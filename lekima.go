@@ -1,14 +1,6 @@
 package main
 
-import (
-	"fmt"
-	"log"
-	"time"
-
-	ui "github.com/gizak/termui/v3"
-	w "github.com/gizak/termui/v3/widgets"
-	// c "github.com/benmooo/lekima/components"
-)
+// c "github.com/benmooo/lekima/components"
 
 const (
 	appName = "lekima"
@@ -120,52 +112,9 @@ func NewLekima() *Lekima {
 
 // entry
 func main() {
-	if err := ui.Init(); err != nil {
-		log.Fatalf("failed to init termui: %v", err)
-	}
-	defer ui.Close()
-
-	// le := NewLekima()
-	// p0 = c.NewLogo()
-	l := w.NewList()
-	l.Title = "list"
-	l.Rows = []string{
-		"[foo](fg:red)",
-		"[bar](fg:red)",
-		"[baz](fg:red)",
-		"[jjjjjjjjj](fg:red)",
-		"[0] [github.com/gizak/termui/v3](fg:red)",
-		"[1] [你好，世界](fg:red)",
-		"[2] [こんにちは世界](fg:red)",
-		"[3] [color](fg:red)",
-		"[4] [output.go](fg:red)",
-		"[5] [random_out.go](fg:red)",
-		"[6] [dashboard.go](fg:red)",
-		"[7] [foo](fg:red)",
-		"[8] [bar](fg:red)",
-		"[9] [baz](fg:red)",
-	}
-	l.SetRect(0, 0, 50, 10)
-	// p0.B= "hello world"
-
-	ui.Render(l)
-
-	events := ui.PollEvents()
-	for {
-		e := <-events
-		switch e.ID {
-		case "j":
-			l.ScrollDown()
-		case "k":
-			l.ScrollUp()
-		case "G":
-			l.ScrollBottom()
-		case "<C-c>":
-			fmt.Println("program terminated.")
-			time.Sleep(3000 * time.Millisecond)
-			return
-		}
-		ui.Render(l)
+	// check env
+	if err := checkEnv(); err != nil {
+		// log.err
 	}
 
 }
