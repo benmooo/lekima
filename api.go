@@ -2,8 +2,6 @@
 
 package main
 
-import "fmt"
-
 const (
 	domain = "127.0.0.1"
 	port   = 3000
@@ -58,8 +56,8 @@ func NewApi() Api {
 }
 
 func newRouteMap(m *routeMap) routeMap {
-	for k, v := range m {
-		m[k] = fmt.Sprintf("%s:%d%s", domain, port, v)
-	}
+	// for k, v := range m {
+	// 	m[k] = fmt.Sprintf("%s:%d%s", domain, port, v)
+	// }
 	return *m
 }

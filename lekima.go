@@ -1,5 +1,7 @@
 package main
 
+import "log"
+
 // c "github.com/benmooo/lekima/components"
 
 const (
@@ -74,6 +76,12 @@ type user struct {
 // 	footer    *c.Footer
 // }
 
+func Chk(e error) {
+	if e != nil {
+		log.Fatal(e)
+	}
+}
+
 // Lekima : the app instance
 type Lekima struct {
 	// version string
@@ -111,10 +119,10 @@ func NewLekima() *Lekima {
 }
 
 // entry
-func main() {
-	// check env
-	if err := checkEnv(); err != nil {
-		// log.err
-	}
+// func main() {
+// 	// check env
+// 	if err := checkEnv(); err != nil {
+// 		// log.err
+// 	}
 
-}
+// }
