@@ -7,17 +7,16 @@ import (
 	"github.com/gizak/termui/v3/widgets"
 )
 
-// func chk(e error) {
-// 	if e != nil {
-// 		log.Fatal(e)
-// 	}
-// }
+func chk(e error) {
+	if e != nil {
+		log.Fatal(e)
+	}
+}
 
 func main() {
+	// init ui
 	err := ui.Init()
-	if err != nil {
-		log.Fatal(err)
-	}
+	chk(err)
 	defer ui.Close()
 
 	pg := make([]*widgets.Paragraph, 6)
@@ -58,6 +57,7 @@ func main() {
 	currentMode := modes[0]
 
 	searchBox := widgets.NewParagraph()
+	searchBox.SetRect(width/3, height/4, 2*width/3, height/4+3)
 	searchBox.Title = "search"
 	searchBox.Text = ""
 	ui.Render(grid)
