@@ -53,33 +53,67 @@ func main() {
 		ui.NewRow(1.0/8, pg[0]),
 	)
 
-	showSearchBox := false
-	mode := "normal"
+	// showSearchBox := false
+	modes := []string{"normal", "search"}
+	currentMode := modes[0]
 
-	p := widgets.NewParagraph()
-	p.SetRect(0, 0, 20, 20)
-	p.Title = "search"
-	p.Text = "...."
+	searchBox := widgets.NewParagraph()
+	searchBox.Title = "search"
+	searchBox.Text = ""
 	ui.Render(grid)
 	uiEvents := ui.PollEvents()
 
 	for {
-		select {
-		case e := <-uiEvents:
-			switch e.ID {
-			case "q":
-				return
-			case "<Resize>":
-				payload := e.Payload.(ui.Resize)
-				grid.SetRect(0, 0, payload.Width, payload.Height)
-				ui.Clear()
-				ui.Render(grid)
-			case "/":
+		switch currentMode {
+		case "normal":
+			select {
+			case e := <-uiEvents:
+				switch e.ID {
+				case "q":
+					return
+				case "<Resize>":
+					payload := e.Payload.(ui.Resize)
+					width, height := payload.Width, payload.Height
+					grid.SetRect(0, 0, width, height)
+					searchBox.SetRect(width/3, height/4, 2*width/3, height/4+3)
+					ui.Clear()
+					ui.Render(grid)
+				case "/":
+					currentMode = "search"
+					ui.Render(searchBox)
+				}
+			}
+		case "search":
+			select {
+			case e := <-uiEvents:
+				switch e.ID {
+				case "<Resize>":
+					payload := e.Payload.(ui.Resize)
+					width, height := payload.Width, payload.Height
+					grid.SetRect(0, 0, width, height)
+					searchBox.SetRect(width/3, height/4, 2*width/3, height/4+3)
+					ui.Clear()
+					ui.Render(grid, searchBox)
 
-				w, h := ui.TerminalDimensions()
-				p.SetRect(w/3, h/4, 2*w/3, h/4+4)
-				ui.Render(p)
+				case "<Enter>", "<Escape>":
+					currentMode = "normal"
+					searchBox.Text = ""
+					ui.Clear()
+					ui.Render(grid)
 
+				case "<Backspace>":
+					l := len(searchBox.Text)
+					if l > 0 {
+						searchBox.Text = searchBox.Text[:l-1]
+						ui.Render(searchBox)
+					}
+				case "<Space>":
+					searchBox.Text += " "
+
+				default:
+					searchBox.Text += e.ID
+					ui.Render(searchBox)
+				}
 			}
 		}
 
