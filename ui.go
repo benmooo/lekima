@@ -22,7 +22,7 @@ func newUI() *ui.Grid {
 	var container = ui.NewGrid()
 
 	// logo
-	logo = widgets.NewParagraph()
+	logo := widgets.NewParagraph()
 	logo.Text = "#LEKIMA#"
 
 	// user profile
@@ -51,7 +51,7 @@ func newUI() *ui.Grid {
 					Nodes: nil,
 				},
 				{
-					Value: nodeValue("lll💓"),
+					Value: nodeValue("another"),
 					Nodes: nil,
 				},
 			},
@@ -60,11 +60,11 @@ func newUI() *ui.Grid {
 			Value: nodeValue("RECOMMAND"),
 			Nodes: []*widgets.TreeNode{
 				{
-					Value: nodeValue("💓"),
+					Value: nodeValue("foo"),
 					Nodes: nil,
 				},
 				{
-					Value: nodeValue("💓"),
+					Value: nodeValue("bar"),
 					Nodes: nil,
 				},
 			},
