@@ -2,15 +2,15 @@ package main
 
 import "log"
 
-type user struct {
+type User struct {
 	name     string
 	phone    string
 	password string
 	level    uint8
 }
 
-func newUser(p, pwd string) *user {
-	return &user{
+func newUser(p, pwd string) *User {
+	return &User{
 		name:     "",
 		phone:    p,
 		password: pwd,
@@ -18,7 +18,7 @@ func newUser(p, pwd string) *user {
 	}
 }
 
-func (u *user) update(field string, val interface{}) *user {
+func (u *User) update(field string, val interface{}) *User {
 	switch field {
 	case "name":
 		u.name = val.(string)
