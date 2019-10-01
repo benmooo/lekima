@@ -10,13 +10,13 @@ import (
 
 // defaults
 const (
-	AppName = "lekima"
-	Version = "1.0.0"
-	ApiRepo = "https://github.com/Binaryify/NeteaseCloudMusicApi.git"
-
-	// settingsPath = "~/.lekima/settings.json"
-	// logPath      = "~/.lekima/errlog.log"
-	// volume       = 0.99
+	AppName    = "lekima"
+	AppVersion = "1.0.0"
+	APIRepoURI = "https://github.com/Binaryify/NeteaseCloudMusicApi.git"
+	Home       = "/.lekima"
+	ConfigFile = "/.lekima/cfg.json"
+	LogFile    = "/.lekima/log"
+	APIRepo    = "/.lekima/NeteaseCloudMusicApi"
 )
 
 func getHomeDir() string {
@@ -25,62 +25,52 @@ func getHomeDir() string {
 	return u.HomeDir
 }
 
-// Config : basic configuration of the app
-// type config struct {
-// 	// path of config cache
-// 	configDir string
-// 	logDir    string
-// 	logPath   string
-
-// 	// schema
-// 	colorSchema string
-// 	// show help widget or not
-// 	// helpVisible bool
-
-// 	// timeof interval of app update
-// 	// updateInterval time.Day
-
-// 	// app mode
-// 	miniMode bool
-
-// 	// show desktop lyrics or not
-// 	// desktopLyric bool
-// 	// volume
-// 	volume int
-// }
-
 // Lekima : the app instance
 type Lekima struct {
-	// *user
-	// ui
-	HomeDir string
-	CfgPath string
-	ApiPath string
-	*ApiServer
+	// initialized
+	Initiated chan bool
+
+	// app infomation
+	*Info
+
+	// api server
+	*APIServer
 }
 
 func NewLekima() *Lekima {
-	homedir := getHomeDir() + "/.lekima"
 	return &Lekima{
-		HomeDir: homedir,
-		CfgPath: homedir + "/cfg.json",
-		ApiPath: homedir + "/NeteaseCloudMusicApi",
-		ApiServer: &ApiServer{
-			Ready:  make(chan bool),
-			Status: Dead,
-		},
+		Initiated: make(chan bool),
+
+		Info:      NewInfo(),
+		APIServer: NewAPIServer(),
 	}
 }
 
 func (l *Lekima) run() {
-	l.init()
+	// defer l.Close()
 
+	// init
+	go func() {
+		// l.init()
+	}()
+
+	// start api server
+	go func() {
+		// l.startAPIServer()
+	}()
+
+	// init
+	go func() {
+		// l.init()
+	}()
+
+	// init
+	go func() {
+		// l.init()
+	}()
 }
 
-func (l *Lekima) init() *Lekima {
-	// channel for communication
-	// apiCh := make(chan bool)
-
+func (l *Lekima) Init() *Lekima {
 	// check prerequestes libasounds-2, git, node, npm, npx
 	prerequisites := []string{"git", "node", "npm"}
 	for _, v := range prerequisites {
@@ -91,73 +81,146 @@ func (l *Lekima) init() *Lekima {
 	// check $USER/.lekima dir
 	_, err := os.Stat(l.HomeDir)
 	if os.IsNotExist(err) {
-		// make dir
-		err = os.Mkdir(l.HomeDir, os.ModePerm)
-		chk(err)
+		l.MkHomeDir()
 	}
 
 	// chk settings file
-	_, err = os.Stat(l.CfgPath)
+	_, err = os.Stat(l.CfgFile)
 	if os.IsNotExist(err) {
-		// create a new settings file
-		cfg := NewCfg("", "")
-		bytes, err := json.Marshal(cfg)
-		chk(err)
-
-		err = ioutil.WriteFile(l.CfgPath, bytes, os.ModePerm)
-		chk(err)
+		l.NewCfgFile()
 	}
 
-	// check neteasecloudmusicapi && version
-	_, err = os.Stat(l.ApiPath)
+	// check neteasecloudmusicapi && version -> 4 update
+	_, err = os.Stat(l.Repo)
 	if os.IsNotExist(err) {
-		// clone the repo to local
-		go func() {
-			l.cloneApiRepo().Ready <- true
-		}()
-	} else {
-		// check the version
+		l.Mark(Cloning).
+			Clone().
+			Mark(InstallingPkgs).
+			InstallPackages()
 	}
-
-	// start the apiserver
-
 	return l
 }
 
-func (l *Lekima) startApiServer() *Lekima {
-	cmd := exec.Command("node", l.ApiPath+"/app.js")
-	err := cmd.Run()
+// func (l *Lekima)
+
+func (l *Lekima) MkHomeDir() *Lekima {
+	err := os.Mkdir(l.HomeDir, os.ModePerm)
 	chk(err)
 	return l
 }
 
-func (l *Lekima) cloneApiRepo() *Lekima {
-	cmd := exec.Command("git", "clone", "--depth=1", ApiRepo, l.ApiPath)
-	err := cmd.Run()
+func (l *Lekima) NewCfgFile() *Lekima {
+	cfg := NewCfg("", "")
+	bytes, err := json.Marshal(cfg)
+	chk(err)
+
+	err = ioutil.WriteFile(l.CfgFile, bytes, os.ModePerm)
 	chk(err)
 	return l
 }
 
-func (l *Lekima) updateApiRepo() *Lekima {
-	cmd := exec.Command("git", "-C", l.ApiPath, "pull", "--depth=1")
+type APIServer struct {
+	Cmd     *exec.Cmd
+	Repo    string
+	RepoURI string
+
+	Ready2Start, Ok chan bool
+	Status          chan APIServerStatus
+}
+
+func NewAPIServer() *APIServer {
+	return &APIServer{
+		Repo:    APIRepo,
+		RepoURI: APIRepoURI,
+
+		Ready2Start: make(chan bool),
+		Ok:          make(chan bool),
+		Status:      make(chan APIServerStatus, 4),
+	}
+}
+
+func (s *APIServer) Start() *APIServer {
+	s.Cmd = exec.Command("node", s.Repo+"/app.js")
+	err := s.Cmd.Start()
+	chk(err)
+	return s
+}
+
+func (s *APIServer) Restart() *APIServer {
+	return s.Close().Start()
+}
+
+func (s *APIServer) Mark(status APIServerStatus) *APIServer {
+	s.Status <- status
+	return s
+}
+
+func (s *APIServer) Close() *APIServer {
+	err := s.Cmd.Process.Kill()
+	chk(err)
+	return s
+}
+
+func (s *APIServer) Pull() *APIServer {
+	cmd := exec.Command("git", "-C", s.Repo, "pull", "--depth=1")
 	err := cmd.Run()
 	chk(err)
-	return l
+	return s
 }
 
-type ApiServer struct {
-	Ready  chan bool
-	Status ApiServerStatus
+func (s *APIServer) Clone() *APIServer {
+	cmd := exec.Command("git", "clone", "--depth=1", s.RepoURI, s.Repo)
+	err := cmd.Run()
+	chk(err)
+	return s
 }
 
-type ApiServerStatus byte
+func (s *APIServer) InstallPackages() *APIServer {
+	cmd := exec.Command("npm", "i", "--prefix", s.Repo)
+	err := cmd.Run()
+	chk(err)
+	return s
+}
+
+func (s *APIServer) Update() *APIServer {
+	return s.Pull().InstallPackages()
+}
+
+type APIServerStatus string
 
 const (
-	Dead ApiServerStatus = iota
-	Running
-	Starting
-	Suspending
+	Inactive       APIServerStatus = "inactive"
+	Running        APIServerStatus = "running"
+	Starting       APIServerStatus = "starting"
+	Terminating    APIServerStatus = "starting"
+	Updating       APIServerStatus = "updating"
+	Pulling        APIServerStatus = "pulling from master"
+	Restarting     APIServerStatus = "restarting"
+	Cloning        APIServerStatus = "cloning the repositry"
+	InstallingPkgs APIServerStatus = "installing packages"
 )
+
+//
+type Info struct {
+	AppName string
+	Version string
+
+	// path
+	HomeDir string
+	CfgFile string
+	LogFile string
+}
+
+func NewInfo() *Info {
+	userHomedir := getHomeDir()
+	return &Info{
+		AppName: AppName,
+		Version: AppVersion,
+		HomeDir: userHomedir + Home,
+		CfgFile: userHomedir + ConfigFile,
+		LogFile: userHomedir + LogFile,
+	}
+}
 
 type Cfg struct {
 	Account string `json:"account"`
