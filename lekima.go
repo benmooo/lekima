@@ -55,9 +55,9 @@ func (l *Lekima) run() {
 
 	// start api server
 	go func() {
-		// check if api server is ready
+		// check if lekima initialized
 		if <-l.Initiated {
-			l.Start()
+			l.Mark(Starting).Start().Mark(Running)
 		}
 	}()
 
