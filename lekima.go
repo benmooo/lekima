@@ -6,17 +6,16 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"path/filepath"
 )
 
 // defaults
 const (
 	AppName    = "lekima"
 	AppVersion = "1.0.0"
-	APIRepoURI = "https://github.com/Binaryify/NeteaseCloudMusicApi.git"
 	Home       = "/.lekima"
 	ConfigFile = "/.lekima/cfg.json"
 	LogFile    = "/.lekima/log"
-	APIRepo    = "/.lekima/NeteaseCloudMusicApi"
 )
 
 func getHomeDir() string {
@@ -51,22 +50,23 @@ func (l *Lekima) run() {
 
 	// init
 	go func() {
-		// l.init()
+		l.Init().Initialized()
 	}()
 
 	// start api server
 	go func() {
-		// l.startAPIServer()
+		// check if api server is ready
+		if <-l.Initiated {
+			l.Start()
+		}
 	}()
 
-	// init
+	// render ui
 	go func() {
-		// l.init()
+
 	}()
 
-	// init
 	go func() {
-		// l.init()
 	}()
 }
 
@@ -93,7 +93,8 @@ func (l *Lekima) Init() *Lekima {
 	// check neteasecloudmusicapi && version -> 4 update
 	_, err = os.Stat(l.Repo)
 	if os.IsNotExist(err) {
-		l.Mark(Cloning).
+		l.
+			Mark(Cloning).
 			Clone().
 			Mark(InstallingPkgs).
 			InstallPackages()
@@ -101,7 +102,10 @@ func (l *Lekima) Init() *Lekima {
 	return l
 }
 
-// func (l *Lekima)
+func (l *Lekima) Initialized() *Lekima {
+	l.Initiated <- true
+	return l
+}
 
 func (l *Lekima) MkHomeDir() *Lekima {
 	err := os.Mkdir(l.HomeDir, os.ModePerm)
@@ -119,87 +123,6 @@ func (l *Lekima) NewCfgFile() *Lekima {
 	return l
 }
 
-type APIServer struct {
-	Cmd     *exec.Cmd
-	Repo    string
-	RepoURI string
-
-	Ready2Start, Ok chan bool
-	Status          chan APIServerStatus
-}
-
-func NewAPIServer() *APIServer {
-	return &APIServer{
-		Repo:    APIRepo,
-		RepoURI: APIRepoURI,
-
-		Ready2Start: make(chan bool),
-		Ok:          make(chan bool),
-		Status:      make(chan APIServerStatus, 4),
-	}
-}
-
-func (s *APIServer) Start() *APIServer {
-	s.Cmd = exec.Command("node", s.Repo+"/app.js")
-	err := s.Cmd.Start()
-	chk(err)
-	return s
-}
-
-func (s *APIServer) Restart() *APIServer {
-	return s.Close().Start()
-}
-
-func (s *APIServer) Mark(status APIServerStatus) *APIServer {
-	s.Status <- status
-	return s
-}
-
-func (s *APIServer) Close() *APIServer {
-	err := s.Cmd.Process.Kill()
-	chk(err)
-	return s
-}
-
-func (s *APIServer) Pull() *APIServer {
-	cmd := exec.Command("git", "-C", s.Repo, "pull", "--depth=1")
-	err := cmd.Run()
-	chk(err)
-	return s
-}
-
-func (s *APIServer) Clone() *APIServer {
-	cmd := exec.Command("git", "clone", "--depth=1", s.RepoURI, s.Repo)
-	err := cmd.Run()
-	chk(err)
-	return s
-}
-
-func (s *APIServer) InstallPackages() *APIServer {
-	cmd := exec.Command("npm", "i", "--prefix", s.Repo)
-	err := cmd.Run()
-	chk(err)
-	return s
-}
-
-func (s *APIServer) Update() *APIServer {
-	return s.Pull().InstallPackages()
-}
-
-type APIServerStatus string
-
-const (
-	Inactive       APIServerStatus = "inactive"
-	Running        APIServerStatus = "running"
-	Starting       APIServerStatus = "starting"
-	Terminating    APIServerStatus = "starting"
-	Updating       APIServerStatus = "updating"
-	Pulling        APIServerStatus = "pulling from master"
-	Restarting     APIServerStatus = "restarting"
-	Cloning        APIServerStatus = "cloning the repositry"
-	InstallingPkgs APIServerStatus = "installing packages"
-)
-
 //
 type Info struct {
 	AppName string
@@ -212,13 +135,13 @@ type Info struct {
 }
 
 func NewInfo() *Info {
-	userHomedir := getHomeDir()
+	homedir := getHomeDir()
 	return &Info{
 		AppName: AppName,
 		Version: AppVersion,
-		HomeDir: userHomedir + Home,
-		CfgFile: userHomedir + ConfigFile,
-		LogFile: userHomedir + LogFile,
+		HomeDir: filepath.Join(homedir, Home),
+		CfgFile: filepath.Join(homedir, ConfigFile),
+		LogFile: filepath.Join(homedir, LogFile),
 	}
 }
 
