@@ -28,6 +28,8 @@ type APIServer struct {
 
 	Ok     chan bool
 	Status chan APIServerStatus
+
+	// make requests
 }
 
 func NewAPIServer() *APIServer {
@@ -56,6 +58,7 @@ const (
 	Pulling        APIServerStatus = "pulling from upstream master"
 	Cloning        APIServerStatus = "cloning the repositry"
 	InstallingPkgs APIServerStatus = "installing packages"
+	Initializing   APIServerStatus = "Initializing"
 )
 
 type Routes map[string]string
@@ -69,6 +72,7 @@ func NewRoutes() Routes {
 }
 
 func (s *APIServer) Start() *APIServer {
+	s.Mark(Starting)
 	s.Cmd = exec.Command("node", filepath.Join(s.Repo, "app.js"))
 	err := s.Cmd.Start()
 	chk(err)
@@ -76,6 +80,7 @@ func (s *APIServer) Start() *APIServer {
 }
 
 func (s *APIServer) Restart() *APIServer {
+	s.Mark(Restarting)
 	return s.Close().Start()
 }
 
@@ -85,12 +90,14 @@ func (s *APIServer) Mark(status APIServerStatus) *APIServer {
 }
 
 func (s *APIServer) Close() *APIServer {
+	s.Mark(Terminating)
 	err := s.Cmd.Process.Kill()
 	chk(err)
 	return s
 }
 
 func (s *APIServer) Pull() *APIServer {
+	s.Mark(Pulling)
 	cmd := exec.Command("git", "-C", s.Repo, "pull", "--depth=1")
 	err := cmd.Run()
 	chk(err)
@@ -98,6 +105,7 @@ func (s *APIServer) Pull() *APIServer {
 }
 
 func (s *APIServer) Clone() *APIServer {
+	s.Mark(Cloning)
 	cmd := exec.Command("git", "clone", "--depth=1", s.RepoURI, s.Repo)
 	err := cmd.Run()
 	chk(err)
@@ -105,6 +113,7 @@ func (s *APIServer) Clone() *APIServer {
 }
 
 func (s *APIServer) InstallPackages() *APIServer {
+	s.Mark(InstallingPkgs)
 	cmd := exec.Command("npm", "i", "--prefix", s.Repo)
 	err := cmd.Run()
 	chk(err)
@@ -112,6 +121,7 @@ func (s *APIServer) InstallPackages() *APIServer {
 }
 
 func (s *APIServer) Update() *APIServer {
+	s.Mark(Updating)
 	return s.Pull().InstallPackages()
 }
 

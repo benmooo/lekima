@@ -34,6 +34,9 @@ type Lekima struct {
 
 	// api server
 	*APIServer
+
+	// ui
+	*UI
 }
 
 func NewLekima() *Lekima {
@@ -42,6 +45,7 @@ func NewLekima() *Lekima {
 
 		Info:      NewInfo(),
 		APIServer: NewAPIServer(),
+		UI:        NewUI(),
 	}
 }
 
@@ -50,14 +54,14 @@ func (l *Lekima) run() {
 
 	// init
 	go func() {
-		l.Init().Initialized()
+		l.Init().Mark(Initializing)
 	}()
 
 	// start api server
 	go func() {
 		// check if lekima initialized
 		if <-l.Initiated {
-			l.Mark(Starting).Start().Mark(Running)
+			l.Start().Mark(Running)
 		}
 	}()
 
@@ -94,18 +98,18 @@ func (l *Lekima) Init() *Lekima {
 	_, err = os.Stat(l.Repo)
 	if os.IsNotExist(err) {
 		l.
-			Mark(Cloning).
 			Clone().
-			Mark(InstallingPkgs).
 			InstallPackages()
 	}
-	return l
-}
-
-func (l *Lekima) Initialized() *Lekima {
+	// indicate that the api server is gonna start
 	l.Initiated <- true
 	return l
 }
+
+// func (l *Lekima) Initialized() *Lekima {
+// 	l.Initiated <- true
+// 	return l
+// }
 
 func (l *Lekima) MkHomeDir() *Lekima {
 	err := os.Mkdir(l.HomeDir, os.ModePerm)

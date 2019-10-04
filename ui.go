@@ -7,7 +7,7 @@ import (
 )
 
 type UI struct {
-	Container *ui.Grid
+	Layout *ui.Grid
 
 	MarginTop, MarginLeft, HeaderRatio, BodyRatio, SiderRatio, MainRatio float64
 
@@ -16,14 +16,20 @@ type UI struct {
 	Sidebar     *widgets.Tree
 	MainContent *widgets.Table
 
+	HeaderText, HelpDoc string
+
+	PlayListHeader []string
+
 	// events bindings
+	InitialRender chan bool // first render indication
+
 	Tiles *[]Tile
 	Focus Tile
 }
 
 func NewUI() *UI {
 	return &UI{
-		Container:   ui.NewGrid(),
+		Layout:      ui.NewGrid(),
 		MarginTop:   1.000 / 8,
 		MarginLeft:  1.500 / 12,
 		HeaderRatio: 1.000 / 9,
@@ -38,10 +44,16 @@ func NewUI() *UI {
 		Comments:  widgets.NewParagraph(),
 		Help:      widgets.NewParagraph(),
 
+		HeaderText:     "LEKIMA,  hello [?],  press L to Login.",
+		HelpDoc:        "help document.",
+		PlayListHeader: []string{"No", "Name", "Author", "Album", "Duration"},
+
 		Sidebar:     widgets.NewTree(),
 		MainContent: widgets.NewTable(),
 		Tiles:       &[]Tile{Sidebar, MainContent, SearchBox, Help, Comments},
 		Focus:       Sidebar,
+
+		InitialRender: make(chan bool),
 	}
 }
 
@@ -66,8 +78,8 @@ func (u *UI) Prepare() *UI {
 	mb.Border = false
 	// width, height of current terminal
 	w, h := u.Size()
-	u.Container.SetRect(0, 0, w, h)
-	u.Container.Set(
+	u.Layout.SetRect(0, 0, w, h)
+	u.Layout.Set(
 		ui.NewRow(u.MarginTop, mb),
 		ui.NewRow(1-2*u.MarginTop,
 			ui.NewCol(u.MarginLeft, mb),
@@ -83,7 +95,7 @@ func (u *UI) Prepare() *UI {
 		ui.NewRow(u.MarginTop, mb),
 	)
 	//init paragraph text
-	u.Header.Text = "LEKIMA,  hello [?],  press L to Login."
+	u.Header.Text = u.HeaderText
 	// u.SideBar
 	nodes := []*widgets.TreeNode{
 		{
@@ -94,10 +106,10 @@ func (u *UI) Prepare() *UI {
 	u.Sidebar.SetNodes(nodes)
 	// main content
 	u.MainContent.Rows = [][]string{
-		[]string{"No", "Name", "Author", "Album", "Duration"},
+		u.PlayListHeader,
 	}
 	// help
-	u.Help.Text = `help document.`
+	u.Help.Text = u.HelpDoc
 	u.Comments.Text = "no comments avaiable."
 	return u
 }
@@ -112,13 +124,22 @@ func (u *UI) ChangeFocus(t Tile) *UI {
 	return u
 }
 
-func (u *UI) ChangeFocus(t Tile) *UI {
-	u.Focus = t
+func (u *UI) Render(us ...ui.Drawable) {
+	ui.Render(us...)
+}
+
+func (u *UI) FirstRender() *UI {
+	u.RenderLayout().InitialRender <- true
 	return u
 }
 
-func (u *UI) Render(us ...ui.Drawable) {
-	ui.Render(us...)
+func (u *UI) RenderLayout() *UI {
+	u.Render(u.Layout)
+	return u
+}
+
+func (u *UI) PollEvents() <-chan ui.Event {
+	return ui.PollEvents()
 }
 
 // type Ratio float64
