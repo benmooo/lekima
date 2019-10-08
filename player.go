@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"time"
 
+	browser "github.com/EDDYCJY/fake-useragent"
 	"github.com/faiface/beep"
 	"github.com/faiface/beep/effects"
 	"github.com/faiface/beep/mp3"
@@ -12,11 +13,14 @@ import (
 )
 
 type Player struct {
+	Playlists []*Playlist
+	Playlist  Playlist
+
 	// music stream instance
 	MusicInstance
 
 	CurrentList
-	Playlist       []*Song
+	// Playlist       []*Song
 	CurrentFocus   *Song // current focus
 	CurrentPlaying *Song // current focus
 
@@ -32,8 +36,22 @@ type Player struct {
 	Loader
 }
 
+// type Playlist struct {
+// 	ID   int
+// 	Name string
+// 	*list.List
+// }
+
 func NewPlayer() *Player {
 	return &Player{}
+}
+
+func (p *Player) Init() *Player {
+	// init loader
+	p.InitReq()
+	// another things
+
+	return p
 }
 
 func (p *Player) InitSpeaker(sr beep.SampleRate, bufsize int) *Player {
@@ -42,6 +60,10 @@ func (p *Player) InitSpeaker(sr beep.SampleRate, bufsize int) *Player {
 }
 
 func (p *Player) prepare(s *Song) *Player {
+	// check if song url has expired or not
+	// if s.IsExpired() {
+	// 	s.URL = p.FetchSongURL(s)
+	// }
 	// parse song url : *url.URL
 	songurl, err := url.ParseRequestURI(s.URL)
 	chk(err)
@@ -52,7 +74,7 @@ func (p *Player) prepare(s *Song) *Player {
 	// decode response body which is an io.ReadCloser interfce
 	// defalt decoder mp3 -> tobe improved
 	streamer, f, err := mp3.Decode(resp.Body)
-	defer streamer.Close()
+	// defer streamer.Close()
 	// check if speaker initialized
 	if !p.SpeakerInitiated {
 		p.InitSpeaker(f.SampleRate*p.Speed, f.SampleRate.N(time.Second/20))
@@ -73,7 +95,7 @@ func (p *Player) Play(s *Song) {
 	done := make(chan bool)
 	p.prepare(s)
 	defer p.CloseStreamer()
-	speaker.Play(beep.Seq(p.MusicInstance.Vol), beep.Callback(func() {
+	speaker.Play(beep.Seq(p.Vol), beep.Callback(func() {
 		done <- true
 	}))
 	<-done
@@ -170,8 +192,22 @@ func (p *Player) NextSong() *Song {
 	return p.CurrentList.Songs[i+1]
 }
 
-func (p *Player) UpdateFocus() *Player {
+func (p *Player) UpdateFocus(s *Song) *Player {
+	p.CurrentFocus = s
+	return p
+}
 
+func (p *Player) FocusPrevSong() *Player {
+	l := len(p.CurrentList.Songs)
+	i := p.CurrentList.Index
+	if l > 0 {
+		if i == 0 {
+			p.CurrentList.Index = l - 1
+
+		} else {
+			p.CurrentList.Index = l - 1
+		}
+	}
 	return p
 }
 
@@ -205,6 +241,18 @@ func (p *Player) FocusBottom() *Player {
 	return p
 }
 
+func (p *Player) AddToHistory(s *Song) *Player {
+	p.History = append(p.History, s)
+	return p
+}
+
+func (p *Player) ClearHistory() *Player {
+	p.History = []*Song{}
+	return p
+}
+
+// func (p *Player)
+
 type CurrentList struct {
 	Songs []*Song
 	Index int
@@ -230,6 +278,10 @@ func NewSong(id int, name string, ar Artist, al Album, dt int, url SongURL) *Son
 		Duration: dt,
 		SongURL:  url,
 	}
+}
+
+func (s *Song) IsExpired() bool {
+	return s.URL == ""
 }
 
 type Artist struct {
@@ -272,12 +324,11 @@ type Loader struct {
 	Req    *http.Request
 }
 
-func (l *Loader) InitReq() *Loader {
+func (l *Loader) InitReq() {
 	// add header to every request
 	for k, v := range l.Header {
 		l.Req.Header.Add(k, v)
 	}
-	return l
 }
 
 func NewLoader() *Loader {
@@ -286,7 +337,7 @@ func NewLoader() *Loader {
 			"Range":          "bytes=0-",
 			"Referer":        "https://music.163.com/",
 			"Sec-Fetch-Mode": "cors",
-			"User-Agent":     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/76.0.3809.100 Safari/537.36",
+			"User-Agent":     browser.Chrome(),
 		},
 		Client: &http.Client{},
 	}

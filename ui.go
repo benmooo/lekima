@@ -25,6 +25,7 @@ type UI struct {
 
 	Tiles *[]Tile
 	Focus Tile
+	// Ready chan bool
 }
 
 func NewUI() *UI {
@@ -44,18 +45,22 @@ func NewUI() *UI {
 		Comments:  widgets.NewParagraph(),
 		Help:      widgets.NewParagraph(),
 
-		HeaderText:     "LEKIMA,  hello [?],  press L to Login.",
-		HelpDoc:        "help document.",
+		HeaderText:     defaultHeaderText,
+		HelpDoc:        defaultHelpDoc,
 		PlayListHeader: []string{"No", "Name", "Author", "Album", "Duration"},
 
 		Sidebar:     widgets.NewTree(),
 		MainContent: widgets.NewTable(),
 		Tiles:       &[]Tile{Sidebar, MainContent, SearchBox, Help, Comments},
 		Focus:       Sidebar,
-
-		InitialRender: make(chan bool),
+		// Ready:       make(chan bool),
 	}
 }
+
+const (
+	defaultHeaderText = "LEKIMA,  hello [?],  press L to Login."
+	defaultHelpDoc    = "help document."
+)
 
 func (u *UI) Init() *UI {
 	err := ui.Init()
@@ -128,14 +133,13 @@ func (u *UI) Render(us ...ui.Drawable) {
 	ui.Render(us...)
 }
 
-func (u *UI) FirstRender() *UI {
-	u.RenderLayout().InitialRender <- true
-	return u
-}
-
 func (u *UI) RenderLayout() *UI {
 	u.Render(u.Layout)
 	return u
+}
+
+func (u *UI) Ready(ch chan<- bool) {
+	ch <- true
 }
 
 func (u *UI) PollEvents() <-chan ui.Event {

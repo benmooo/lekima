@@ -4,11 +4,8 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
-	"net/http"
 	"os/exec"
 	"path/filepath"
-	"strings"
 )
 
 const (
@@ -24,10 +21,11 @@ type APIServer struct {
 	Repo    string
 	RepoURI string
 
-	Routes
+	// Routes
 
 	Ok     chan bool
-	Status chan APIServerStatus
+	Status string
+	Routes
 
 	// make requests
 }
@@ -42,37 +40,47 @@ func NewAPIServer() *APIServer {
 
 		// Ready2Start: make(chan bool),
 		Ok:     make(chan bool),
-		Status: make(chan APIServerStatus, 4),
+		Status: Inactive,
 	}
 }
 
-type APIServerStatus string
-
 const (
-	Inactive       APIServerStatus = "inactive"
-	Running        APIServerStatus = "running"
-	Starting       APIServerStatus = "starting"
-	Restarting     APIServerStatus = "restarting"
-	Terminating    APIServerStatus = "terminating"
-	Updating       APIServerStatus = "updating"
-	Pulling        APIServerStatus = "pulling from upstream master"
-	Cloning        APIServerStatus = "cloning the repositry"
-	InstallingPkgs APIServerStatus = "installing packages"
-	Initializing   APIServerStatus = "Initializing"
+	Inactive       = "inactive"
+	Running        = "running"
+	Starting       = "starting"
+	Restarting     = "restarting"
+	Terminating    = "terminating"
+	Updating       = "updating"
+	Pulling        = "pulling from upstream master"
+	Cloning        = "cloning the repositry"
+	InstallingPkgs = "installing packages"
+	Initializing   = "Initializing"
 )
 
-type Routes map[string]string
+func (s *APIServer) Mark(status string) *APIServer {
+	s.Status = status
+	return s
+}
 
-func NewRoutes() Routes {
-	var r Routes
-	for name, url := range routemap {
-		r[name] = fmt.Sprintf("http://%s:%d%s", Domain, Port, url)
-	}
-	return r
+func (s *APIServer) Notify(ch chan<- string) *APIServer {
+	ch <- s.Status
+	return s
+}
+
+func (s *APIServer) CloseNotifier(ch chan string) *APIServer {
+	close(ch)
+	return s
+}
+
+func (s *APIServer) MarkNotify(ch chan<- string, sta string) *APIServer {
+	return s.Mark(sta).Notify(ch)
+}
+
+func (s *APIServer) Ready(ch chan<- bool) {
+	ch <- true
 }
 
 func (s *APIServer) Start() *APIServer {
-	s.Mark(Starting)
 	s.Cmd = exec.Command("node", filepath.Join(s.Repo, "app.js"))
 	err := s.Cmd.Start()
 	chk(err)
@@ -80,24 +88,16 @@ func (s *APIServer) Start() *APIServer {
 }
 
 func (s *APIServer) Restart() *APIServer {
-	s.Mark(Restarting)
 	return s.Close().Start()
 }
 
-func (s *APIServer) Mark(status APIServerStatus) *APIServer {
-	s.Status <- status
-	return s
-}
-
 func (s *APIServer) Close() *APIServer {
-	s.Mark(Terminating)
 	err := s.Cmd.Process.Kill()
 	chk(err)
 	return s
 }
 
 func (s *APIServer) Pull() *APIServer {
-	s.Mark(Pulling)
 	cmd := exec.Command("git", "-C", s.Repo, "pull", "--depth=1")
 	err := cmd.Run()
 	chk(err)
@@ -105,7 +105,6 @@ func (s *APIServer) Pull() *APIServer {
 }
 
 func (s *APIServer) Clone() *APIServer {
-	s.Mark(Cloning)
 	cmd := exec.Command("git", "clone", "--depth=1", s.RepoURI, s.Repo)
 	err := cmd.Run()
 	chk(err)
@@ -113,7 +112,6 @@ func (s *APIServer) Clone() *APIServer {
 }
 
 func (s *APIServer) InstallPackages() *APIServer {
-	s.Mark(InstallingPkgs)
 	cmd := exec.Command("npm", "i", "--prefix", s.Repo)
 	err := cmd.Run()
 	chk(err)
@@ -121,36 +119,7 @@ func (s *APIServer) InstallPackages() *APIServer {
 }
 
 func (s *APIServer) Update() *APIServer {
-	s.Mark(Updating)
 	return s.Pull().InstallPackages()
-}
-
-// make requests to the apiserver
-func (s *APIServer) Req(routename string, ps ...Params) string {
-	url := s.Routes[routename]
-	if len(ps) > 0 {
-		url = fmt.Sprintf("%s?%s", url, ps[0].Assemble())
-	}
-	resp, err := http.Get(url)
-	chk(err)
-	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
-	chk(err)
-	return string(body)
-}
-
-type Params interface {
-	Assemble() string
-}
-
-type QueryMap map[string]string
-
-func (qm QueryMap) Assemble() string {
-	var p []string
-	for k, v := range qm {
-		p = append(p, fmt.Sprintf("%s=%s", k, v))
-	}
-	return strings.Join(p, "&")
 }
 
 // type RouteMap map[string]string
@@ -188,4 +157,15 @@ var routemap = map[string]string{
 	"fmTrash":         "/fm_trash",   // songid
 	"scrobble":        "/scrobble",   // songid, playlistid
 	"cloud":           "/user/cloud", // limit:20, offset=0
+	"topList":         "/top/playlist",
+}
+
+type Routes map[string]string
+
+func NewRoutes() Routes {
+	var r Routes
+	for name, url := range routemap {
+		r[name] = fmt.Sprintf("http://%s:%d%s", Domain, Port, url)
+	}
+	return r
 }
