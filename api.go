@@ -131,8 +131,8 @@ var routemap = map[string]string{
 	"loginStatus":  "/login/status",
 	"user":         "/user/detail", // params: userid
 	"subcount":     "/user/subcount",
-	"playlist":     "/playlist",
-	"radio":        "/user/dj", // params: userid
+	"myPlaylist":   "/user/playlist", // params: userid
+	"radio":        "/user/dj",       // params: userid
 	// "follows": "/user/follows", // userid
 	// "fans": "/user/followed",   // usreid
 	"record":         "/user/record", // userid
@@ -143,21 +143,21 @@ var routemap = map[string]string{
 	"checkmusic":     "/check/music",     //songid, br=999000
 	"search":         "/search",          //keywords, alt-> [limit, type, offset]
 	// "searchHotList": "/search/hot",
-	"searchSug":       "/search/suggest",     //keywords, alt->[type='mobile']
-	"subPlaylist":     "/playlist/subscribe", // playlist id, type: 1:2
-	"altPlaylist":     "/playlist/tracks",    // op: add | del, pid, songid
-	"lyric":           "/lyric",              // songid
-	"comments":        "/comment/music",      // songid, limit=20, offset, before( >5000)
-	"songDetail":      "/song/detail",        // ids: songids[232,123,23]
-	"dailyPlaylists":  "/recommend/resource",
-	"dailySongs":      "/recommend/songs",
-	"fm":              "/personal_fm",
-	"dailyAttendance": "/daily_signin",
-	"like":            "/like",       // songid
-	"fmTrash":         "/fm_trash",   // songid
-	"scrobble":        "/scrobble",   // songid, playlistid
-	"cloud":           "/user/cloud", // limit:20, offset=0
-	"topList":         "/top/playlist",
+	"searchSug":         "/search/suggest",     //keywords, alt->[type='mobile']
+	"subPlaylist":       "/playlist/subscribe", // playlist id, type: 1:2
+	"altPlaylist":       "/playlist/tracks",    // op: add | del, pid, songid
+	"lyric":             "/lyric",              // songid
+	"comments":          "/comment/music",      // songid, limit=20, offset, before( >5000)
+	"songDetail":        "/song/detail",        // ids: songids[232,123,23]
+	"recommendPlaylist": "/recommend/resource",
+	"recommendSongs":    "/recommend/songs",
+	"fm":                "/personal_fm",
+	"dailyAttendance":   "/daily_signin",
+	"like":              "/like",       // songid
+	"fmTrash":           "/fm_trash",   // songid
+	"scrobble":          "/scrobble",   // songid, playlistid
+	"cloud":             "/user/cloud", // limit:20, offset=0
+	"topList":           "/top/playlist",
 }
 
 type Routes map[string]string

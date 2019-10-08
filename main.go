@@ -43,7 +43,7 @@ func main() {
 		if <-uiReady {
 			for status := range ass {
 				lekima.UI.HeaderText = fmt.Sprintf("%s status: %s", defaultHeaderText, status)
-				lekima.UI.Render(lekima.UI.Header)
+				lekima.UI.RenderLayout()
 			}
 		}
 	}()
@@ -59,15 +59,21 @@ func main() {
 	go func() {
 		if <-apiReady {
 			l := lekima
-
-			// try to log in
-			acc := l.ReadAccount()
-			if acc.username != "" {
-				err := l.Login(acc)
-				chk(err)
+			// check if logged in
+			status := l.LoginStatus()
+			if status.Code != 200 {
+				// try to login
+				acc := l.ReadAccount()
+				if acc.username != "" {
+					if err := l.Login(acc); err != nil {
+					}
+				} else {
+					// input to login
+				}
 			}
+
 			// fetch playlists
-			l.FetchPlaylists()
+			l.FetchSidebarContent()
 
 			uiEvent := l.UI.PollEvents()
 			// main event handler
@@ -82,18 +88,18 @@ func main() {
 							l.UI.ToggleFocus()
 						case "o", "<Enter>":
 							// if l.UI.
-							l.UI.ToggleFocus().SetMainContent(l.Playlist)
+							// l.UI.ToggleFocus().SetMainContent(l.Playlist)
 						case "j":
-							l.UI.ScrollDown()
+							// l.UI.ScrollDown()
 						case "k":
-							l.UI.ScrollUp()
-						case "k":
-							l.UI.ScrollUp()
+							// l.UI.ScrollUp()
+						case "l":
+							// l.UI.ScrollUp()
 						}
 					case MainContent:
 						switch e.ID {
 						case "<Tab>":
-							l.UI.ToggleFocus()
+							// l.UI.ToggleFocus()
 						}
 
 					}

@@ -284,21 +284,6 @@ func (s *Song) IsExpired() bool {
 	return s.URL == ""
 }
 
-type Artist struct {
-	ID   int
-	Name string
-}
-
-type Album struct {
-	ID   int
-	Name string
-}
-
-type SongURL struct {
-	URL    string
-	Expire int
-}
-
 var speedMap = map[string]float64{
 	"1.0x": 1.00,
 	"1.2x": 1.20,

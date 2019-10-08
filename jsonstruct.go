@@ -4,6 +4,16 @@ type LoginStatusResp struct {
 	Code int `json:"code"`
 }
 
+type LoggedinStatusResp struct {
+	Code    int `json:"code"`
+	Profile `json:"profile,omitempty"`
+}
+
+type Profile struct {
+	UserID   int    `json:"userId"`
+	Nickname string `json:"nickname"`
+}
+
 type StatusCode struct {
 	Code int `json:"code"`
 }
@@ -13,6 +23,52 @@ type TopPlaylistsResp struct {
 	Code      int         `json:"code"`
 	Total     int         `json:"total"`
 	Category  string      `json:"cat"`
+}
+
+type PlaylistDetailResp struct {
+	Code     int `json:"code"`
+	Playlist `json:"playlist"`
+}
+
+type FMResp struct {
+	Code int       `json:"code"`
+	Data []*Track2 `json:"data"`
+}
+
+type CloudResp struct {
+	Code int           `json:"code"`
+	Data []*CloudTrack `json:"data"`
+}
+
+type DJResp struct {
+	Code     int   `json:"code"`
+	DJRadios []*DJ `json:"djRadios"`
+}
+
+type CloudTrack struct {
+	SimpleSong Track `json:"simpleSong"`
+	SongID     int   `json:"songId"`
+}
+
+type RecommendSongsResp struct {
+	Code      int       `json:"code"`
+	Recommend []*Track2 `json:"recommend"`
+}
+
+type MyPlaylistResp struct {
+	Code      int         `json:"code"`
+	Playlists []*Playlist `json:"playlist"`
+}
+
+// recommend sonds | fm | search  --> results
+// recommend sonds | fm | search
+type Track2 struct {
+	ID       int      `json:"id"`
+	Name     string   `json:"name"`
+	Artists  []Artist `json:"artists"`
+	Pop      int      `json:"popularity"`
+	Album    `json:"album"`
+	Duration int `json:"duration"`
 }
 
 type Playlist struct {
@@ -31,11 +87,6 @@ type Track struct {
 	Album    `json:"al"`
 	Duration int `json:"dt"`
 }
-
-type PlaylistDetailResp struct {
-	Code     int `json:"code"`
-	Playlist `json:"playlist"`
-}
 type Artist struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`
@@ -46,7 +97,23 @@ type Album struct {
 	Name string `json:"name"`
 }
 
+// crumb to be improved
 type SongURL struct {
 	URL    string
 	Expire int
+}
+
+type DJ struct {
+	ID          int    `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"desc"`
+}
+
+type SidebarContents struct {
+	FM         *Playlist
+	Recommend  *Playlist
+	MyPlaylist []*Playlist
+	Cloud      *Playlist
+	Top        []*Playlist
+	// DJs            []*DJ
 }

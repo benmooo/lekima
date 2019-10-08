@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -32,6 +33,7 @@ func getHomeDir() string {
 
 // Lekima : the app instance
 type Lekima struct {
+	User
 	Loggedin bool
 
 	// app infomation
@@ -130,29 +132,60 @@ func (l *Lekima) Login(acc Account) error {
 	} else {
 		params["email"] = acc.username
 	}
-	d := l.Req("login", params)
-	if d["code"].(float64) != 200 {
+	byt := l.Req("login", params)
+	var s StatusCode
+	err := json.Unmarshal(byt, &s)
+	chk(err)
+	if s.Code != 200 {
 		return errors.New("login failed")
 	}
 	l.Loggedin = true
 	return nil
 }
 
-func (l *Lekima) User() User {
-	if !l.Loggedin {
-		return User{}
+func (l *Lekima) LoginStatus() StatusCode {
+	byt := l.Req("loginStatus")
+	var s StatusCode
+	err := json.Unmarshal(byt, &s)
+	chk(err)
+	if s.Code == 200 {
+		l.Loggedin = true
 	}
-	data := l.Req("loginStatus")
-	if data["code"].(float64) != 200 {
-		return User{}
-	}
-	return User{
-		ID:       int(data["profile"].(map[string]interface{})["userId"].(float64)),
-		Nickname: data["profile"].(map[string]interface{})["nickname"].(string),
-	}
+	return s
 }
 
-func (l *Lekima) Req(routename string, ps ...Params) Data {
+func (l *Lekima) EnsureLogin() {
+
+	// check if logged in
+	status := l.LoginStatus()
+	if status.Code != 200 {
+		// try to login
+		acc := l.ReadAccount()
+		if acc.username != "" {
+			if err := l.Login(acc); err == nil {
+				return
+			}
+		}
+	}
+	// ui render and handle
+}
+
+// func (l *Lekima) User() User {
+// return l.User
+// if !l.Loggedin {
+// 	return User{}
+// }
+// byt := l.Req("loginStatus")
+// if data["code"].(float64) != 200 {
+// 	return User{}
+// }
+// return User{
+// 	ID:       int(data["profile"].(map[string]interface{})["userId"].(float64)),
+// 	Nickname: data["profile"].(map[string]interface{})["nickname"].(string),
+// }
+// }
+
+func (l *Lekima) Req(routename string, ps ...Params) []byte {
 	url := l.Routes[routename]
 	if len(ps) > 0 {
 		var query []string
@@ -164,34 +197,130 @@ func (l *Lekima) Req(routename string, ps ...Params) Data {
 	resp, err := http.Get(url)
 	chk(err)
 	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
+	byt, err := ioutil.ReadAll(resp.Body)
 	chk(err)
-	var data Data
-	err = json.Unmarshal(body, &data)
-	chk(err)
-	return data
+	// var data Data
+	// err = json.Unmarshal(body, &data)
+	// chk(err)
+	return byt
 }
 
-func (l *Lekima) FetchSongURL(s *Song) string {
+func (l *Lekima) FetchSongURL(s *Song) SongURL {
 	params := Query{
 		"id": strconv.Itoa(s.ID),
 		"br": "320000",
 	}
-	d := l.Req("songurl", params)
-	return d["data"].([]interface{})[0].(map[string]interface{})["url"].(string)
+	byt := l.Req("songurl", params)
+	var su SongURL
+	err := json.Unmarshal(byt, &su)
+	chk(err)
+	return su
 }
 
-// fetch playlist
-func (l *Lekima) FetchPlaylists() {
-	// !logged in  top play
-	// var topLists = []*Playlist
-	if !l.Loggedin {
-		data := l.Req("topList", Query{"limit": "5"})
-		if data["code"].(float64) == 200 {
-			id := data["playlists"].([]map[string]interface{})[0]["id"].(float64)
-		}
+// fetch top playlists
+func (l *Lekima) FetchTop(limit int) []*Playlist {
+	bytes := l.Req("topList", Query{"limit": strconv.Itoa(limit)})
+	var resp TopPlaylistsResp
+	err := json.Unmarshal(bytes, &resp)
+	chk(err)
+	if resp.Code != 200 {
+		log.Fatal("fail to fetch top playlists")
+	}
+	return resp.Playlists
+}
+
+// fetch fm
+func (l *Lekima) FetchFM() *Playlist {
+	bytes := l.Req("fm")
+	var resp FMResp
+	err := json.Unmarshal(bytes, &resp)
+	chk(err)
+	if resp.Code != 200 {
+		log.Fatal("fail to fetch fm")
+	}
+	var ts []*Track
+	for _, v := range resp.Data {
+		var t Track = Track(*v)
+		ts = append(ts, &t)
 	}
 
+	return &Playlist{
+		Name:        "FM",
+		Description: "Personal_FM",
+		Tracks:      ts,
+	}
+}
+
+// fetch daily recommend songs
+func (l *Lekima) FetchRecommendSongs() *Playlist {
+	bytes := l.Req("recommendSongs")
+	var resp RecommendSongsResp
+	err := json.Unmarshal(bytes, &resp)
+	chk(err)
+	if resp.Code != 200 {
+		log.Fatal("fail to fetch fm")
+	}
+	var ts []*Track
+	for _, v := range resp.Recommend {
+		var t Track = Track(*v)
+		ts = append(ts, &t)
+	}
+	return &Playlist{
+		Name:        "Recommend",
+		Description: "Recommend_Songs",
+		Tracks:      ts,
+	}
+}
+
+// fetch daily cloud
+func (l *Lekima) FetchCloud() *Playlist {
+	bytes := l.Req("cloud")
+	var resp CloudResp
+	err := json.Unmarshal(bytes, &resp)
+	chk(err)
+	if resp.Code != 200 {
+		log.Fatal("fail to fetch cloud")
+	}
+	var ts []*Track
+	for _, v := range resp.Data {
+		ts = append(ts, &v.SimpleSong)
+	}
+	return &Playlist{
+		Name:        "Cloud",
+		Description: "Cloud_Data",
+		Tracks:      ts,
+	}
+}
+
+// fetch my playlists
+func (l *Lekima) FetchMyPlaylist() []*Playlist {
+	bytes := l.Req("myPlaylist")
+	var resp MyPlaylistResp
+	err := json.Unmarshal(bytes, &resp)
+	chk(err)
+	if resp.Code != 200 {
+		log.Fatal("fail to fetch cloud")
+	}
+	return resp.Playlists
+}
+
+//
+
+// fetch playlist
+func (l *Lekima) FetchSidebarContent() *SidebarContents {
+	// not logged in -> top play
+	if !l.Loggedin {
+		return &SidebarContents{
+			Top: l.FetchTop(5),
+		}
+	}
+	return &SidebarContents{
+		Top:        l.FetchTop(5),
+		FM:         l.FetchFM(),
+		Recommend:  l.FetchRecommendSongs(),
+		Cloud:      l.FetchCloud(),
+		MyPlaylist: l.FetchMyPlaylist(),
+	}
 }
 
 type Account struct {
