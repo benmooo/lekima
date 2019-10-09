@@ -163,7 +163,7 @@ var routemap = map[string]string{
 type Routes map[string]string
 
 func NewRoutes() Routes {
-	var r Routes
+	r := Routes{}
 	for name, url := range routemap {
 		r[name] = fmt.Sprintf("http://%s:%d%s", Domain, Port, url)
 	}

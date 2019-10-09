@@ -25,6 +25,11 @@ type TopPlaylistsResp struct {
 	Category  string      `json:"cat"`
 }
 
+type SongURLResp struct {
+	Code int        `json:"code"`
+	Data []*SongURL `json:"data"`
+}
+
 type PlaylistDetailResp struct {
 	Code     int `json:"code"`
 	Playlist `json:"playlist"`
@@ -99,8 +104,9 @@ type Album struct {
 
 // crumb to be improved
 type SongURL struct {
-	URL    string
-	Expire int
+	ID     int    `json:"id"`
+	URL    string `json:"url"`
+	Expire int    `json:"expi"`
 }
 
 type DJ struct {

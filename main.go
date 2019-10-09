@@ -66,14 +66,17 @@ func main() {
 				acc := l.ReadAccount()
 				if acc.username != "" {
 					if err := l.Login(acc); err != nil {
+						// input to login
 					}
 				} else {
-					// input to login
+					// input to login && sync to local
 				}
 			}
 
 			// fetch playlists
-			l.FetchSidebarContent()
+			c := l.FetchSidebarContent()
+			// render
+			l.UI.LoadSidebarContent(c).RenderLayout()
 
 			uiEvent := l.UI.PollEvents()
 			// main event handler

@@ -146,6 +146,49 @@ func (u *UI) PollEvents() <-chan ui.Event {
 	return ui.PollEvents()
 }
 
+func (u *UI) LoadSidebarContent(c *SidebarContents) *UI {
+	var nodes, top, mylist []*widgets.TreeNode
+	// top playlist
+	for _, p := range c.Top {
+		top = append(top, &widgets.TreeNode{
+			Value: nodeValue(p.Name),
+			Nodes: nil,
+		})
+	}
+	// my playlist
+	for _, p := range c.MyPlaylist {
+		mylist = append(mylist, &widgets.TreeNode{
+			Value: nodeValue(p.Name),
+			Nodes: nil,
+		})
+	}
+	nodes = []*widgets.TreeNode{
+		{
+			Value: nodeValue("FM"),
+			Nodes: nil,
+		},
+		{
+			Value: nodeValue("Recommend"),
+			Nodes: nil,
+		},
+		{
+			Value: nodeValue("Mylist"),
+			Nodes: mylist,
+		},
+		{
+			Value: nodeValue("Cloud"),
+			Nodes: nil,
+		},
+
+		{
+			Value: nodeValue("Top5"),
+			Nodes: top,
+		},
+	}
+	u.Sidebar.SetNodes(nodes)
+	return u
+}
+
 // type Ratio float64
 type Tile byte
 

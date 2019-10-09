@@ -205,16 +205,19 @@ func (l *Lekima) Req(routename string, ps ...Params) []byte {
 	return byt
 }
 
-func (l *Lekima) FetchSongURL(s *Song) SongURL {
+func (l *Lekima) FetchSongURL(s *Song) *SongURL {
 	params := Query{
 		"id": strconv.Itoa(s.ID),
 		"br": "320000",
 	}
 	byt := l.Req("songurl", params)
-	var su SongURL
+	var su SongURLResp
 	err := json.Unmarshal(byt, &su)
 	chk(err)
-	return su
+	if su.Code != 200 {
+		log.Fatal("failed to fetch song url")
+	}
+	return su.Data[0]
 }
 
 // fetch top playlists
