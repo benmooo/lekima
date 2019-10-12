@@ -2,6 +2,9 @@
 package main
 
 import (
+	"fmt"
+	"strconv"
+
 	ui "github.com/gizak/termui/v3"
 	"github.com/gizak/termui/v3/widgets"
 )
@@ -14,16 +17,14 @@ type UI struct {
 	Header, SearchBox, Comments, Help *widgets.Paragraph
 
 	Sidebar     *widgets.Tree
-	MainContent *widgets.Table
+	MainContent *Table
 
 	HeaderText, HelpDoc string
 
-	PlayListHeader []string
-
 	// events bindings
-	InitialRender chan bool // first render indication
+	// InitialRender chan bool // first render indication
 
-	Tiles *[]Tile
+	Tiles []Tile
 	Focus Tile
 	// Ready chan bool
 }
@@ -45,21 +46,21 @@ func NewUI() *UI {
 		Comments:  widgets.NewParagraph(),
 		Help:      widgets.NewParagraph(),
 
-		HeaderText:     defaultHeaderText,
-		HelpDoc:        defaultHelpDoc,
-		PlayListHeader: []string{"No", "Name", "Author", "Album", "Duration"},
+		HeaderText: defaultHeaderText,
+		HelpDoc:    defaultHelpDoc,
 
 		Sidebar:     widgets.NewTree(),
-		MainContent: widgets.NewTable(),
-		Tiles:       &[]Tile{Sidebar, MainContent, SearchBox, Help, Comments},
-		Focus:       Sidebar,
+		MainContent: NewTable(),
+		Tiles:       []Tile{SidebarTile, MainContentTile, SearchBoxTile, HelpTile, CommentsTile},
+		Focus:       SidebarTile,
 		// Ready:       make(chan bool),
 	}
 }
 
-const (
-	defaultHeaderText = "LEKIMA,  hello [?],  press L to Login."
-	defaultHelpDoc    = "help document."
+var (
+	defaultHeaderText     = "LEKIMA,  hello [?],  press L to Login."
+	defaultHelpDoc        = "help document."
+	defaultPlaylistHeader = []string{"No", "Name", "Author", "Album", "Duration", "ID"}
 )
 
 func (u *UI) Init() *UI {
@@ -70,6 +71,11 @@ func (u *UI) Init() *UI {
 
 func (u *UI) Close() *UI {
 	ui.Close()
+	return u
+}
+
+func (u *UI) Clear() *UI {
+	ui.Clear()
 	return u
 }
 
@@ -102,17 +108,19 @@ func (u *UI) Prepare() *UI {
 	//init paragraph text
 	u.Header.Text = u.HeaderText
 	// u.SideBar
-	nodes := []*widgets.TreeNode{
-		{
-			Value: nodeValue("Top Playlise"),
-			Nodes: []*widgets.TreeNode{},
-		},
-	}
-	u.Sidebar.SetNodes(nodes)
+	u.Sidebar.TextStyle = ui.NewStyle(ui.ColorCyan)
+	u.Sidebar.SetNodes([]*widgets.TreeNode{})
 	// main content
-	u.MainContent.Rows = [][]string{
-		u.PlayListHeader,
+	u.MainContent.Header = defaultPlaylistHeader
+	// u.MainContent.ColWidths = []int{5, 5, 5, 5, 5}
+	u.MainContent.ShowCursor = true
+	u.MainContent.CursorColor = ui.ColorCyan
+	u.MainContent.ColResizer = func() {
+		u.MainContent.ColWidths = []int{
+			10, 40, 30, 30, 20, 10,
+		}
 	}
+
 	// help
 	u.Help.Text = u.HelpDoc
 	u.Comments.Text = "no comments avaiable."
@@ -147,45 +155,64 @@ func (u *UI) PollEvents() <-chan ui.Event {
 }
 
 func (u *UI) LoadSidebarContent(c *SidebarContents) *UI {
-	var nodes, top, mylist []*widgets.TreeNode
-	// top playlist
+	var nodes, top5, mylist []*widgets.TreeNode
+	if c.FM != nil {
+		nodes = append(nodes, &widgets.TreeNode{
+			Value: c.FM,
+			Nodes: nil,
+		})
+	}
+	if c.Recommend != nil {
+		nodes = append(nodes, &widgets.TreeNode{
+			Value: c.Recommend,
+			Nodes: nil,
+		})
+	}
+	if c.Cloud != nil {
+		nodes = append(nodes, &widgets.TreeNode{
+			Value: c.Cloud,
+			Nodes: nil,
+		})
+	}
+
+	// top5 playlist
 	for _, p := range c.Top {
-		top = append(top, &widgets.TreeNode{
-			Value: nodeValue(p.Name),
+		top5 = append(top5, &widgets.TreeNode{
+			Value: p,
 			Nodes: nil,
 		})
 	}
 	// my playlist
 	for _, p := range c.MyPlaylist {
 		mylist = append(mylist, &widgets.TreeNode{
-			Value: nodeValue(p.Name),
+			Value: p,
 			Nodes: nil,
 		})
 	}
-	nodes = []*widgets.TreeNode{
-		{
-			Value: nodeValue("FM"),
-			Nodes: nil,
-		},
-		{
-			Value: nodeValue("Recommend"),
-			Nodes: nil,
-		},
-		{
-			Value: nodeValue("Mylist"),
+	nodes = append(nodes,
+		&widgets.TreeNode{
+			Value: nodeValue("mylist"),
 			Nodes: mylist,
 		},
-		{
-			Value: nodeValue("Cloud"),
-			Nodes: nil,
+		&widgets.TreeNode{
+			Value: nodeValue("top5"),
+			Nodes: top5,
 		},
-
-		{
-			Value: nodeValue("Top5"),
-			Nodes: top,
-		},
-	}
+	)
 	u.Sidebar.SetNodes(nodes)
+	return u
+}
+
+func (u *UI) SetMainContent(p *Playlist) *UI {
+	var rows [][]string
+	for i, t := range p.Tracks {
+		seconds := int(1.0 * t.Duration / 1000)
+		dt := fmt.Sprintf("%d:%02d", seconds/60, seconds%60)
+		rows = append(rows, []string{
+			strconv.Itoa(i + 1), t.Name, t.Artists[0].Name, t.Album.Name, dt, strconv.Itoa(t.ID),
+		})
+	}
+	u.MainContent.Rows = rows
 	return u
 }
 
@@ -193,15 +220,15 @@ func (u *UI) LoadSidebarContent(c *SidebarContents) *UI {
 type Tile byte
 
 const (
-	Sidebar Tile = iota
-	MainContent
-	SearchBox
-	Help
-	Comments
+	SidebarTile Tile = iota
+	MainContentTile
+	SearchBoxTile
+	HelpTile
+	CommentsTile
 )
 
 type nodeValue string
 
-func (nv nodeValue) String() string {
-	return string(nv)
+func (n nodeValue) String() string {
+	return string(n)
 }

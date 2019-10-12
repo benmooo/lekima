@@ -34,7 +34,7 @@ func NewAPIServer() *APIServer {
 	homedir := getHomeDir()
 	return &APIServer{
 		Repo:    filepath.Join(homedir, APIRepo),
-		RepoURI: filepath.Join(homedir, APIRepoURI),
+		RepoURI: APIRepoURI,
 
 		Routes: NewRoutes(),
 

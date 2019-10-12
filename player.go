@@ -2,7 +2,6 @@ package main
 
 import (
 	"net/http"
-	"net/url"
 	"time"
 
 	browser "github.com/EDDYCJY/fake-useragent"
@@ -13,27 +12,15 @@ import (
 )
 
 type Player struct {
-	Playlists []*Playlist
-	Playlist  Playlist
-
-	// music stream instance
+	SpeakerInitiated bool
 	MusicInstance
-
-	CurrentList
-	// Playlist       []*Song
-	CurrentFocus   *Song // current focus
-	CurrentPlaying *Song // current focus
-
-	History []*Song
 
 	PlayMode
 	Volume float64
 	Speed  beep.SampleRate
 
-	SpeakerInitiated bool
-
 	// request to the music server
-	Loader
+	Client *http.Client
 }
 
 // type Playlist struct {
@@ -43,15 +30,10 @@ type Player struct {
 // }
 
 func NewPlayer() *Player {
-	return &Player{}
-}
-
-func (p *Player) Init() *Player {
-	// init loader
-	p.InitReq()
-	// another things
-
-	return p
+	return &Player{
+		Client: &http.Client{},
+		Speed:  1.0,
+	}
 }
 
 func (p *Player) InitSpeaker(sr beep.SampleRate, bufsize int) *Player {
@@ -59,17 +41,10 @@ func (p *Player) InitSpeaker(sr beep.SampleRate, bufsize int) *Player {
 	return p
 }
 
-func (p *Player) prepare(s *Song) *Player {
-	// check if song url has expired or not
-	// if s.IsExpired() {
-	// 	s.URL = p.FetchSongURL(s)
-	// }
-	// parse song url : *url.URL
-	songurl, err := url.ParseRequestURI(s.URL)
-	chk(err)
-	// update url of request of player loader
-	p.Loader.Req.URL = songurl
-	resp, err := p.Loader.Client.Do(p.Req)
+func (p *Player) prepare(s *SongURL) *Player {
+	req, _ := http.NewRequest("GET", s.URL, nil)
+	req.Header = defaultRequestHeader
+	resp, err := p.Client.Do(req)
 	chk(err)
 	// decode response body which is an io.ReadCloser interfce
 	// defalt decoder mp3 -> tobe improved
@@ -77,28 +52,27 @@ func (p *Player) prepare(s *Song) *Player {
 	// defer streamer.Close()
 	// check if speaker initialized
 	if !p.SpeakerInitiated {
-		p.InitSpeaker(f.SampleRate*p.Speed, f.SampleRate.N(time.Second/20))
+		p.InitSpeaker(f.SampleRate*1.0, f.SampleRate.N(time.Second/20))
 		p.SpeakerInitiated = true
 	}
 	// assign music instance
-	ctrl := &beep.Ctrl{Streamer: streamer, Paused: false}
+	ctrl := &beep.Ctrl{Streamer: streamer}
 	p.MusicInstance = MusicInstance{
 		Streamer: streamer,
 		Ctrl:     ctrl,
-		Vol:      &effects.Volume{Streamer: ctrl, Base: 2, Volume: p.Volume, Silent: false},
+		Vol:      &effects.Volume{Streamer: ctrl, Base: 2, Volume: p.Volume},
 	}
 	return p
 }
 
-func (p *Player) Play(s *Song) {
+func (p *Player) Play(s *SongURL) {
 	// prepare
-	done := make(chan bool)
+	// p.CloseStreamer()
+	if p.Streamer != nil {
+		p.CloseStreamer()
+	}
 	p.prepare(s)
-	defer p.CloseStreamer()
-	speaker.Play(beep.Seq(p.Vol), beep.Callback(func() {
-		done <- true
-	}))
-	<-done
+	speaker.Play(p.Vol)
 }
 
 func (p *Player) CloseStreamer() *Player {
@@ -164,100 +138,6 @@ func (p *Player) TogglePlay() *Player {
 	return p
 }
 
-func (p *Player) PlayFocus() {
-	p.Play(p.CurrentFocus)
-}
-
-func (p *Player) PrevSong() *Song {
-	l := len(p.CurrentList.Songs)
-	i := p.CurrentList.Index
-	if l < 1 {
-		return nil
-	}
-	if i == 0 {
-		return p.CurrentList.Songs[l-1]
-	}
-	return p.CurrentList.Songs[i-1]
-}
-
-func (p *Player) NextSong() *Song {
-	l := len(p.CurrentList.Songs)
-	i := p.CurrentList.Index
-	if l < 1 {
-		return nil
-	}
-	if i == l-1 {
-		return p.CurrentList.Songs[0]
-	}
-	return p.CurrentList.Songs[i+1]
-}
-
-func (p *Player) UpdateFocus(s *Song) *Player {
-	p.CurrentFocus = s
-	return p
-}
-
-func (p *Player) FocusPrevSong() *Player {
-	l := len(p.CurrentList.Songs)
-	i := p.CurrentList.Index
-	if l > 0 {
-		if i == 0 {
-			p.CurrentList.Index = l - 1
-
-		} else {
-			p.CurrentList.Index = l - 1
-		}
-	}
-	return p
-}
-
-func (p *Player) FocusNextSong() *Player {
-	l := len(p.CurrentList.Songs)
-	i := p.CurrentList.Index
-	if l > 0 {
-		if i == l-1 {
-			p.CurrentList.Index = 0
-
-		} else {
-			p.CurrentList.Index = 0
-		}
-	}
-	return p
-}
-
-func (p *Player) FocusTop() *Player {
-	l := len(p.CurrentList.Songs)
-	if l > 0 {
-		p.CurrentList.Index = 0
-	}
-	return p
-}
-
-func (p *Player) FocusBottom() *Player {
-	l := len(p.CurrentList.Songs)
-	if l > 0 {
-		p.CurrentList.Index = l - 1
-	}
-	return p
-}
-
-func (p *Player) AddToHistory(s *Song) *Player {
-	p.History = append(p.History, s)
-	return p
-}
-
-func (p *Player) ClearHistory() *Player {
-	p.History = []*Song{}
-	return p
-}
-
-// func (p *Player)
-
-type CurrentList struct {
-	Songs []*Song
-	Index int
-}
-
 type Song struct {
 	ID   int
 	Name string
@@ -280,10 +160,6 @@ func NewSong(id int, name string, ar Artist, al Album, dt int, url SongURL) *Son
 	}
 }
 
-func (s *Song) IsExpired() bool {
-	return s.URL == ""
-}
-
 var speedMap = map[string]float64{
 	"1.0x": 1.00,
 	"1.2x": 1.20,
@@ -303,33 +179,15 @@ const (
 	Random
 )
 
-type Loader struct {
-	Header map[string]string
-	Client *http.Client
-	Req    *http.Request
-}
-
-func (l *Loader) InitReq() {
-	// add header to every request
-	for k, v := range l.Header {
-		l.Req.Header.Add(k, v)
-	}
-}
-
-func NewLoader() *Loader {
-	return &Loader{
-		Header: map[string]string{
-			"Range":          "bytes=0-",
-			"Referer":        "https://music.163.com/",
-			"Sec-Fetch-Mode": "cors",
-			"User-Agent":     browser.Chrome(),
-		},
-		Client: &http.Client{},
-	}
-}
-
 type MusicInstance struct {
 	Streamer beep.StreamSeekCloser
 	Ctrl     *beep.Ctrl
 	Vol      *effects.Volume
+}
+
+var defaultRequestHeader = http.Header{
+	"Range":          []string{"bytes=0-"},
+	"Referer":        []string{"https://music.163.com/"},
+	"Sec-Fetch-Mode": []string{"cors"},
+	"User-Agent":     []string{browser.Chrome()},
 }

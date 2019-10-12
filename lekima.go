@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"net/http/cookiejar"
 	"os"
 	"os/exec"
 	"os/user"
@@ -44,13 +45,23 @@ type Lekima struct {
 
 	// ui
 	*UI
+	// Client
+	Client *http.Client
+
+	// Player
+	*Player
 }
 
 func NewLekima() *Lekima {
+	cookieJar, _ := cookiejar.New(nil)
 	return &Lekima{
 		Info:      NewInfo(),
 		APIServer: NewAPIServer(),
 		UI:        NewUI(),
+		Loggedin:  false,
+
+		Client: &http.Client{Jar: cookieJar},
+		Player: NewPlayer(),
 	}
 }
 
@@ -78,6 +89,8 @@ func (l *Lekima) Init() *Lekima {
 			Clone().
 			InstallPackages()
 	}
+	// init player
+	// l.Player.Init()
 	return l
 }
 
@@ -140,6 +153,16 @@ func (l *Lekima) Login(acc Account) error {
 		return errors.New("login failed")
 	}
 	l.Loggedin = true
+	// get user id, name
+	var resp LoginResp
+	err = json.Unmarshal(byt, &resp)
+	chk(err)
+
+	if resp.Code == 200 {
+		l.User = User{
+			ID: resp.Acc.ID,
+		}
+	}
 	return nil
 }
 
@@ -194,7 +217,8 @@ func (l *Lekima) Req(routename string, ps ...Params) []byte {
 		}
 		url = fmt.Sprintf("%s?%s", url, strings.Join(query, "&"))
 	}
-	resp, err := http.Get(url)
+	req, _ := http.NewRequest("GET", url, nil)
+	resp, err := l.Client.Do(req)
 	chk(err)
 	defer resp.Body.Close()
 	byt, err := ioutil.ReadAll(resp.Body)
@@ -205,20 +229,52 @@ func (l *Lekima) Req(routename string, ps ...Params) []byte {
 	return byt
 }
 
-func (l *Lekima) FetchSongURL(s *Song) *SongURL {
+func (l *Lekima) FetchSongURL(id string) *SongURL {
 	params := Query{
-		"id": strconv.Itoa(s.ID),
+		"id": id,
 		"br": "320000",
 	}
-	byt := l.Req("songurl", params)
+	byt := l.Req("song", params)
 	var su SongURLResp
 	err := json.Unmarshal(byt, &su)
 	chk(err)
 	if su.Code != 200 {
-		log.Fatal("failed to fetch song url")
+		log.Panic("failed to fetch song url")
 	}
 	return su.Data[0]
 }
+func (l *Lekima) FetchPlaylistDetail(id string) *Playlist {
+	params := Query{"id": id}
+	byt := l.Req("playlistDetail", params)
+	var resp PlaylistDetailResp
+	err := json.Unmarshal(byt, &resp)
+	chk(err)
+	if resp.Code != 200 {
+		log.Panic("failed to fetch playlist detail")
+	}
+	return resp.Playlist
+}
+
+// func (l *Lekima) FetchSongURL(id string) *SongURL {
+// 	params := Query{
+// 		"id": id,
+// 		"br": "320000",
+// 	}
+// 	byt := l.Req("songurl", params)
+// 	var su SongURLResp
+// 	err := json.Unmarshal(byt, &su)
+// 	chk(err)
+// 	if su.Code != 200 {
+// 		log.Panic("failed to fetch song url")
+// 	}
+// 	return su.Data[0]
+// }
+
+// func (l *Lekima) FetchSong(id string) *SongURL {
+// 	params := Query{
+// 		""
+// 	}
+// }
 
 // fetch top playlists
 func (l *Lekima) FetchTop(limit int) []*Playlist {
@@ -227,7 +283,7 @@ func (l *Lekima) FetchTop(limit int) []*Playlist {
 	err := json.Unmarshal(bytes, &resp)
 	chk(err)
 	if resp.Code != 200 {
-		log.Fatal("fail to fetch top playlists")
+		log.Panic("fail to fetch top playlists")
 	}
 	return resp.Playlists
 }
@@ -239,7 +295,7 @@ func (l *Lekima) FetchFM() *Playlist {
 	err := json.Unmarshal(bytes, &resp)
 	chk(err)
 	if resp.Code != 200 {
-		log.Fatal("fail to fetch fm")
+		log.Panic("fail to fetch fm")
 	}
 	var ts []*Track
 	for _, v := range resp.Data {
@@ -261,7 +317,7 @@ func (l *Lekima) FetchRecommendSongs() *Playlist {
 	err := json.Unmarshal(bytes, &resp)
 	chk(err)
 	if resp.Code != 200 {
-		log.Fatal("fail to fetch fm")
+		log.Panic("fail to fetch recommend songs")
 	}
 	var ts []*Track
 	for _, v := range resp.Recommend {
@@ -282,7 +338,7 @@ func (l *Lekima) FetchCloud() *Playlist {
 	err := json.Unmarshal(bytes, &resp)
 	chk(err)
 	if resp.Code != 200 {
-		log.Fatal("fail to fetch cloud")
+		log.Panic("fail to fetch cloud")
 	}
 	var ts []*Track
 	for _, v := range resp.Data {
@@ -297,12 +353,13 @@ func (l *Lekima) FetchCloud() *Playlist {
 
 // fetch my playlists
 func (l *Lekima) FetchMyPlaylist() []*Playlist {
-	bytes := l.Req("myPlaylist")
+	params := Query{"uid": strconv.Itoa(l.User.ID)}
+	bytes := l.Req("myPlaylist", params)
 	var resp MyPlaylistResp
 	err := json.Unmarshal(bytes, &resp)
 	chk(err)
 	if resp.Code != 200 {
-		log.Fatal("fail to fetch cloud")
+		log.Panic("fail to fetch myplaylist")
 	}
 	return resp.Playlists
 }
@@ -324,6 +381,10 @@ func (l *Lekima) FetchSidebarContent() *SidebarContents {
 		Cloud:      l.FetchCloud(),
 		MyPlaylist: l.FetchMyPlaylist(),
 	}
+}
+
+func (l *Lekima) Exit(c chan<- bool) {
+	c <- true
 }
 
 type Account struct {

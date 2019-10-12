@@ -4,6 +4,16 @@ type LoginStatusResp struct {
 	Code int `json:"code"`
 }
 
+type LoginResp struct {
+	Code int `json:"code"`
+	Acc  `json:"account"`
+}
+
+type Acc struct {
+	ID       int    `json:"id"`
+	UserName string `json:"userName"`
+}
+
 type LoggedinStatusResp struct {
 	Code    int `json:"code"`
 	Profile `json:"profile,omitempty"`
@@ -31,8 +41,8 @@ type SongURLResp struct {
 }
 
 type PlaylistDetailResp struct {
-	Code     int `json:"code"`
-	Playlist `json:"playlist"`
+	Code      int `json:"code"`
+	*Playlist `json:"playlist"`
 }
 
 type FMResp struct {
@@ -82,6 +92,10 @@ type Playlist struct {
 	TrackCount  int      `json:"trackCount"`
 	Description string   `json:"description"`
 	Tracks      []*Track `json:"tracks"`
+}
+
+func (p *Playlist) String() string {
+	return p.Name
 }
 
 type Track struct {
