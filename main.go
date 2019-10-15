@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strconv"
 	"sync"
 	"time"
 )
@@ -75,142 +74,18 @@ func main() {
 	go func() {
 		wg1.Wait()
 		l := lekima
+		uiEvent := l.UI.PollEvents()
 		// try to login
-		if err := l.Login(); err != nil {
-			// try to relogin
+		if err := l.Login(l.ReadAccount()); err != nil {
+			l.UI.Render(l.UI.Login.Username, l.UI.Login.Password)
+			l.HandleLogin(uiEvent)
 		}
-
 		c := l.FetchSidebarContent()
 		// render
 		l.UI.LoadSidebarContent(c).RenderLayout()
-
-		uiEvent := l.UI.PollEvents()
 		// main event handler
-		for {
-			select {
-			case e := <-uiEvent:
-				// sidebar key events handler
-				switch l.UI.Focus {
-				case SidebarTile:
-					switch e.ID {
-					case "q", "<C-c>":
-						l.Exit(quit)
-					case "<Tab>":
-						l.UI.ToggleFocus(MainContentTile)
-					case "o", "<Enter>":
-						n := l.UI.Sidebar.SelectedNode()
-						if n.Nodes != nil {
-							l.UI.Sidebar.ToggleExpand()
-						} else {
-							l.UI.ToggleFocus(MainContentTile)
-							p := n.Value.(*Playlist)
-							if p.Tracks == nil {
-								p = l.FetchPlaylistDetail(strconv.Itoa(p.ID))
-							}
-							l.UI.SetMainContent(p)
-						}
-					case "j":
-						l.UI.Sidebar.ScrollDown()
-					case "k":
-						l.UI.Sidebar.ScrollUp()
-					case "l":
-						// l.UI.ScrollUp()
-					case "/":
-						l.UI.ToggleFocus(SearchBoxTile)
-						l.UI.ToggleSearchBox().ClearSearchText()
-					case "?":
-						l.UI.ToggleFocus(HelpTile)
-						l.UI.ToggleHelp()
-					case "<Resize>":
-						l.UI.ResizeLayout()
-					}
-				case MainContentTile:
-					switch e.ID {
-					case "<Tab>":
-						l.UI.ToggleFocus(SidebarTile)
-					case "q", "<C-c>":
-						l.Exit(quit)
-					case "g":
-						l.UI.MainContent.ScrollTop()
-					case "G":
-						l.UI.MainContent.ScrollBottom()
-					case "j":
-						l.UI.MainContent.ScrollDown()
-					case "k":
-						l.UI.MainContent.ScrollUp()
-					case "<Space>":
-						l.Player.TogglePlay()
-					case "o", "<Enter>":
-						index := l.UI.MainContent.SelectedRow
-						songid := l.UI.MainContent.Rows[index][5]
-						songurl := l.FetchSongURL(songid)
-						l.Player.Play(songurl)
-					case "m":
-						l.Player.ToggleMute()
-					case "=":
-						l.Player.IncreaseVol()
-					case "-":
-						l.Player.DecreaseVol()
-					case "/":
-						l.UI.ToggleFocus(SearchBoxTile)
-						l.UI.ToggleSearchBox().ClearSearchText()
-					case "?":
-						l.UI.ToggleFocus(HelpTile)
-						l.UI.ToggleHelp()
-					case "<Resize>":
-						l.UI.ResizeLayout()
-					}
-				case SearchBoxTile:
-					switch e.ID {
-					case "<Tab>", "<Space>":
-						l.UI.AppendSearchText(" ")
-					case "<Escape>":
-						l.ToggleSearchBox()
-						l.UI.ClearSearchText()
-						l.UI.ToggleFocus(MainContentTile)
-					case "<Enter>":
-						p := l.FetchSearch(l.UI.SearchBox.Text)
-						l.UI.SetMainContent(p)
-						l.ToggleSearchBox()
-						l.UI.ClearSearchText()
-						l.UI.ToggleFocus(MainContentTile)
-					case "<C-c>":
-						l.Exit(quit)
-					case "<Backspace>":
-						l.UI.PopSearchText()
-					case "<Resize>":
-						l.UI.ResizeLayout()
-						l.UI.ResizeSearchBox()
-					default:
-						l.UI.AppendSearchText(e.ID)
-
-					}
-				case HelpTile:
-					switch e.ID {
-					case "q", "<C-c>":
-						l.Exit(quit)
-					case "<Resize>":
-						l.UI.ResizeLayout()
-						l.UI.ResizeHelp()
-					case "<Escape>":
-						l.UI.ToggleHelp()
-						l.UI.ToggleFocus(MainContentTile)
-					}
-
-				}
-
-			}
-			l.UI.RenderLayout()
-		}
-
-		// }
+		l.eventLoop(uiEvent)
 	}()
 
 	lekima.ListenExit(quit)
-}
-
-func eventLoop() {
-	// for {
-
-	// }
 }

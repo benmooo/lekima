@@ -142,27 +142,27 @@ func (p *Player) TogglePlay() *Player {
 	return p
 }
 
-type Song struct {
-	ID   int
-	Name string
-	Artist
-	// Alia     []string
-	// Pop      byte // popular 1-100
-	Album
-	Duration int
-	SongURL
-}
+// type Song struct {
+// 	ID   int
+// 	Name string
+// 	Artist
+// 	// Alia     []string
+// 	// Pop      byte // popular 1-100
+// 	Album
+// 	Duration int
+// 	SongURL
+// }
 
-func NewSong(id int, name string, ar Artist, al Album, dt int, url SongURL) *Song {
-	return &Song{
-		ID:       id,
-		Name:     name,
-		Artist:   ar,
-		Album:    al,
-		Duration: dt,
-		SongURL:  url,
-	}
-}
+// func NewSong(id int, name string, ar Artist, al Album, dt int, url SongURL) *Song {
+// 	return &Song{
+// 		ID:       id,
+// 		Name:     name,
+// 		Artist:   ar,
+// 		Album:    al,
+// 		Duration: dt,
+// 		SongURL:  url,
+// 	}
+// }
 
 var speedMap = map[string]float64{
 	"1.0x": 1.00,

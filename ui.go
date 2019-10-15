@@ -29,6 +29,8 @@ type UI struct {
 
 	// indicator of searchbox
 	Popup *widgets.Paragraph
+	// login
+	Login *LoginWidget
 }
 
 func NewUI() *UI {
@@ -57,6 +59,7 @@ func NewUI() *UI {
 		Tiles:       []Tile{SidebarTile, MainContentTile, SearchBoxTile, HelpTile, CommentsTile},
 		Focus:       SidebarTile,
 		// Ready:       make(chan bool),
+		Login: NewLoginWidget(),
 	}
 }
 
@@ -142,6 +145,17 @@ func (u *UI) Prepare() *UI {
 	u.SearchBox.Title = "Search"
 	// u.ResizeSearchBox()
 	u.Comments.Text = "no comments avaiable."
+	// login
+	u.Login.Username.Title = "Phone|Email"
+	u.Login.Password.Title = "Password"
+	u.ResizeLogin()
+	return u
+}
+
+func (u *UI) ResizeLogin() *UI {
+	w, h := u.Size()
+	u.Login.Username.SetRect(3*w/8, h/3, 5*w/8, h/3+3)
+	u.Login.Password.SetRect(3*w/8, h/3+3, 5*w/8, h/3+6)
 	return u
 }
 
@@ -321,6 +335,46 @@ const (
 	HelpTile
 	CommentsTile
 )
+
+type LoginWidget struct {
+	Username *widgets.Paragraph
+	Password *widgets.Paragraph
+	Focus    *widgets.Paragraph
+}
+
+func NewLoginWidget() *LoginWidget {
+	l := &LoginWidget{
+		Username: widgets.NewParagraph(),
+		Password: widgets.NewParagraph(),
+	}
+	l.Focus = l.Username
+	return l
+}
+
+func (l *LoginWidget) ToggleFocus() {
+	if l.Focus == l.Username {
+		l.Focus = l.Password
+	} else {
+		l.Focus = l.Username
+	}
+}
+
+func (l *LoginWidget) AppendFocusText(s string) {
+	l.Focus.Text += s
+}
+
+func (l *LoginWidget) Clear() {
+	l.Username.Text = ""
+	l.Password.Text = ""
+}
+
+func (l *LoginWidget) PopFocusText() {
+	text := l.Focus.Text
+	length := len(text)
+	if length > 0 {
+		l.Focus.Text = text[0 : length-1]
+	}
+}
 
 type nodeValue string
 

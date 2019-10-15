@@ -16,6 +16,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	ui "github.com/gizak/termui/v3"
 )
 
 // defaults
@@ -112,10 +114,17 @@ func (l *Lekima) newCfgFile() *Lekima {
 	cfg := NewCfg("", "")
 	bytes, err := json.Marshal(cfg)
 	chk(err)
-
 	err = ioutil.WriteFile(l.CfgFile, bytes, os.ModePerm)
 	chk(err)
 	return l
+}
+
+func (l *Lekima) WriteAccount(acc Account) {
+	cfg := NewCfg(acc.username, acc.pwd)
+	bytes, err := json.Marshal(cfg)
+	chk(err)
+	err = ioutil.WriteFile(l.CfgFile, bytes, os.ModePerm)
+	chk(err)
 }
 
 func (l *Lekima) ReadCfg() *Cfg {
@@ -137,8 +146,8 @@ func (l *Lekima) ReadAccount() Account {
 	}
 }
 
-func (l *Lekima) Login() error {
-	acc := l.ReadAccount()
+func (l *Lekima) Login(acc Account) error {
+	// acc := l.ReadAccount()
 	// check if is valid account
 	if acc.username == "" {
 		return errors.New("invalid account")
@@ -373,33 +382,173 @@ func (l *Lekima) FetchSidebarContent() *SidebarContents {
 	}
 }
 
-func (l *Lekima) EventLoop() {
-	uiEvent := l.UI.PollEvents()
+func (l *Lekima) HandleLogin(uiEvent <-chan ui.Event) {
+	password := ""
+	for {
+		e := <-uiEvent
+		switch e.ID {
+		case "<Tab>":
+			l.UI.Login.ToggleFocus()
+		case "<Space>":
+			if l.UI.Login.Focus == l.UI.Login.Username {
+				l.UI.Login.AppendFocusText(" ")
+			} else {
+				l.UI.Login.AppendFocusText("*")
+				password += " "
+			}
+		case "<Backspace>":
+			l.UI.Login.PopFocusText()
+			if l.UI.Login.Focus == l.UI.Login.Password {
+				length := len(password)
+				if length > 0 {
+					password = password[0 : length-1]
+				}
+			}
+		case "<Enter>":
+			// check login
+			acc := Account{l.UI.Login.Username.Text, password}
+			if err := l.Login(acc); err != nil {
+				password = ""
+				l.UI.Login.Clear()
+				l.UI.Login.Username.Title = "Login failed, plz try again."
+			} else {
+				// write username & password to local files
+				l.WriteAccount(acc)
+				return
+			}
+		case "<Escape>":
+		case "Resize":
+			l.UI.ResizeLogin()
+		default:
+			if l.UI.Login.Focus == l.UI.Login.Username {
+				l.UI.Login.AppendFocusText(e.ID)
+			} else {
+				l.UI.Login.AppendFocusText("*")
+				password += e.ID
+			}
+		}
+		l.UI.Render(l.UI.Login.Username, l.UI.Login.Password)
+	}
+}
+
+func (l *Lekima) EventLoop(uiEvent <-chan ui.Event) {
 	for {
 		select {
 		case e := <-uiEvent:
+			// sidebar key events handler
 			switch l.UI.Focus {
 			case SidebarTile:
 				switch e.ID {
 				case "q", "<C-c>":
-					return
+					l.Exit(quit)
 				case "<Tab>":
 					l.UI.ToggleFocus(MainContentTile)
 				case "o", "<Enter>":
-					// n := l.UI.Sidebar.SelectedNode()
+					n := l.UI.Sidebar.SelectedNode()
+					if n.Nodes != nil {
+						l.UI.Sidebar.ToggleExpand()
+					} else {
+						l.UI.ToggleFocus(MainContentTile)
+						p := n.Value.(*Playlist)
+						if p.Tracks == nil {
+							p = l.FetchPlaylistDetail(strconv.Itoa(p.ID))
+						}
+						l.UI.SetMainContent(p)
+					}
 				case "j":
 					l.UI.Sidebar.ScrollDown()
 				case "k":
 					l.UI.Sidebar.ScrollUp()
+				case "l":
+					// l.UI.ScrollUp()
+				case "/":
+					l.UI.ToggleFocus(SearchBoxTile)
+					l.UI.ToggleSearchBox().ClearSearchText()
+				case "?":
+					l.UI.ToggleFocus(HelpTile)
+					l.UI.ToggleHelp()
+				case "<Resize>":
+					l.UI.ResizeLayout()
 				}
 			case MainContentTile:
 				switch e.ID {
+				case "<Tab>":
+					l.UI.ToggleFocus(SidebarTile)
+				case "q", "<C-c>":
+					l.Exit(quit)
+				case "g":
+					l.UI.MainContent.ScrollTop()
+				case "G":
+					l.UI.MainContent.ScrollBottom()
+				case "j":
+					l.UI.MainContent.ScrollDown()
+				case "k":
+					l.UI.MainContent.ScrollUp()
+				case "<Space>":
+					l.Player.TogglePlay()
+				case "o", "<Enter>":
+					index := l.UI.MainContent.SelectedRow
+					songid := l.UI.MainContent.Rows[index][5]
+					songurl := l.FetchSongURL(songid)
+					l.Player.Play(songurl)
+				case "m":
+					l.Player.ToggleMute()
+				case "=":
+					l.Player.IncreaseVol()
+				case "-":
+					l.Player.DecreaseVol()
+				case "/":
+					l.UI.ToggleFocus(SearchBoxTile)
+					l.UI.ToggleSearchBox().ClearSearchText()
+				case "?":
+					l.UI.ToggleFocus(HelpTile)
+					l.UI.ToggleHelp()
+				case "<Resize>":
+					l.UI.ResizeLayout()
+				}
+			case SearchBoxTile:
+				switch e.ID {
+				case "<Tab>", "<Space>":
+					l.UI.AppendSearchText(" ")
+				case "<Escape>":
+					l.ToggleSearchBox()
+					l.UI.ClearSearchText()
+					l.UI.ToggleFocus(MainContentTile)
+				case "<Enter>":
+					p := l.FetchSearch(l.UI.SearchBox.Text)
+					l.UI.SetMainContent(p)
+					l.ToggleSearchBox()
+					l.UI.ClearSearchText()
+					l.UI.ToggleFocus(MainContentTile)
+				case "<C-c>":
+					l.Exit(quit)
+				case "<Backspace>":
+					l.UI.PopSearchText()
+				case "<Resize>":
+					l.UI.ResizeLayout()
+					l.UI.ResizeSearchBox()
+				default:
+					l.UI.AppendSearchText(e.ID)
+
+				}
+			case HelpTile:
+				switch e.ID {
+				case "<C-c>":
+					l.Exit(quit)
+				case "<Resize>":
+					l.UI.ResizeLayout()
+					l.UI.ResizeHelp()
+				case "<Escape>":
+					l.UI.ToggleHelp()
+					l.UI.ToggleFocus(MainContentTile)
 				}
 
 			}
-		}
 
+		}
+		l.UI.RenderLayout()
 	}
+
 }
 
 func (l *Lekima) Exit(c chan<- bool) {
