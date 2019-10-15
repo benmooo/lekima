@@ -35,6 +35,11 @@ type TopPlaylistsResp struct {
 	Category  string      `json:"cat"`
 }
 
+type SearchResp struct {
+	Code         int `json:"code"`
+	SearchResult `json:"result"`
+}
+
 type SongURLResp struct {
 	Code int        `json:"code"`
 	Data []*SongURL `json:"data"`
@@ -81,7 +86,7 @@ type Track2 struct {
 	ID       int      `json:"id"`
 	Name     string   `json:"name"`
 	Artists  []Artist `json:"artists"`
-	Pop      int      `json:"popularity"`
+	Pop      int      `json:"popularity,omitempty"`
 	Album    `json:"album"`
 	Duration int `json:"duration"`
 }
@@ -102,7 +107,7 @@ type Track struct {
 	ID       int      `json:"id"`
 	Name     string   `json:"name"`
 	Artists  []Artist `json:"ar"`
-	Pop      int      `json:"pop"`
+	Pop      int      `json:"pop,omitempty"`
 	Album    `json:"al"`
 	Duration int `json:"dt"`
 }
@@ -114,6 +119,10 @@ type Artist struct {
 type Album struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`
+}
+
+type SearchResult struct {
+	Songs []*Track2
 }
 
 // crumb to be improved

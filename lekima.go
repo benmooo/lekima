@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/cookiejar"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/user"
@@ -136,7 +137,12 @@ func (l *Lekima) ReadAccount() Account {
 	}
 }
 
-func (l *Lekima) Login(acc Account) error {
+func (l *Lekima) Login() error {
+	acc := l.ReadAccount()
+	// check if is valid account
+	if acc.username == "" {
+		return errors.New("invalid account")
+	}
 	reg := regexp.MustCompile("^1[35789][0-9]{9}$")
 	isphone := reg.MatchString(acc.username)
 	params := Query{"password": acc.pwd}
@@ -157,11 +163,9 @@ func (l *Lekima) Login(acc Account) error {
 	var resp LoginResp
 	err = json.Unmarshal(byt, &resp)
 	chk(err)
-
-	if resp.Code == 200 {
-		l.User = User{
-			ID: resp.Acc.ID,
-		}
+	// attach user to l
+	l.User = User{
+		ID: resp.Acc.ID,
 	}
 	return nil
 }
@@ -175,22 +179,6 @@ func (l *Lekima) LoginStatus() StatusCode {
 		l.Loggedin = true
 	}
 	return s
-}
-
-func (l *Lekima) EnsureLogin() {
-
-	// check if logged in
-	status := l.LoginStatus()
-	if status.Code != 200 {
-		// try to login
-		acc := l.ReadAccount()
-		if acc.username != "" {
-			if err := l.Login(acc); err == nil {
-				return
-			}
-		}
-	}
-	// ui render and handle
 }
 
 // func (l *Lekima) User() User {
@@ -229,6 +217,29 @@ func (l *Lekima) Req(routename string, ps ...Params) []byte {
 	return byt
 }
 
+func (l *Lekima) FetchSearch(keywords string) *Playlist {
+	params := Query{"keywords": url.QueryEscape(keywords)}
+	byt := l.Req("search", params)
+	var resp SearchResp
+	err := json.Unmarshal(byt, &resp)
+	chk(err)
+	if resp.Code != 200 {
+		log.Panic("failed to search with keywors " + keywords)
+	}
+	var ts []*Track
+	for _, v := range resp.SearchResult.Songs {
+		t := Track(*v)
+		ts = append(ts, &t)
+	}
+
+	return &Playlist{
+		Name:        "Search",
+		Description: "SearchResult",
+		Tracks:      ts,
+	}
+
+}
+
 func (l *Lekima) FetchSongURL(id string) *SongURL {
 	params := Query{
 		"id": id,
@@ -254,27 +265,6 @@ func (l *Lekima) FetchPlaylistDetail(id string) *Playlist {
 	}
 	return resp.Playlist
 }
-
-// func (l *Lekima) FetchSongURL(id string) *SongURL {
-// 	params := Query{
-// 		"id": id,
-// 		"br": "320000",
-// 	}
-// 	byt := l.Req("songurl", params)
-// 	var su SongURLResp
-// 	err := json.Unmarshal(byt, &su)
-// 	chk(err)
-// 	if su.Code != 200 {
-// 		log.Panic("failed to fetch song url")
-// 	}
-// 	return su.Data[0]
-// }
-
-// func (l *Lekima) FetchSong(id string) *SongURL {
-// 	params := Query{
-// 		""
-// 	}
-// }
 
 // fetch top playlists
 func (l *Lekima) FetchTop(limit int) []*Playlist {
@@ -383,6 +373,35 @@ func (l *Lekima) FetchSidebarContent() *SidebarContents {
 	}
 }
 
+func (l *Lekima) EventLoop() {
+	uiEvent := l.UI.PollEvents()
+	for {
+		select {
+		case e := <-uiEvent:
+			switch l.UI.Focus {
+			case SidebarTile:
+				switch e.ID {
+				case "q", "<C-c>":
+					return
+				case "<Tab>":
+					l.UI.ToggleFocus(MainContentTile)
+				case "o", "<Enter>":
+					// n := l.UI.Sidebar.SelectedNode()
+				case "j":
+					l.UI.Sidebar.ScrollDown()
+				case "k":
+					l.UI.Sidebar.ScrollUp()
+				}
+			case MainContentTile:
+				switch e.ID {
+				}
+
+			}
+		}
+
+	}
+}
+
 func (l *Lekima) Exit(c chan<- bool) {
 	c <- true
 }
@@ -440,8 +459,6 @@ func (qm Query) Assemble() string {
 	}
 	return strings.Join(p, "&")
 }
-
-type Data map[string]interface{}
 
 type User struct {
 	ID       int

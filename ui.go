@@ -26,7 +26,9 @@ type UI struct {
 
 	Tiles []Tile
 	Focus Tile
-	// Ready chan bool
+
+	// indicator of searchbox
+	Popup *widgets.Paragraph
 }
 
 func NewUI() *UI {
@@ -45,6 +47,7 @@ func NewUI() *UI {
 		SearchBox: widgets.NewParagraph(),
 		Comments:  widgets.NewParagraph(),
 		Help:      widgets.NewParagraph(),
+		Popup:     widgets.NewParagraph(),
 
 		HeaderText: defaultHeaderText,
 		HelpDoc:    defaultHelpDoc,
@@ -58,8 +61,19 @@ func NewUI() *UI {
 }
 
 var (
-	defaultHeaderText     = "LEKIMA,  hello [?],  press L to Login."
-	defaultHelpDoc        = "help document."
+	defaultHeaderText = "LEKIMA,  hello [?],  press L to Login."
+	defaultHelpDoc    = `    Key Map
+	"j": scroll down
+	"k": scroll up
+	"o": toggle playlists|play a song
+	"?": show help
+	"/": search
+	"q" "Ctrl+c": quit the program
+	"<Tab>": toggle Focus
+	"<Escape>": terminate current operation
+	"<Space>": toggle pause | play
+	"<Enter>": toggle playlists|play a song|search ..etc.
+	`
 	defaultPlaylistHeader = []string{"No", "Name", "Author", "Album", "Duration", "ID"}
 )
 
@@ -122,13 +136,94 @@ func (u *UI) Prepare() *UI {
 	}
 
 	// help
+	u.Help.Title = "Help Doc"
 	u.Help.Text = u.HelpDoc
+	// search box
+	u.SearchBox.Title = "Search"
+	// u.ResizeSearchBox()
 	u.Comments.Text = "no comments avaiable."
 	return u
 }
 
-func (u *UI) ToggleFocus() *UI {
-	u.Focus ^= 1
+func (u *UI) ResizeLayout() *UI {
+	w, h := u.Size()
+	u.Layout.SetRect(0, 0, w, h)
+	return u
+}
+
+func (u *UI) ToggleHelp() *UI {
+	if u.Popup.Title == "Help Doc" {
+		u.Popup = widgets.NewParagraph()
+	} else {
+		u.ResizeHelp()
+		u.Popup = u.Help
+	}
+	return u
+}
+func (u *UI) ResizeHelp() *UI {
+	w, h := u.Size()
+	u.Help.SetRect(3*w/8, h/3, 5*w/8, h/3+15)
+	return u
+}
+
+func (u *UI) ToggleSearchBox() *UI {
+	if u.Popup.Title == "Search" {
+		u.Popup = widgets.NewParagraph()
+	} else {
+		u.ResizeSearchBox()
+		u.Popup = u.SearchBox
+	}
+	return u
+}
+
+func (u *UI) AppendSearchText(s string) *UI {
+	u.SearchBox.Text += s
+	return u
+}
+
+func (u *UI) PopSearchText() *UI {
+	text := u.SearchBox.Text
+	l := len(text)
+	if l > 0 {
+		u.SearchBox.Text = text[0 : l-1]
+	}
+	return u
+}
+
+func (u *UI) ClearSearchText() *UI {
+	u.SearchBox.Text = ""
+	return u
+}
+
+func (u *UI) ResizeSearchBox() *UI {
+	w, h := u.Size()
+	u.SearchBox.SetRect(3*w/8, h/3, 5*w/8, h/3+3)
+	return u
+}
+
+func (u *UI) ToggleFocus(t Tile) *UI {
+	u.Focus = t
+	// reset the style
+	u.ResetBorderStyle()
+	style := ui.NewStyle(ui.ColorCyan)
+	switch t {
+	case SidebarTile:
+		u.Sidebar.BorderStyle = style
+	case MainContentTile:
+		u.MainContent.BorderStyle = style
+	case HelpTile:
+		u.Help.BorderStyle = style
+	case SearchBoxTile:
+		u.SearchBox.BorderStyle = style
+	}
+	return u
+}
+
+func (u *UI) ResetBorderStyle() *UI {
+	u.Sidebar.BorderStyle = ui.StyleClear
+	u.MainContent.BorderStyle = ui.StyleClear
+	u.SearchBox.BorderStyle = ui.StyleClear
+	u.Help.BorderStyle = ui.StyleClear
 	return u
 }
 
@@ -142,7 +237,7 @@ func (u *UI) Render(us ...ui.Drawable) {
 }
 
 func (u *UI) RenderLayout() *UI {
-	u.Render(u.Layout)
+	u.Render(u.Layout, u.Popup)
 	return u
 }
 

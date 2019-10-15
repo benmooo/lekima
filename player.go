@@ -42,7 +42,11 @@ func (p *Player) InitSpeaker(sr beep.SampleRate, bufsize int) *Player {
 }
 
 func (p *Player) prepare(s *SongURL) *Player {
-	req, _ := http.NewRequest("GET", s.URL, nil)
+	url := s.URL
+	if url == "" {
+		return p
+	}
+	req, _ := http.NewRequest("GET", url, nil)
 	req.Header = defaultRequestHeader
 	resp, err := p.Client.Do(req)
 	chk(err)
