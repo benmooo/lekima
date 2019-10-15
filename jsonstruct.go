@@ -19,6 +19,12 @@ type LoggedinStatusResp struct {
 	Profile `json:"profile,omitempty"`
 }
 
+type UserDetailResp struct {
+	Code    int `json:"code"`
+	Level   int `json:"level,omitempty"`
+	Profile `json:"profile,omitempty"`
+}
+
 type Profile struct {
 	UserID   int    `json:"userId"`
 	Nickname string `json:"nickname"`

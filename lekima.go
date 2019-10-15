@@ -68,7 +68,7 @@ func NewLekima() *Lekima {
 	}
 }
 
-func (l *Lekima) Init() *Lekima {
+func (l *Lekima) Init(c chan<- string) *Lekima {
 	// check prerequestes libasounds-2, git, node, npm, npx
 	prerequisites := []string{"git", "node", "npm"}
 	for _, v := range prerequisites {
@@ -89,7 +89,9 @@ func (l *Lekima) Init() *Lekima {
 	_, err = os.Stat(l.Repo)
 	if os.IsNotExist(err) {
 		l.
+			MarkNotify(c, Cloning).
 			Clone().
+			MarkNotify(c, InstallingPkgs).
 			InstallPackages()
 	}
 	// init player
@@ -224,6 +226,18 @@ func (l *Lekima) Req(routename string, ps ...Params) []byte {
 	// err = json.Unmarshal(body, &data)
 	// chk(err)
 	return byt
+}
+
+func (l *Lekima) FetchUserDetail(id int) Profile {
+	params := Query{"uid": strconv.Itoa(id)}
+	byt := l.Req("user", params)
+	var resp UserDetailResp
+	err := json.Unmarshal(byt, &resp)
+	chk(err)
+	if resp.Code != 200 {
+		log.Panic("failed to fetch user detail")
+	}
+	return resp.Profile
 }
 
 func (l *Lekima) FetchSearch(keywords string) *Playlist {
@@ -431,7 +445,7 @@ func (l *Lekima) HandleLogin(uiEvent <-chan ui.Event) {
 	}
 }
 
-func (l *Lekima) EventLoop(uiEvent <-chan ui.Event) {
+func (l *Lekima) EventLoop(uiEvent <-chan ui.Event, quit chan<- bool) {
 	for {
 		select {
 		case e := <-uiEvent:
@@ -454,6 +468,7 @@ func (l *Lekima) EventLoop(uiEvent <-chan ui.Event) {
 							p = l.FetchPlaylistDetail(strconv.Itoa(p.ID))
 						}
 						l.UI.SetMainContent(p)
+						l.UI.MainContent.ScrollTop()
 					}
 				case "j":
 					l.UI.Sidebar.ScrollDown()
@@ -517,6 +532,7 @@ func (l *Lekima) EventLoop(uiEvent <-chan ui.Event) {
 				case "<Enter>":
 					p := l.FetchSearch(l.UI.SearchBox.Text)
 					l.UI.SetMainContent(p)
+					l.UI.MainContent.ScrollTop()
 					l.ToggleSearchBox()
 					l.UI.ClearSearchText()
 					l.UI.ToggleFocus(MainContentTile)

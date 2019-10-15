@@ -36,7 +36,7 @@ func main() {
 		lekima.
 			Notify(ass).
 			MarkNotify(ass, Initializing)
-		lekima.Init().
+		lekima.Init(ass).
 			MarkNotify(ass, Starting).
 			Start().
 			MarkNotify(ass, Running).
@@ -80,11 +80,14 @@ func main() {
 			l.UI.Render(l.UI.Login.Username, l.UI.Login.Password)
 			l.HandleLogin(uiEvent)
 		}
+		// header
+		p := l.FetchUserDetail(l.User.ID)
+		l.UI.Header.Text = fmt.Sprintf("Lekima, ID: %d, Username: %s!", p.UserID, p.Nickname)
 		c := l.FetchSidebarContent()
 		// render
 		l.UI.LoadSidebarContent(c).RenderLayout()
 		// main event handler
-		l.eventLoop(uiEvent)
+		l.EventLoop(uiEvent, quit)
 	}()
 
 	lekima.ListenExit(quit)
