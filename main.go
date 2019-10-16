@@ -65,7 +65,15 @@ func main() {
 	go func() {
 		wg2.Wait()
 		for status := range ass {
-			lekima.UI.Header.Text = fmt.Sprintf("%s status: %s", defaultHeaderText, status)
+			// lekima.UI.Header.Text = fmt.Sprintf(
+			// 	defaultHeaderText,
+			// 	lekima.User.Nickname,
+			// 	lekima.Player.PlayMode,
+			// 	lekima.Player.Volume,
+			// 	lekima.Player.Status,
+			// 	status,
+			// )
+			lekima.UI.Header.Text = fmt.Sprintf("LEKIMA\nAPI ServerStatus: %s", status)
 			lekima.UI.RenderLayout()
 		}
 	}()
@@ -81,8 +89,9 @@ func main() {
 			l.HandleLogin(uiEvent)
 		}
 		// header
-		p := l.FetchUserDetail(l.User.ID)
-		l.UI.Header.Text = fmt.Sprintf("Lekima, ID: %d, Username: %s!", p.UserID, p.Nickname)
+		l.FetchUserDetail(l.User.ID)
+		l.RefreshUIHeader()
+		// l.UI.Header.Text = fmt.Sprintf("Lekima, ID: %d, Username: %s!", p.UserID, p.Nickname)
 		c := l.FetchSidebarContent()
 		// render
 		l.UI.LoadSidebarContent(c).RenderLayout()

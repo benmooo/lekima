@@ -64,13 +64,15 @@ func NewUI() *UI {
 }
 
 var (
-	defaultHeaderText = "LEKIMA,  hello [?],  press L to Login."
+	defaultHeaderText = "LEKIMA, Username: %s\nPlayMode: %s, Volume: %f\nSong: %s | %s"
 	defaultHelpDoc    = `    Key Map
 	"j": scroll down
 	"k": scroll up
 	"o": toggle playlists|play a song
 	"?": show help
 	"/": search
+	"P": toggle play mode
+	"m": toggle mute
 	"q" "Ctrl+c": quit the program
 	"<Tab>": toggle Focus
 	"<Escape>": terminate current operation
@@ -159,6 +161,25 @@ func (u *UI) ResizeLogin() *UI {
 	return u
 }
 
+func (u *UI) RefreshHeader(name string, mode PlayMode, vol float64, song string, status uint8) *UI {
+	var m, s string
+	switch mode {
+	case Loop:
+		m = "loop"
+	case SingleCycle:
+		m = "singlecycle"
+	case Random:
+		m = "random"
+	}
+	if status == 0 {
+		s = "paused"
+	} else {
+		s = "playing"
+	}
+	u.Header.Text = fmt.Sprintf(defaultHeaderText, name, m, vol, song, s)
+	return u
+}
+
 func (u *UI) ResizeLayout() *UI {
 	w, h := u.Size()
 	u.Layout.SetRect(0, 0, w, h)
@@ -176,7 +197,7 @@ func (u *UI) ToggleHelp() *UI {
 }
 func (u *UI) ResizeHelp() *UI {
 	w, h := u.Size()
-	u.Help.SetRect(3*w/8, h/3, 5*w/8, h/3+15)
+	u.Help.SetRect(3*w/8, h/3, 5*w/8, h/3+17)
 	return u
 }
 

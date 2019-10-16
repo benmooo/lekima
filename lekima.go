@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -53,6 +54,8 @@ type Lekima struct {
 
 	// Player
 	*Player
+	*Playlist
+	Index int
 }
 
 func NewLekima() *Lekima {
@@ -65,6 +68,11 @@ func NewLekima() *Lekima {
 
 		Client: &http.Client{Jar: cookieJar},
 		Player: NewPlayer(),
+		Playlist: &Playlist{
+			Tracks: []*Track{
+				&Track{Name: "void"},
+			},
+		},
 	}
 }
 
@@ -237,6 +245,7 @@ func (l *Lekima) FetchUserDetail(id int) Profile {
 	if resp.Code != 200 {
 		log.Panic("failed to fetch user detail")
 	}
+	l.User.Nickname = resp.Profile.Nickname
 	return resp.Profile
 }
 
@@ -445,9 +454,36 @@ func (l *Lekima) HandleLogin(uiEvent <-chan ui.Event) {
 	}
 }
 
+func (l *Lekima) RefreshUIHeader() {
+	l.UI.RefreshHeader(
+		l.User.Nickname,
+		l.Player.PlayMode,
+		l.Player.Volume,
+		l.Playlist.Tracks[l.Index].Name,
+		l.Player.Status,
+	)
+}
+
 func (l *Lekima) EventLoop(uiEvent <-chan ui.Event, quit chan<- bool) {
 	for {
 		select {
+		// next song
+		case index := <-l.Player.PlayNext:
+			songCount := len(l.Playlist.Tracks)
+			switch l.Player.PlayMode {
+			case Loop:
+				index = ringNext(songCount, index)
+				l.Player.Play(l.Playlist, index, l.FetchSongURL)
+				l.Index = index
+				l.RefreshUIHeader()
+			case SingleCycle:
+				l.Player.Play(l.Playlist, index, l.FetchSongURL)
+			case Random:
+				index = rand.Intn(songCount)
+				l.Player.Play(l.Playlist, index, l.FetchSongURL)
+				l.Index = index
+				l.RefreshUIHeader()
+			}
 		case e := <-uiEvent:
 			// sidebar key events handler
 			switch l.UI.Focus {
@@ -467,9 +503,11 @@ func (l *Lekima) EventLoop(uiEvent <-chan ui.Event, quit chan<- bool) {
 						if p.Tracks == nil {
 							p = l.FetchPlaylistDetail(strconv.Itoa(p.ID))
 						}
+						l.Playlist = p
 						l.UI.SetMainContent(p)
 						l.UI.MainContent.ScrollTop()
 					}
+					// l.Player.SetStatus(1)
 				case "j":
 					l.UI.Sidebar.ScrollDown()
 				case "k":
@@ -484,6 +522,8 @@ func (l *Lekima) EventLoop(uiEvent <-chan ui.Event, quit chan<- bool) {
 					l.UI.ToggleHelp()
 				case "<Resize>":
 					l.UI.ResizeLayout()
+				case "P":
+					l.Player.TogglePlayMode()
 				}
 			case MainContentTile:
 				switch e.ID {
@@ -500,18 +540,28 @@ func (l *Lekima) EventLoop(uiEvent <-chan ui.Event, quit chan<- bool) {
 				case "k":
 					l.UI.MainContent.ScrollUp()
 				case "<Space>":
-					l.Player.TogglePlay()
+					l.Player.TogglePlay().ToggleStatus()
+					l.RefreshUIHeader()
 				case "o", "<Enter>":
+					if l.Player.Streamer != nil {
+						l.Player.CloseStreamer()
+						l.Player.Interupt = true
+					}
+					// start a new play loop
 					index := l.UI.MainContent.SelectedRow
-					songid := l.UI.MainContent.Rows[index][5]
-					songurl := l.FetchSongURL(songid)
-					l.Player.Play(songurl)
+					l.Player.Play(l.Playlist, index, l.FetchSongURL)
+					// handler status change
+					l.Index = index
+					l.Player.SetStatus(1)
+					l.RefreshUIHeader()
 				case "m":
 					l.Player.ToggleMute()
 				case "=":
 					l.Player.IncreaseVol()
+					l.RefreshUIHeader()
 				case "-":
 					l.Player.DecreaseVol()
+					l.RefreshUIHeader()
 				case "/":
 					l.UI.ToggleFocus(SearchBoxTile)
 					l.UI.ToggleSearchBox().ClearSearchText()
@@ -520,6 +570,9 @@ func (l *Lekima) EventLoop(uiEvent <-chan ui.Event, quit chan<- bool) {
 					l.UI.ToggleHelp()
 				case "<Resize>":
 					l.UI.ResizeLayout()
+				case "P":
+					l.Player.TogglePlayMode()
+					l.RefreshUIHeader()
 				}
 			case SearchBoxTile:
 				switch e.ID {
@@ -531,11 +584,15 @@ func (l *Lekima) EventLoop(uiEvent <-chan ui.Event, quit chan<- bool) {
 					l.UI.ToggleFocus(MainContentTile)
 				case "<Enter>":
 					p := l.FetchSearch(l.UI.SearchBox.Text)
+					l.Playlist = p
 					l.UI.SetMainContent(p)
 					l.UI.MainContent.ScrollTop()
 					l.ToggleSearchBox()
 					l.UI.ClearSearchText()
 					l.UI.ToggleFocus(MainContentTile)
+					// handle status chage
+					l.Index = 0
+					l.RefreshUIHeader()
 				case "<C-c>":
 					l.Exit(quit)
 				case "<Backspace>":
@@ -628,4 +685,9 @@ func (qm Query) Assemble() string {
 type User struct {
 	ID       int
 	Nickname string
+}
+
+type Check struct {
+	Stop  bool
+	Index int
 }

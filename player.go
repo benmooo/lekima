@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 
 	browser "github.com/EDDYCJY/fake-useragent"
@@ -15,12 +16,15 @@ type Player struct {
 	SpeakerInitiated bool
 	MusicInstance
 
+	Status uint8 // 0 -> paused 1-> playing
 	PlayMode
 	Volume float64
 	Speed  beep.SampleRate
 
 	// request to the music server
-	Client *http.Client
+	Client   *http.Client
+	PlayNext chan int
+	Interupt bool
 }
 
 // type Playlist struct {
@@ -31,14 +35,27 @@ type Player struct {
 
 func NewPlayer() *Player {
 	return &Player{
-		Client: &http.Client{},
-		Speed:  1.0,
+		Client:   &http.Client{},
+		Speed:    1.0,
+		PlayMode: Loop,
+		PlayNext: make(chan int),
+		Interupt: false,
+		Status:   0,
 	}
 }
 
 func (p *Player) InitSpeaker(sr beep.SampleRate, bufsize int) *Player {
 	speaker.Init(sr, bufsize)
 	return p
+}
+
+func (p *Player) ToggleStatus() *Player {
+	p.Status ^= 1
+	return p
+}
+
+func (p *Player) SetStatus(i uint8) {
+	p.Status = i
 }
 
 func (p *Player) prepare(s *SongURL) *Player {
@@ -69,19 +86,37 @@ func (p *Player) prepare(s *SongURL) *Player {
 	return p
 }
 
-func (p *Player) Play(s *SongURL) {
-	// prepare
-	// p.CloseStreamer()
-	if p.Streamer != nil {
-		p.CloseStreamer()
-	}
-	p.prepare(s)
-	speaker.Play(p.Vol)
+func (p *Player) Play(list *Playlist, index int, fetcher func(string) *SongURL) {
+	p.prepare(fetcher(strconv.Itoa(list.Tracks[index].ID)))
+	// speaker.Play(p.Vol)
+	speaker.Play(beep.Seq(p.Vol, beep.Callback(func() {
+		if p.Interupt {
+			p.Interupt = false
+		} else {
+			p.CloseStreamer()
+			p.PlayNext <- index
+		}
+	})))
 }
 
-func (p *Player) CloseStreamer() *Player {
-	p.MusicInstance.Streamer.Close()
-	return p
+// func (p *Player) Loop(p *Playlist, index int, fetcher func(string) *SongURL) {
+// 	done := make(chan bool)
+// 	songCount := len(p.Tracks)
+// 	// current songurl
+// 	songurl := fetcher(strconv.Itoa(p.Tracks[index].ID))
+// 	p.Play(songurl, done)
+// }
+
+func ringNext(sum, index int) int {
+	if sum-1 <= index {
+		return 0
+	}
+	index++
+	return index
+}
+
+func (p *Player) CloseStreamer() error {
+	return p.MusicInstance.Streamer.Close()
 }
 
 func (p *Player) IncreaseVol() *Player {
@@ -142,6 +177,14 @@ func (p *Player) TogglePlay() *Player {
 	return p
 }
 
+func (p *Player) TogglePlayMode() {
+	if p.PlayMode == Random {
+		p.PlayMode = Loop
+	} else {
+		p.PlayMode++
+	}
+}
+
 // type Song struct {
 // 	ID   int
 // 	Name string
@@ -174,11 +217,10 @@ var speedMap = map[string]float64{
 	"2.0x": 2.00,
 }
 
-type PlayMode byte
+type PlayMode uint8
 
 const (
-	Order PlayMode = iota
-	Loop
+	Loop PlayMode = iota
 	SingleCycle
 	Random
 )
