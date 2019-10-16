@@ -591,8 +591,8 @@ func (l *Lekima) EventLoop(uiEvent <-chan ui.Event, quit chan<- bool) {
 					l.UI.ClearSearchText()
 					l.UI.ToggleFocus(MainContentTile)
 					// handle status chage
-					l.Index = 0
-					l.RefreshUIHeader()
+					// l.Index = 0
+					// l.RefreshUIHeader()
 				case "<C-c>":
 					l.Exit(quit)
 				case "<Backspace>":
