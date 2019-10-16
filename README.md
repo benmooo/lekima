@@ -1,14 +1,11 @@
 <div align="center">
 
-> <a href="./assets/typhoon-lekima.jpg">
->     <img src="./assets/typhoon-lekima.jpg" width="20%" />
-> </a>
-
-<br><br>
 <center><h1>LEKIMA</h1></center>
+<br><br>
 
 Terminal based Netease Cloud Music player for vimer? | vimor?, named after the typhoon lekima.
 
+<br><br>
 <img src="./assets/screenshot.png" width="96%" />
 
 </div>
