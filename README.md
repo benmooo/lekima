@@ -1,15 +1,27 @@
 <div align="center">
 
-<a href="./assets/typhoon-lekima.jpg">
-    <img src="./assets/typhoon-lekima.jpg" width="20%" />
-</a>
+> <a href="./assets/typhoon-lekima.jpg">
+>     <img src="./assets/typhoon-lekima.jpg" width="20%" />
+> </a>
+
 <br><br>
+<center><h1>LEKIMA</h1></center>
 
 Terminal based Netease Cloud Music player for vimer? | vimor?, named after the typhoon lekima.
 
 <img src="./assets/screenshot.png" width="96%" />
 
 </div>
+
+## Prerequisites
+
+### Api server
+
+git, node, npm
+
+### Sound
+refer to [hajimehoshi/oto](https://github.com/hajimehoshi/oto)
+
 
 ## Installation
 
