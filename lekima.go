@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	ui "github.com/gizak/termui/v3"
 )
@@ -346,8 +347,9 @@ func (l *Lekima) FetchRecommendSongs() *Playlist {
 		var t Track = Track(*v)
 		ts = append(ts, &t)
 	}
+	date := time.Now().Format("02 Jan")
 	return &Playlist{
-		Name:        "Recommend",
+		Name:        date,
 		Description: "Recommend_Songs",
 		Tracks:      ts,
 	}

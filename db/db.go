@@ -1,4 +1,4 @@
-// Package db part
+// For caching
 package db
 
 import (
