@@ -34,6 +34,7 @@ go get github.com/benmooo/lekima
 ### Binary
 ```bash
 curl -sLo lekima https://github.com/benmooo/lekima/blob/master/assets/lekima?raw=true
+chmod u+x lekima
 ```
 
 
