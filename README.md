@@ -33,7 +33,7 @@ go get github.com/benmooo/lekima
 
 ### Binary
 ```bash
-curl -sLO https://github.com/benmooo/lekima/blob/master/assets/lekima?raw=true
+curl -sLo lekima https://github.com/benmooo/lekima/blob/master/assets/lekima?raw=true
 ```
 
 
