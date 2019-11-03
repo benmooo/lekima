@@ -31,11 +31,13 @@ Need go1.12.+ installed.
 go get github.com/benmooo/lekima
 ```
 
-### Binary
+### Binary(deprecated)
+<s>
 ```bash
 curl -sLo lekima https://github.com/benmooo/lekima/blob/master/assets/lekima?raw=true
 chmod u+x lekima
 ```
+</s>
 
 
 ## Usage
