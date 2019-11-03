@@ -32,12 +32,14 @@ go get github.com/benmooo/lekima
 ```
 
 ### Binary(deprecated)
-<s>
 ```bash
+<s>
 curl -sLo lekima https://github.com/benmooo/lekima/blob/master/assets/lekima?raw=true
-chmod u+x lekima
-```
 </s>
+<s>
+chmod u+x lekima
+</s>
+```
 
 
 ## Usage
