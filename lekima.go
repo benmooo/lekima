@@ -251,6 +251,9 @@ func (l *Lekima) FetchUserDetail(id int) Profile {
 }
 
 func (l *Lekima) FetchSearch(keywords string) *Playlist {
+	if len(keywords) < 1 {
+		keywords = "nil"
+	}
 	params := Query{"keywords": url.QueryEscape(keywords)}
 	byt := l.Req("search", params)
 	var resp SearchResp

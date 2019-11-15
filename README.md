@@ -6,7 +6,7 @@
 Terminal based Netease Cloud Music player for vimer? | vimor?, named after the typhoon lekima.
 
 <br><br>
-<img src="./assets/screenshot.png" width="96%" />
+<img src="./assets/screenshot.png" width="100%" />
 
 </div>
 
