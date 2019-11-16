@@ -3,7 +3,8 @@
 <center><h1>LEKIMA</h1></center>
 <br><br>
 
-Terminal based Netease Cloud Music player for vimer? | vimor?, named after the typhoon lekima.
+<p>Terminal based Netease Cloud Music player for vimer? | vimor?, named after the typhoon lekima.</p>
+<p>Live [demo](https://www.bilibili.com/video/av71530651/)</p>
 
 <br><br>
 <img src="./assets/screenshot.png" width="100%" />
