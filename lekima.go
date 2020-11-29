@@ -346,7 +346,7 @@ func (l *Lekima) FetchRecommendSongs() *Playlist {
 		log.Panic("fail to fetch recommend songs")
 	}
 	var ts []*Track
-	for _, v := range resp.Recommend {
+	for _, v := range resp.Data.DailySongs {
 		var t Track = Track(*v)
 		ts = append(ts, &t)
 	}

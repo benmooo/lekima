@@ -78,7 +78,9 @@ type CloudTrack struct {
 
 type RecommendSongsResp struct {
 	Code      int       `json:"code"`
-	Recommend []*Track2 `json:"recommend"`
+    Data      struct {
+        DailySongs []*Track `json:"dailySongs"`
+    } `json:"data"`
 }
 
 type MyPlaylistResp struct {
