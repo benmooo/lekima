@@ -36,10 +36,10 @@ type UI struct {
 func NewUI() *UI {
 	layoutUI := &UI{
 		Layout:      ui.NewGrid(),
-		MarginTop:   1.000 / 8,
+		MarginTop:   0.900 / 8,
 		MarginLeft:  1.500 / 12,
-		HeaderRatio: 1.300 / 9,
-		BodyRatio:   7.700 / 9,
+		HeaderRatio: 1.400 / 9,
+		BodyRatio:   7.800 / 9,
 		SiderRatio:  1.000 / 5,
 		MainRatio:   4.000 / 5,
 
