@@ -71,7 +71,7 @@ func NewLekima() *Lekima {
 		Player: NewPlayer(),
 		Playlist: &Playlist{
 			Tracks: []*Track{
-				&Track{Name: "void"},
+				{Name: "void"},
 			},
 		},
 	}

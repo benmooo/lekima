@@ -215,15 +215,15 @@ func (p *Player) TogglePlayMode() {
 // 	}
 // }
 
-var speedMap = map[string]float64{
-	"1.0x": 1.00,
-	"1.2x": 1.20,
-	"1.4x": 1.40,
-	"1.5x": 1.50,
-	"1.6x": 1.60,
-	"1.8x": 1.80,
-	"2.0x": 2.00,
-}
+// var speedMap = map[string]float64{
+// 	"1.0x": 1.00,
+// 	"1.2x": 1.20,
+// 	"1.4x": 1.40,
+// 	"1.5x": 1.50,
+// 	"1.6x": 1.60,
+// 	"1.8x": 1.80,
+// 	"2.0x": 2.00,
+// }
 
 type PlayMode uint8
 
