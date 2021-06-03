@@ -48,7 +48,7 @@ func newUI() *ui.Grid {
 			Nodes: nil,
 		},
 		{
-			Value: nodeValue("FAVORITES"),
+			Value: nodeValue("FAVORITES💓"),
 			Nodes: []*widgets.TreeNode{
 				{
 					Value: nodeValue("💓"),
@@ -92,13 +92,13 @@ func initUI() {
 	pg := make([]*widgets.Paragraph, 6)
 	for i := range pg {
 		pg[i] = widgets.NewParagraph()
-		switch i % 2 {
-		case 0:
-			pg[i].Border = false
-		default:
-			pg[i].Text = "lorem ispum ..."
+		// switch i % 2 {
+		// case 0:
+		// 	pg[i].Border = false
+		// default:
+		// 	pg[i].Text = "lorem ispum ..."
 			// pg[i].Title = fmt.Sprintf("para: %d", i+1)
-		}
+		// }
 	}
 
 	grid := ui.NewGrid()

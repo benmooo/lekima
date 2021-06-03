@@ -34,12 +34,12 @@ type UI struct {
 }
 
 func NewUI() *UI {
-	return &UI{
+	layoutUI := &UI{
 		Layout:      ui.NewGrid(),
 		MarginTop:   1.000 / 8,
 		MarginLeft:  1.500 / 12,
-		HeaderRatio: 1.000 / 9,
-		BodyRatio:   8.000 / 9,
+		HeaderRatio: 1.300 / 9,
+		BodyRatio:   7.700 / 9,
 		SiderRatio:  1.000 / 5,
 		MainRatio:   4.000 / 5,
 
@@ -54,13 +54,41 @@ func NewUI() *UI {
 		HeaderText: defaultHeaderText,
 		HelpDoc:    defaultHelpDoc,
 
-		Sidebar:     widgets.NewTree(),
+		Sidebar: widgets.NewTree(),
+		// MainContent: NewTable(),
 		MainContent: NewTable(),
 		Tiles:       []Tile{SidebarTile, MainContentTile, SearchBoxTile, HelpTile, CommentsTile},
 		Focus:       SidebarTile,
 		// Ready:       make(chan bool),
 		Login: NewLoginWidget(),
 	}
+
+	ui.Theme.Default.Fg = ui.ColorClear
+	clearStyle := ui.NewStyle(ui.ColorClear)
+
+	// ui settings
+	layoutUI.Header.BorderStyle = clearStyle
+	layoutUI.Header.TextStyle = clearStyle
+
+	layoutUI.SearchBox.BorderStyle = clearStyle
+	layoutUI.SearchBox.TextStyle = clearStyle
+	layoutUI.SearchBox.TitleStyle = clearStyle
+
+	layoutUI.Help.BorderStyle = clearStyle
+	layoutUI.Help.TextStyle = clearStyle
+	layoutUI.Help.TitleStyle = clearStyle
+
+	layoutUI.Sidebar.BorderStyle = clearStyle
+	layoutUI.Sidebar.TextStyle = clearStyle
+	layoutUI.Sidebar.SelectedRowStyle = clearStyle
+
+	layoutUI.MainContent.BorderStyle = clearStyle
+	layoutUI.MainContent.TitleStyle = clearStyle
+	layoutUI.MainContent.ShowLocation = true
+	layoutUI.MainContent.ShowCursor = true
+	layoutUI.MainContent.CursorColor = ui.ColorCyan
+
+	return layoutUI
 }
 
 var (
@@ -132,8 +160,8 @@ func (u *UI) Prepare() *UI {
 	// main content
 	u.MainContent.Header = defaultPlaylistHeader
 	// u.MainContent.ColWidths = []int{5, 5, 5, 5, 5}
-	u.MainContent.ShowCursor = true
-	u.MainContent.CursorColor = ui.ColorCyan
+	// u.MainContent.ShowCursor = true
+	// u.MainContent.CursorColor = ui.ColorCyan
 	u.MainContent.ColResizer = func() {
 		u.MainContent.ColWidths = []int{
 			10, 40, 30, 30, 20, 10,

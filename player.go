@@ -1,7 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 
@@ -70,6 +72,12 @@ func (p *Player) prepare(s *SongURL) *Player {
 	// decode response body which is an io.ReadCloser interfce
 	// defalt decoder mp3 -> tobe improved
 	streamer, f, err := mp3.Decode(resp.Body)
+	if err != nil {
+		// is not mp3 file
+		fmt.Println("is not mp3 file!!!")
+		os.Exit(1)
+	}
+
 	// defer streamer.Close()
 	// check if speaker initialized
 	if !p.SpeakerInitiated {

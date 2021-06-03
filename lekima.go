@@ -254,7 +254,7 @@ func (l *Lekima) FetchSearch(keywords string) *Playlist {
 	if len(keywords) < 1 {
 		keywords = "nil"
 	}
-	params := Query{"keywords": url.QueryEscape(keywords)}
+	params := Query{"keywords": url.QueryEscape(keywords), "limit": "60"}
 	byt := l.Req("search", params)
 	var resp SearchResp
 	err := json.Unmarshal(byt, &resp)
@@ -494,6 +494,8 @@ func (l *Lekima) EventLoop(uiEvent <-chan ui.Event, quit chan<- bool) {
 			switch l.UI.Focus {
 			case SidebarTile:
 				switch e.ID {
+				// case "<MouseLeft>":
+				// 	l.UI.MainContent.HandleClick(e.Payload.(ui.Mouse).X, e.Payload.(ui.Mouse).Y)
 				case "q", "<C-c>":
 					l.Exit(quit)
 				case "<Tab>":
@@ -532,6 +534,8 @@ func (l *Lekima) EventLoop(uiEvent <-chan ui.Event, quit chan<- bool) {
 				}
 			case MainContentTile:
 				switch e.ID {
+				case "<MouseLeft>":
+					l.UI.MainContent.HandleClick(e.Payload.(ui.Mouse).X, e.Payload.(ui.Mouse).Y)
 				case "<Tab>":
 					l.UI.ToggleFocus(SidebarTile)
 				case "q", "<C-c>":

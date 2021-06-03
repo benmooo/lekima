@@ -77,10 +77,10 @@ type CloudTrack struct {
 }
 
 type RecommendSongsResp struct {
-	Code      int       `json:"code"`
-    Data      struct {
-        DailySongs []*Track `json:"dailySongs"`
-    } `json:"data"`
+	Code int `json:"code"`
+	Data struct {
+		DailySongs []*Track `json:"dailySongs"`
+	} `json:"data"`
 }
 
 type MyPlaylistResp struct {
@@ -114,9 +114,9 @@ func (p *Playlist) String() string {
 type Track struct {
 	ID       int      `json:"id"`
 	Name     string   `json:"name"`
-	Artists  []Artist `json:"ar"`
+	Artists  []Artist `json:"ar,omitempty"`
 	Pop      int      `json:"pop,omitempty"`
-	Album    `json:"al"`
+	Album    `json:"al,omitempty"`
 	Duration int `json:"dt"`
 }
 type Artist struct {
