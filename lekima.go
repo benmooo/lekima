@@ -584,35 +584,39 @@ func (l *Lekima) EventLoop(uiEvent <-chan ui.Event, quit chan<- bool) {
 					l.RefreshUIHeader()
 				}
 			case SearchBoxTile:
-				switch e.ID {
-				case "<Tab>", "<Space>":
-					l.UI.AppendSearchText(" ")
-				case "<Escape>":
-					l.ToggleSearchBox()
-					l.UI.ClearSearchText()
-					l.UI.ToggleFocus(MainContentTile)
-				case "<Enter>":
-					p := l.FetchSearch(l.UI.SearchBox.Text)
-					l.Playlist = p
-					l.UI.SetMainContent(p)
-					l.UI.MainContent.ScrollTop()
-					l.ToggleSearchBox()
-					l.UI.ClearSearchText()
-					l.UI.ToggleFocus(MainContentTile)
-					// handle status chage
-					// l.Index = 0
-					// l.RefreshUIHeader()
-				case "<C-c>":
-					l.Exit(quit)
-				case "<Backspace>":
-					l.UI.PopSearchText()
-				case "<Resize>":
+				switch e.Type {
+				case ui.KeyboardEvent:
+					switch e.ID {
+					case "<Tab>", "<Space>":
+						l.UI.AppendSearchText(" ")
+					case "<Escape>":
+						l.ToggleSearchBox()
+						l.UI.ClearSearchText()
+						l.UI.ToggleFocus(MainContentTile)
+					case "<Enter>":
+						p := l.FetchSearch(l.UI.SearchBox.Text)
+						l.Playlist = p
+						l.UI.SetMainContent(p)
+						l.UI.MainContent.ScrollTop()
+						l.ToggleSearchBox()
+						l.UI.ClearSearchText()
+						l.UI.ToggleFocus(MainContentTile)
+					case "<C-c>":
+						l.Exit(quit)
+					case "<Backspace>":
+						l.UI.PopSearchText()
+					default:
+						l.UI.AppendSearchText(e.ID)
+
+					}
+				case ui.ResizeEvent:
 					l.UI.ResizeLayout()
 					l.UI.ResizeSearchBox()
-				default:
-					l.UI.AppendSearchText(e.ID)
+
+				case ui.MouseEvent:
 
 				}
+
 			case HelpTile:
 				switch e.ID {
 				case "<C-c>":
