@@ -316,7 +316,8 @@ func (l *Lekima) FetchTop(limit int) []*Playlist {
 
 // fetch fm
 func (l *Lekima) FetchFM() *Playlist {
-	bytes := l.Req("fm")
+	params := Query{"timestamp": strconv.Itoa(int(time.Now().Unix()))}
+	bytes := l.Req("fm", params)
 	var resp FMResp
 	err := json.Unmarshal(bytes, &resp)
 	chk(err)
@@ -334,6 +335,11 @@ func (l *Lekima) FetchFM() *Playlist {
 		Description: "Personal_FM",
 		Tracks:      ts,
 	}
+}
+
+func (l *Lekima) ExpandFMTracks(list []*Track) *Lekima {
+	l.Playlist.Tracks = append(l.Playlist.Tracks, list...)
+	return l
 }
 
 // fetch daily recommend songs
@@ -582,6 +588,11 @@ func (l *Lekima) EventLoop(uiEvent <-chan ui.Event, quit chan<- bool) {
 				case "P":
 					l.Player.TogglePlayMode()
 					l.RefreshUIHeader()
+				case "r":
+					p := l.FetchFM()
+					l.Playlist = p
+					l.UI.SetMainContent(p)
+					l.UI.MainContent.ScrollTop()
 				}
 			case SearchBoxTile:
 				switch e.Type {
