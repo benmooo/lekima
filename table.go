@@ -40,6 +40,9 @@ func NewTable() *Table {
 		TopRow:      0,
 		UniqueCol:   0,
 		ColResizer:  func() {},
+    ShowCursor: true,
+    CursorColor: ui.CellClear.Style.Fg,
+    ShowLocation: true,
 	}
 }
 
@@ -93,7 +96,7 @@ func (t *Table) Draw(buf *ui.Buffer) {
 		if t.ShowCursor {
 			if (t.SelectedItem == "" && rowNum == t.SelectedRow) || (t.SelectedItem != "" && t.SelectedItem == row[t.UniqueCol]) {
 				style.Fg = t.CursorColor
-				style.Modifier = ui.ModifierReverse
+				style.Modifier = ui.ModifierBold
 				for _, width := range t.ColWidths {
 					if width == 0 {
 						continue

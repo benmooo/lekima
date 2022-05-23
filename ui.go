@@ -55,7 +55,6 @@ func NewUI() *UI {
 		HelpDoc:    defaultHelpDoc,
 
 		Sidebar: widgets.NewTree(),
-		// MainContent: NewTable(),
 		MainContent: NewTable(),
 		Tiles:       []Tile{SidebarTile, MainContentTile, SearchBoxTile, HelpTile, CommentsTile},
 		Focus:       SidebarTile,
