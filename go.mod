@@ -5,6 +5,7 @@ go 1.13
 require (
 	github.com/EDDYCJY/fake-useragent v0.2.0
 	github.com/PuerkitoBio/goquery v1.8.0 // indirect
+	github.com/benmooo/ncmapi v0.0.0-20220523164421-acb93efe7d61
 	github.com/faiface/beep v1.1.0
 	github.com/gizak/termui/v3 v3.1.0
 	github.com/gopherjs/gopherjs v1.17.2 // indirect

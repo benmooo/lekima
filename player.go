@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"strconv"
 	"time"
 
 	browser "github.com/EDDYCJY/fake-useragent"
@@ -94,8 +93,8 @@ func (p *Player) prepare(s *SongURL) *Player {
 	return p
 }
 
-func (p *Player) Play(list *Playlist, index int, fetcher func(string) *SongURL) {
-	p.prepare(fetcher(strconv.Itoa(list.Tracks[index].ID)))
+func (p *Player) Play(list *Playlist, index int, fetcher func(int) *SongURL) {
+	p.prepare(fetcher(list.Tracks[index].ID))
 	// speaker.Play(p.Vol)
 	speaker.Play(beep.Seq(p.Vol, beep.Callback(func() {
 		if p.Interupt {

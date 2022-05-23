@@ -9,16 +9,15 @@ import (
 	"math/rand"
 	"net/http"
 	"net/http/cookiejar"
-	"net/url"
 	"os"
 	"os/exec"
 	"os/user"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
+	"github.com/benmooo/ncmapi"
+	// apitypes "github.com/benmooo/ncmapi/api-types"
 	ui "github.com/gizak/termui/v3"
 )
 
@@ -45,8 +44,8 @@ type Lekima struct {
 	// app infomation
 	*Info
 
-	// api server
-	*APIServer
+	// api
+	api *ncmapi.NeteaseAPI
 
 	// ui
 	*UI
@@ -62,10 +61,10 @@ type Lekima struct {
 func NewLekima() *Lekima {
 	cookieJar, _ := cookiejar.New(nil)
 	return &Lekima{
-		Info:      NewInfo(),
-		APIServer: NewAPIServer(),
-		UI:        NewUI(),
-		Loggedin:  false,
+		Info:     NewInfo(),
+		api:      ncmapi.Default(),
+		UI:       NewUI(),
+		Loggedin: false,
 
 		Client: &http.Client{Jar: cookieJar},
 		Player: NewPlayer(),
@@ -94,17 +93,6 @@ func (l *Lekima) Init(c chan<- string) *Lekima {
 	if os.IsNotExist(err) {
 		l.newCfgFile()
 	}
-	// check neteasecloudmusicapi && version -> 4 update
-	_, err = os.Stat(l.Repo)
-	if os.IsNotExist(err) {
-		l.
-			MarkNotify(c, Cloning).
-			Clone().
-			MarkNotify(c, InstallingPkgs).
-			InstallPackages()
-	}
-	// init player
-	// l.Player.Init()
 	return l
 }
 
@@ -158,90 +146,46 @@ func (l *Lekima) ReadAccount() Account {
 }
 
 func (l *Lekima) Login(acc Account) error {
-	// acc := l.ReadAccount()
-	// check if is valid account
 	if acc.username == "" {
 		return errors.New("invalid account")
 	}
-	reg := regexp.MustCompile("^1[35789][0-9]{9}$")
-	isphone := reg.MatchString(acc.username)
-	params := Query{"password": acc.pwd}
-	if isphone {
-		params["phone"] = acc.username
-	} else {
-		params["email"] = acc.username
+
+	res, err := l.api.LoginPhone(acc.username, acc.pwd)
+	if err != nil {
+		return err
 	}
-	byt := l.Req("login", params)
-	var s StatusCode
-	err := json.Unmarshal(byt, &s)
-	chk(err)
-	if s.Code != 200 {
-		return errors.New("login failed")
-	}
-	l.Loggedin = true
+
 	// get user id, name
 	var resp LoginResp
-	err = json.Unmarshal(byt, &resp)
+	err = json.Unmarshal(res.Data, &resp)
 	chk(err)
-	// attach user to l
-	l.User = User{
-		ID: resp.Acc.ID,
+
+	if resp.Code == 200 && resp.Acc != nil {
+		l.Loggedin = true
+		l.User = User{
+			ID: resp.Acc.ID,
+		}
 	}
 	return nil
 }
 
-func (l *Lekima) LoginStatus() StatusCode {
-	byt := l.Req("loginStatus")
-	var s StatusCode
-	err := json.Unmarshal(byt, &s)
+func (l *Lekima) CheckLoginStatus() {
+	res, _ := l.api.LoginStatus()
+
+	var s LoggedinStatusResp
+	err := json.Unmarshal(res.Data, &s)
 	chk(err)
-	if s.Code == 200 {
+	if s.Profile != nil {
 		l.Loggedin = true
+		l.User.ID = s.Profile.UserID
 	}
-	return s
-}
-
-// func (l *Lekima) User() User {
-// return l.User
-// if !l.Loggedin {
-// 	return User{}
-// }
-// byt := l.Req("loginStatus")
-// if data["code"].(float64) != 200 {
-// 	return User{}
-// }
-// return User{
-// 	ID:       int(data["profile"].(map[string]interface{})["userId"].(float64)),
-// 	Nickname: data["profile"].(map[string]interface{})["nickname"].(string),
-// }
-// }
-
-func (l *Lekima) Req(routename string, ps ...Params) []byte {
-	url := l.Routes[routename]
-	if len(ps) > 0 {
-		var query []string
-		for _, p := range ps {
-			query = append(query, p.Assemble())
-		}
-		url = fmt.Sprintf("%s?%s", url, strings.Join(query, "&"))
-	}
-	req, _ := http.NewRequest("GET", url, nil)
-	resp, err := l.Client.Do(req)
-	chk(err)
-	defer resp.Body.Close()
-	byt, err := ioutil.ReadAll(resp.Body)
-	chk(err)
-	// var data Data
-	// err = json.Unmarshal(body, &data)
-	// chk(err)
-	return byt
 }
 
 func (l *Lekima) FetchUserDetail(id int) Profile {
-	params := Query{"uid": strconv.Itoa(id)}
-	byt := l.Req("user", params)
+	res, _ := l.api.UserDetail(id)
+
 	var resp UserDetailResp
-	err := json.Unmarshal(byt, &resp)
+	err := json.Unmarshal(res.Data, &resp)
 	chk(err)
 	if resp.Code != 200 {
 		log.Panic("failed to fetch user detail")
@@ -252,12 +196,12 @@ func (l *Lekima) FetchUserDetail(id int) Profile {
 
 func (l *Lekima) FetchSearch(keywords string) *Playlist {
 	if len(keywords) < 1 {
-		keywords = "nil"
+		return nil
 	}
-	params := Query{"keywords": url.QueryEscape(keywords), "limit": "60"}
-	byt := l.Req("search", params)
+
+	res, _ := l.api.Search(keywords)
 	var resp SearchResp
-	err := json.Unmarshal(byt, &resp)
+	err := json.Unmarshal(res.Data, &resp)
 	chk(err)
 	if resp.Code != 200 {
 		log.Panic("failed to search with keywors " + keywords)
@@ -276,25 +220,21 @@ func (l *Lekima) FetchSearch(keywords string) *Playlist {
 
 }
 
-func (l *Lekima) FetchSongURL(id string) *SongURL {
-	params := Query{
-		"id": id,
-		"br": "320000",
-	}
-	byt := l.Req("song", params)
+func (l *Lekima) FetchSongURL(id int) *SongURL {
+	res, _ := l.api.SongUrl(id)
 	var su SongURLResp
-	err := json.Unmarshal(byt, &su)
+	err := json.Unmarshal(res.Data, &su)
 	chk(err)
 	if su.Code != 200 {
 		log.Panic("failed to fetch song url")
 	}
 	return su.Data[0]
 }
-func (l *Lekima) FetchPlaylistDetail(id string) *Playlist {
-	params := Query{"id": id}
-	byt := l.Req("playlistDetail", params)
+func (l *Lekima) FetchPlaylistDetail(id int) *Playlist {
+	res, _ := l.api.PlaylistDetail(id)
+
 	var resp PlaylistDetailResp
-	err := json.Unmarshal(byt, &resp)
+	err := json.Unmarshal(res.Data, &resp)
 	chk(err)
 	if resp.Code != 200 {
 		log.Panic("failed to fetch playlist detail")
@@ -302,24 +242,12 @@ func (l *Lekima) FetchPlaylistDetail(id string) *Playlist {
 	return resp.Playlist
 }
 
-// fetch top playlists
-func (l *Lekima) FetchTop(limit int) []*Playlist {
-	bytes := l.Req("topList", Query{"limit": strconv.Itoa(limit)})
-	var resp TopPlaylistsResp
-	err := json.Unmarshal(bytes, &resp)
-	chk(err)
-	if resp.Code != 200 {
-		log.Panic("fail to fetch top playlists")
-	}
-	return resp.Playlists
-}
-
 // fetch fm
 func (l *Lekima) FetchFM() *Playlist {
-	params := Query{"timestamp": strconv.Itoa(int(time.Now().Unix()))}
-	bytes := l.Req("fm", params)
+	res, _ := l.api.PersonalFm()
+
 	var resp FMResp
-	err := json.Unmarshal(bytes, &resp)
+	err := json.Unmarshal(res.Data, &resp)
 	chk(err)
 	if resp.Code != 200 {
 		log.Panic("fail to fetch fm")
@@ -344,9 +272,9 @@ func (l *Lekima) ExpandFMTracks(list []*Track) *Lekima {
 
 // fetch daily recommend songs
 func (l *Lekima) FetchRecommendSongs() *Playlist {
-	bytes := l.Req("recommendSongs")
+	res, _ := l.api.RecommendSongs()
 	var resp RecommendSongsResp
-	err := json.Unmarshal(bytes, &resp)
+	err := json.Unmarshal(res.Data, &resp)
 	chk(err)
 	if resp.Code != 200 {
 		log.Panic("fail to fetch recommend songs")
@@ -366,9 +294,9 @@ func (l *Lekima) FetchRecommendSongs() *Playlist {
 
 // fetch daily cloud
 func (l *Lekima) FetchCloud() *Playlist {
-	bytes := l.Req("cloud")
+	res, _ := l.api.UserCloud()
 	var resp CloudResp
-	err := json.Unmarshal(bytes, &resp)
+	err := json.Unmarshal(res.Data, &resp)
 	chk(err)
 	if resp.Code != 200 {
 		log.Panic("fail to fetch cloud")
@@ -386,10 +314,10 @@ func (l *Lekima) FetchCloud() *Playlist {
 
 // fetch my playlists
 func (l *Lekima) FetchMyPlaylist() []*Playlist {
-	params := Query{"uid": strconv.Itoa(l.User.ID)}
-	bytes := l.Req("myPlaylist", params)
+	res, _ := l.api.UserPlaylist(l.User.ID)
+
 	var resp MyPlaylistResp
-	err := json.Unmarshal(bytes, &resp)
+	err := json.Unmarshal(res.Data, &resp)
 	chk(err)
 	if resp.Code != 200 {
 		log.Panic("fail to fetch myplaylist")
@@ -403,12 +331,9 @@ func (l *Lekima) FetchMyPlaylist() []*Playlist {
 func (l *Lekima) FetchSidebarContent() *SidebarContents {
 	// not logged in -> top play
 	if !l.Loggedin {
-		return &SidebarContents{
-			Top: l.FetchTop(5),
-		}
+		return &SidebarContents{}
 	}
 	return &SidebarContents{
-		Top:        l.FetchTop(5),
 		FM:         l.FetchFM(),
 		Recommend:  l.FetchRecommendSongs(),
 		Cloud:      l.FetchCloud(),
@@ -514,7 +439,7 @@ func (l *Lekima) EventLoop(uiEvent <-chan ui.Event, quit chan<- bool) {
 						l.UI.ToggleFocus(MainContentTile)
 						p := n.Value.(*Playlist)
 						if p.Tracks == nil {
-							p = l.FetchPlaylistDetail(strconv.Itoa(p.ID))
+							p = l.FetchPlaylistDetail(p.ID)
 						}
 						l.Playlist = p
 						l.UI.SetMainContent(p)

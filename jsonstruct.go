@@ -6,7 +6,7 @@ type LoginStatusResp struct {
 
 type LoginResp struct {
 	Code int `json:"code"`
-	Acc  `json:"account"`
+	*Acc `json:"account,omitempty"`
 }
 
 type Acc struct {
@@ -15,8 +15,8 @@ type Acc struct {
 }
 
 type LoggedinStatusResp struct {
-	Code    int `json:"code"`
-	Profile `json:"profile,omitempty"`
+	Code     int `json:"code"`
+	*Profile `json:"profile,omitempty"`
 }
 
 type UserDetailResp struct {
@@ -94,7 +94,7 @@ type Track2 struct {
 	ID       int      `json:"id"`
 	Name     string   `json:"name"`
 	Artists  []Artist `json:"artists"`
-	Pop      int      `json:"popularity,omitempty"`
+	Pop      float64  `json:"popularity,omitempty"`
 	Album    `json:"album"`
 	Duration int `json:"duration"`
 }
@@ -115,7 +115,7 @@ type Track struct {
 	ID       int      `json:"id"`
 	Name     string   `json:"name"`
 	Artists  []Artist `json:"ar,omitempty"`
-	Pop      int      `json:"pop,omitempty"`
+	Pop      float64  `json:"pop,omitempty"`
 	Album    `json:"al,omitempty"`
 	Duration int `json:"dt"`
 }

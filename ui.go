@@ -246,10 +246,14 @@ func (u *UI) AppendSearchText(s string) *UI {
 
 func (u *UI) PopSearchText() *UI {
 	text := u.SearchBox.Text
-	l := len(text)
+
+	r := []rune(text)
+	l := len(r)
+
 	if l > 0 {
-		u.SearchBox.Text = text[0 : l-1]
+		u.SearchBox.Text = string(r[:len(r)-1])
 	}
+
 	return u
 }
 
@@ -313,7 +317,7 @@ func (u *UI) PollEvents() <-chan ui.Event {
 }
 
 func (u *UI) LoadSidebarContent(c *SidebarContents) *UI {
-	var nodes, top5, mylist []*widgets.TreeNode
+	var nodes, mylist []*widgets.TreeNode
 	if c.FM != nil {
 		nodes = append(nodes, &widgets.TreeNode{
 			Value: c.FM,
@@ -333,13 +337,6 @@ func (u *UI) LoadSidebarContent(c *SidebarContents) *UI {
 		})
 	}
 
-	// top5 playlist
-	for _, p := range c.Top {
-		top5 = append(top5, &widgets.TreeNode{
-			Value: p,
-			Nodes: nil,
-		})
-	}
 	// my playlist
 	for _, p := range c.MyPlaylist {
 		mylist = append(mylist, &widgets.TreeNode{
@@ -352,10 +349,6 @@ func (u *UI) LoadSidebarContent(c *SidebarContents) *UI {
 			Value: nodeValue("mylist"),
 			Nodes: mylist,
 		},
-		&widgets.TreeNode{
-			Value: nodeValue("top5"),
-			Nodes: top5,
-		},
 	)
 	u.Sidebar.SetNodes(nodes)
 	return u
@@ -366,6 +359,7 @@ func (u *UI) SetMainContent(p *Playlist) *UI {
 	for i, t := range p.Tracks {
 		seconds := int(1.0 * t.Duration / 1000)
 		dt := fmt.Sprintf("%d:%02d", seconds/60, seconds%60)
+
 		rows = append(rows, []string{
 			strconv.Itoa(i + 1), t.Name, t.Artists[0].Name, t.Album.Name, dt, strconv.Itoa(t.ID),
 		})
