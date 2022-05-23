@@ -13,10 +13,8 @@ Live [demo](https://www.bilibili.com/video/av71530651)
 </div>
 
 ## Prerequisites
+[go1.12.+](https://go.dev/)
 
-### Api server
-
-git, node, npm
 
 ### Sound
 refer to [hajimehoshi/oto](https://github.com/hajimehoshi/oto)
@@ -24,20 +22,11 @@ refer to [hajimehoshi/oto](https://github.com/hajimehoshi/oto)
 
 ## Installation
 
-**Note**: Tested only on Linux witch alacritty. Beside, it takes seconds when first time to run the program since clone the [api](https://github.com/Binaryify/NeteaseCloudMusicApi) repo and install its dependencies.
+**Note**: Tested only on Linux witch alacritty. 
 
-### Source
-
-Need go1.12.+ installed.
 ```bash
 go get github.com/benmooo/lekima
 ```
-
-### Binary(deprecated)
-
-<s>curl -sLo lekima https://github.com/benmooo/lekima/blob/master/assets/lekima?raw=true</s>
-<s>chmod u+x lekima</s>
-
 
 ## Usage
 
@@ -47,6 +36,7 @@ go get github.com/benmooo/lekima
   - `k`: up
   - `j`: down
   - `g`: jump to top
+  - `r`: refresh fm
   - `G` : jump to bottom
   - `<Tab>`: toggle focus 
   - `<Space>`: toggle play | pause

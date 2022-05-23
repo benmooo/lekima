@@ -96,6 +96,7 @@ var (
 	"j": scroll down
 	"k": scroll up
 	"o": toggle playlists|play a song
+	"r": refresh fm
 	"?": show help
 	"/": search
 	"P": toggle play mode
