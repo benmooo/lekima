@@ -35,14 +35,14 @@ type Table struct {
 // NewTable returns a new Table instance
 func NewTable() *Table {
 	return &Table{
-		Block:       ui.NewBlock(),
-		SelectedRow: 0,
-		TopRow:      0,
-		UniqueCol:   0,
-		ColResizer:  func() {},
-    ShowCursor: true,
-    CursorColor: ui.CellClear.Style.Fg,
-    ShowLocation: true,
+		Block:        ui.NewBlock(),
+		SelectedRow:  0,
+		TopRow:       0,
+		UniqueCol:    0,
+		ColResizer:   func() {},
+		ShowCursor:   true,
+		CursorColor:  ui.CellClear.Style.Fg,
+		ShowLocation: true,
 	}
 }
 
