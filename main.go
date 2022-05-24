@@ -11,37 +11,24 @@ func chk(e error) {
 }
 
 func main() {
-	lekima := NewLekima()
+	l := NewLekima()
 	// close ui
-	defer lekima.UI.Close()
-	lekima.Init()
+	defer l.UI.Close()
+	l.Init()
 	quit := make(chan bool) // quit the programe
 
-	lekima.UI.Init().Prepare().RenderLayout()
+	l.UI.Init().Prepare().RenderLayout()
+	uiEvent := l.UI.PollEvents()
+	// try to login
+	l.CheckLoginStatus()
+	if !l.Loggedin {
+		l.Render(l.UI.Login.Username, l.UI.Login.Password)
+		l.HandleLogin(uiEvent)
+	}
 
 	// event loop
-	go func() {
-		l := lekima
-		uiEvent := l.UI.PollEvents()
+  // time.Sleep(time.Second)
+	go l.Loop(uiEvent, quit)
 
-		// try to login
-		l.CheckLoginStatus()
-		if !l.Loggedin {
-			if err := l.Login(l.ReadAccount()); err != nil {
-				l.UI.Render(l.UI.Login.Username, l.UI.Login.Password)
-				l.HandleLogin(uiEvent)
-			}
-		}
-
-		// header
-		l.FetchUserDetail(l.User.ID)
-		l.RefreshUIHeader()
-		c := l.FetchSidebarContent()
-		// render
-		l.UI.LoadSidebarContent(c).RenderLayout()
-		// main event handler
-		l.EventLoop(uiEvent, quit)
-	}()
-
-	lekima.ListenExit(quit)
+	l.ListenExit(quit)
 }

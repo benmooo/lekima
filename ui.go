@@ -85,7 +85,14 @@ func NewUI() *UI {
 	layoutUI.MainContent.TitleStyle = clearStyle
 	layoutUI.MainContent.ShowLocation = true
 	layoutUI.MainContent.ShowCursor = true
-	layoutUI.MainContent.CursorColor = ui.ColorCyan
+	layoutUI.MainContent.CursorColor = ui.ColorBlue
+
+  layoutUI.Login.Username.TitleStyle = clearStyle
+  layoutUI.Login.Username.BorderStyle = clearStyle
+  layoutUI.Login.Username.TextStyle = clearStyle
+  layoutUI.Login.Password.TitleStyle = clearStyle
+  layoutUI.Login.Password.BorderStyle = clearStyle
+  layoutUI.Login.Password.TextStyle = clearStyle
 
 	return layoutUI
 }
@@ -159,12 +166,9 @@ func (u *UI) Prepare() *UI {
 	u.Sidebar.SetNodes([]*widgets.TreeNode{})
 	// main content
 	u.MainContent.Header = defaultPlaylistHeader
-	// u.MainContent.ColWidths = []int{5, 5, 5, 5, 5}
-	// u.MainContent.ShowCursor = true
-	// u.MainContent.CursorColor = ui.ColorCyan
 	u.MainContent.ColResizer = func() {
 		u.MainContent.ColWidths = []int{
-			10, 40, 30, 30, 20, 10,
+			10, 25, 15, 25, 10, 10,
 		}
 	}
 
@@ -177,7 +181,9 @@ func (u *UI) Prepare() *UI {
 	u.Comments.Text = "no comments avaiable."
 	// login
 	u.Login.Username.Title = "Phone|Email"
+  u.Login.Username.Border = true
 	u.Login.Password.Title = "Password"
+	u.Login.Password.Border = true
 	u.ResizeLogin()
 	return u
 }
@@ -186,6 +192,11 @@ func (u *UI) ResizeLogin() *UI {
 	w, h := u.Size()
 	u.Login.Username.SetRect(3*w/8, h/3, 5*w/8, h/3+3)
 	u.Login.Password.SetRect(3*w/8, h/3+3, 5*w/8, h/3+6)
+	return u
+}
+
+func (u *UI) RenderLogin() *UI {
+	u.Render(u.Login.Username, u.Login.Password)
 	return u
 }
 

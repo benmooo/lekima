@@ -4,15 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"math/rand"
 	"net/http"
 	"net/http/cookiejar"
-	"os"
 	"os/user"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/benmooo/ncmapi"
@@ -76,65 +73,12 @@ func NewLekima() *Lekima {
 }
 
 func (l *Lekima) Init() *Lekima {
-	// check $USER/.lekima dir
-	_, err := os.Stat(l.HomeDir)
-	if os.IsNotExist(err) {
-		l.mkHomeDir()
-	}
-	// chk settings file
-	_, err = os.Stat(l.CfgFile)
-	if os.IsNotExist(err) {
-		l.newCfgFile()
-	}
 	return l
 }
 
 func (l *Lekima) ListenExit(ch <-chan bool) {
 	if <-ch {
-		// l.UI.Render(l.UI.Exit)
 		fmt.Println("programe exit.")
-	}
-}
-
-func (l *Lekima) mkHomeDir() *Lekima {
-	err := os.Mkdir(l.HomeDir, os.ModePerm)
-	chk(err)
-	return l
-}
-
-func (l *Lekima) newCfgFile() *Lekima {
-	cfg := NewCfg("", "")
-	bytes, err := json.Marshal(cfg)
-	chk(err)
-	err = ioutil.WriteFile(l.CfgFile, bytes, os.ModePerm)
-	chk(err)
-	return l
-}
-
-func (l *Lekima) WriteAccount(acc Account) {
-	cfg := NewCfg(acc.username, acc.pwd)
-	bytes, err := json.Marshal(cfg)
-	chk(err)
-	err = ioutil.WriteFile(l.CfgFile, bytes, os.ModePerm)
-	chk(err)
-}
-
-func (l *Lekima) ReadCfg() *Cfg {
-	f, err := os.Open(l.Info.CfgFile)
-	chk(err)
-	byt, err := ioutil.ReadAll(f)
-	chk(err)
-	var cfg Cfg
-	err = json.Unmarshal(byt, &cfg)
-	chk(err)
-	return &cfg
-}
-
-func (l *Lekima) ReadAccount() Account {
-	cfg := l.ReadCfg()
-	return Account{
-		username: cfg.Account,
-		pwd:      cfg.Passwd,
 	}
 }
 
@@ -360,13 +304,14 @@ func (l *Lekima) HandleLogin(uiEvent <-chan ui.Event) {
 			// check login
 			acc := Account{l.UI.Login.Username.Text, password}
 			if err := l.Login(acc); err != nil {
-				password = ""
-				l.UI.Login.Clear()
-				l.UI.Login.Username.Title = "Login failed, plz try again."
+				l.UI.Login.Username.Title = err.Error()
 			} else {
-				// write username & password to local files
-				l.WriteAccount(acc)
-				return
+				if !l.Loggedin {
+					l.UI.Login.Username.Title = "Incorrect username or password"
+				} else {
+					// login success
+					return
+				}
 			}
 		case "<Escape>":
 		case "Resize":
@@ -570,6 +515,17 @@ func (l *Lekima) Exit(c chan<- bool) {
 	c <- true
 }
 
+func (l *Lekima) Loop(e <-chan ui.Event, quit chan<- bool) {
+	// header
+	l.FetchUserDetail(l.User.ID)
+	l.RefreshUIHeader()
+	c := l.FetchSidebarContent()
+	// render
+	l.UI.LoadSidebarContent(c).RenderLayout()
+	// main event handler
+	l.EventLoop(e, quit)
+}
+
 type Account struct {
 	username string
 	pwd      string
@@ -608,20 +564,6 @@ func NewCfg(account, passwd string) *Cfg {
 		Account: account,
 		Passwd:  passwd,
 	}
-}
-
-type Params interface {
-	Assemble() string
-}
-
-type Query map[string]string
-
-func (qm Query) Assemble() string {
-	var p []string
-	for k, v := range qm {
-		p = append(p, fmt.Sprintf("%s=%s", k, v))
-	}
-	return strings.Join(p, "&")
 }
 
 type User struct {
