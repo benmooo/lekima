@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"os"
-	"os/exec"
 	"os/user"
 	"path/filepath"
 	"strings"
@@ -76,13 +75,7 @@ func NewLekima() *Lekima {
 	}
 }
 
-func (l *Lekima) Init(c chan<- string) *Lekima {
-	// check prerequestes libasounds-2, git, node, npm, npx
-	prerequisites := []string{"git", "node", "npm"}
-	for _, v := range prerequisites {
-		_, err := exec.LookPath(v)
-		chk(err)
-	}
+func (l *Lekima) Init() *Lekima {
 	// check $USER/.lekima dir
 	_, err := os.Stat(l.HomeDir)
 	if os.IsNotExist(err) {

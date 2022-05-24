@@ -25,7 +25,7 @@ refer to [hajimehoshi/oto](https://github.com/hajimehoshi/oto)
 **Note**: Tested only on Linux witch alacritty. 
 
 ```bash
-go get github.com/benmooo/lekima
+go install github.com/benmooo/lekima@latest
 ```
 
 ## Usage

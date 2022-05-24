@@ -14,6 +14,7 @@ func main() {
 	lekima := NewLekima()
 	// close ui
 	defer lekima.UI.Close()
+	lekima.Init()
 	quit := make(chan bool) // quit the programe
 
 	lekima.UI.Init().Prepare().RenderLayout()
