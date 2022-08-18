@@ -98,7 +98,7 @@ func NewUI() *UI {
 }
 
 var (
-	defaultHeaderText = "LEKIMA, Username: %s\nPlayMode: %s, Volume: %f\nSong: %s | %s"
+	defaultHeaderText = "LEKIMA, Username: %s\nPlayMode: %s, Volume: %f\n%s | %s"
 	defaultHelpDoc    = `    Key Map
 	"j": scroll down
 	"k": scroll up
