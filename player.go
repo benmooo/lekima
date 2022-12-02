@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"time"
@@ -67,22 +69,29 @@ func (p *Player) prepare(s *SongURL) *Player {
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header = defaultRequestHeader
 	resp, err := p.Client.Do(req)
-	chk(err)
-	// decode response body which is an io.ReadCloser interfce
-	// defalt decoder mp3 -> tobe improved
-	streamer, f, err := mp3.Decode(resp.Body)
 	if err != nil {
-		// is not mp3 file
+		panic(err)
+	}
+
+	// HACK: this is a hack to read the full source, otherwise only partial of the stream can be consumed
+	// https://github.com/faiface/beep/mp3/decode.go#L79
+	// https://github.com/faiface/beep/mp3/decode.go#L153-L181
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	source := io.NopCloser(bytes.NewReader(body))
+	streamer, format, err := mp3.Decode(source)
+	if err != nil {
 		fmt.Println("is not mp3 file!!!")
 		os.Exit(1)
 	}
+	defer streamer.Close()
 
-	// defer streamer.Close()
-	// check if speaker initialized
 	if !p.SpeakerInitiated {
-		p.InitSpeaker(f.SampleRate*1.0, f.SampleRate.N(time.Second/20))
-		p.SpeakerInitiated = true
+		speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/20))
+    p.SpeakerInitiated = true
 	}
+
 	// assign music instance
 	ctrl := &beep.Ctrl{Streamer: streamer}
 	p.MusicInstance = MusicInstance{
