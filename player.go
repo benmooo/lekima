@@ -76,6 +76,7 @@ func (p *Player) prepare(s *SongURL) *Player {
 	// HACK: this is a hack to read the full source, otherwise only partial of the stream can be consumed
 	// https://github.com/faiface/beep/mp3/decode.go#L79
 	// https://github.com/faiface/beep/mp3/decode.go#L153-L181
+
 	body, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
 
