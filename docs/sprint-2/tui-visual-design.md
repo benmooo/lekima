@@ -112,6 +112,18 @@ Breakpoints:
   things to disappear on narrow terminals — acceptable, they are also in the
   footer/queue pane.
 
+### Library sidebar
+
+- Header: `// LIBRARY · n` (playlist count) with a focus tick.
+- Two sections in one list: **discover** entries carry their key as a chip
+  (`[d] DAILY`, `[F] FM`, `[t] TOPLISTS`, `[c] CLOUD`, `[♥] LIKED`), then a
+  blank line and `// PLAYLISTS · n`.
+- Playlist rows: `NN name` with the track count right-aligned in `dim`.
+  Names truncate with `…`; the selected row uses the standard selection style
+  and a `▌` gutter marker.
+- Statics are always present, even with no session; playlists show a quiet
+  “no playlists” line instead of an empty pane.
+
 ### Lists and tables
 
 - No surrounding block. A section label line sits above the list.
@@ -134,6 +146,24 @@ Breakpoints:
 - Refetches automatically whenever the track changes, and ignores replies for a
   track that is no longer playing.
 - Toasts shift left of the pane so they never cover its footer.
+
+### History
+
+- The middle pane keeps a back/forward stack (`Ctrl-o` / `Ctrl-i`), vim style.
+- Navigation pushes the current view (source, tracks or charts, selection)
+  before replacing it; back/forward restore it and focus the main pane.
+- A new navigation clears the forward stack, the back stack is capped at 32.
+- Keys are shown in the help overlay and the footer hint.
+
+### Typography variants
+
+- `glyphs = "unicode" | "ascii"`: ASCII replaces `▌ ▶ ‖ ■ █ ░ ─ │ ♥` with
+  `> > || [] # - - | *` and uses `_` as the input cursor.
+- `density = "compact" | "comfortable"`: comfortable inserts a blank row
+  between track rows for larger fonts.
+- Font family and size live in the terminal emulator; see
+  [`../terminal-setup.md`](../terminal-setup.md) for profiles (iTerm2, Ghostty,
+  kitty, Alacritty, WezTerm) and recommended families.
 
 ### Queue
 
@@ -223,7 +253,10 @@ Breakpoints:
 - [x] Overlays use the double border and magenta title.
 - [x] `mono` and `NO_COLOR` render identically in structure.
 - [x] Render tests cover empty, playing, narrow, tiny, search, queue and toast states.
-- [x] Signal bars animate at 20 fps; paused/stopped are visually distinct.
+- [x] Signal bars animate at 10 Hz from real RMS; paused/stopped are distinct.
+- [x] Sidebar uses key chips and right-aligned playlist counts.
+- [x] Back/forward history on `Ctrl-o` / `Ctrl-i`.
+- [x] ASCII glyphs and comfortable density are configurable.
 - [x] Messages are bottom-right toasts, not command-bar text.
 - [x] Liked `♥` marker, cloud/chart/daily sections, lyrics pane in the same
       grammar (labels `//`, double-border overlay only for transient panels).

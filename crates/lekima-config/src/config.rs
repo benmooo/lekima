@@ -58,6 +58,10 @@ impl Default for PlaybackConfig {
 pub struct UiConfig {
     /// `cyber` (default), `amber` or `mono`.
     pub theme: String,
+    /// `unicode` (default) or `ascii` block-drawing set.
+    pub glyphs: String,
+    /// `compact` (default) or `comfortable` row rhythm.
+    pub density: String,
     /// `true` keeps the terminal contents when the TUI exits.
     pub alternate_screen: bool,
     pub show_help_on_start: bool,
@@ -67,6 +71,8 @@ impl Default for UiConfig {
     fn default() -> Self {
         Self {
             theme: "cyber".to_owned(),
+            glyphs: "unicode".to_owned(),
+            density: "compact".to_owned(),
             alternate_screen: true,
             show_help_on_start: false,
         }
@@ -119,6 +125,8 @@ mod tests {
         assert!((config.playback.volume - 0.25).abs() < f32::EPSILON);
         assert_eq!(config.daemon.log_level, "info");
         assert_eq!(config.ui.theme, "cyber");
+        assert_eq!(config.ui.glyphs, "unicode");
+        assert_eq!(config.ui.density, "compact");
         assert!(config.provider.cache);
     }
 

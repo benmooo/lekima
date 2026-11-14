@@ -17,7 +17,7 @@ use ratatui::{
 };
 
 use crate::app::{App, Focus, LyricsState, Mode, SIDEBAR_STATICS, View};
-use crate::theme::Theme;
+use crate::theme::{Density, Theme};
 
 const MIN_WIDTH: u16 = 24;
 const SIDEBAR_WIDTH: u16 = 24;
@@ -80,7 +80,7 @@ fn draw_hud(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         (Some(track), status) => {
             spans.extend([
                 Span::styled(
-                    format!("{} ", glyph(status)),
+                    format!("{} ", glyph(status, theme)),
                     Style::new().fg(state_colour(status, theme)),
                 ),
                 Span::styled(
@@ -146,7 +146,7 @@ fn draw_hud(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     spans.extend([
         Span::styled("  VOL ", Style::new().fg(theme.dim)),
         Span::styled(
-            volume_bar(app.status.effective_volume()),
+            volume_bar(app.status.effective_volume(), theme),
             Style::new().fg(theme.meter_full),
         ),
         Span::styled("  Q:", Style::new().fg(theme.dim)),
@@ -165,7 +165,7 @@ fn draw_hud(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
 }
 
 fn draw_rule(frame: &mut Frame, theme: &Theme, area: Rect) {
-    let rule = "─".repeat(usize::from(area.width));
+    let rule = theme.glyphs.rule.repeat(usize::from(area.width));
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(rule, Style::new().fg(theme.dim)))),
         area,
@@ -206,7 +206,12 @@ fn draw_body(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
 
 fn draw_divider(frame: &mut Frame, theme: &Theme, area: Rect) {
     let lines: Vec<Line> = (0..area.height)
-        .map(|_| Line::from(Span::styled("│", Style::new().fg(theme.dim))))
+        .map(|_| {
+            Line::from(Span::styled(
+                theme.glyphs.divider,
+                Style::new().fg(theme.dim),
+            ))
+        })
         .collect();
     frame.render_widget(Paragraph::new(Text::from(lines)), area);
 }
@@ -220,53 +225,81 @@ fn draw_sidebar(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         Span::styled("// ", Style::new().fg(theme.panel)),
         Span::styled("LIBRARY", Style::new().fg(theme.muted)),
         Span::styled(
-            format!(" {}", app.sidebar_len()),
+            format!(" · {}", app.playlists.len()),
             Style::new().fg(theme.accent_alt),
         ),
     ];
     if focused {
-        title.push(Span::styled(" ▌", Style::new().fg(theme.accent)));
+        title.push(Span::styled(
+            format!(" {}", theme.glyphs.active),
+            Style::new().fg(theme.accent),
+        ));
     }
     frame.render_widget(Paragraph::new(Line::from(title)), label);
 
-    let entry = |index: usize, number: usize, name: String, meta: Option<String>| {
-        let marker = if focused && index == app.sidebar_selection {
-            "▌"
-        } else {
-            " "
-        };
+    let keys = ["d", "F", "t", "c", theme.glyphs.liked];
+    let mut items: Vec<ListItem> = Vec::with_capacity(app.sidebar_len() + 2);
+
+    for (index, name) in SIDEBAR_STATICS.iter().enumerate() {
+        let selected = focused && index == app.sidebar_selection;
+        let marker = if selected { theme.glyphs.active } else { " " };
         let mut spans = vec![
             Span::styled(marker, Style::new().fg(theme.accent)),
-            Span::styled(format!("{number:02} "), Style::new().fg(theme.dim)),
-            Span::styled(name, Style::new().fg(theme.text)),
+            Span::styled("[", Style::new().fg(theme.dim)),
+            Span::styled(keys[index], Style::new().fg(theme.accent_alt)),
+            Span::styled("] ", Style::new().fg(theme.dim)),
+            Span::styled((*name).to_owned(), Style::new().fg(theme.text)),
         ];
-        if let Some(meta) = meta {
-            spans.push(Span::styled(format!(" {meta}"), Style::new().fg(theme.dim)));
+        if selected {
+            spans.push(Span::styled("  ", Style::new()));
         }
-        ListItem::new(Line::from(spans))
-    };
+        items.push(ListItem::new(Line::from(spans)));
+    }
 
-    let mut items: Vec<ListItem> = SIDEBAR_STATICS
-        .iter()
-        .enumerate()
-        .map(|(index, label)| entry(index, index + 1, (*label).to_owned(), None))
-        .collect();
+    items.push(ListItem::new(Line::from("")));
+    items.push(ListItem::new(Line::from(vec![
+        Span::styled("// ", Style::new().fg(theme.panel)),
+        Span::styled("PLAYLISTS", Style::new().fg(theme.muted)),
+        Span::styled(
+            format!(" · {}", app.playlists.len()),
+            Style::new().fg(theme.accent_alt),
+        ),
+    ])));
 
-    if !app.playlists.is_empty() {
+    // Leave one column of breathing room before the divider.
+    let width = usize::from(list_area.width).saturating_sub(1).max(12);
+    if app.playlists.is_empty() {
         items.push(ListItem::new(Line::from(Span::styled(
-            "// PLAYLISTS",
-            Style::new().fg(theme.panel),
+            "  no playlists",
+            Style::new().fg(theme.dim),
         ))));
+    } else {
         for (index, playlist) in app.playlists.iter().enumerate() {
             let flat = SIDEBAR_STATICS.len() + index;
-            items.push(entry(flat, index + 1, playlist.name.clone(), None));
+            let selected = focused && flat == app.sidebar_selection;
+            let marker = if selected { theme.glyphs.active } else { " " };
+            let count = playlist.track_count.to_string();
+            let prefix = 4; // marker + space + two-digit index + space
+            let name_width = width.saturating_sub(prefix + count.len() + 1);
+            let name = truncate_chars(&playlist.name, name_width);
+            let pad = width
+                .saturating_sub(prefix + name.chars().count() + count.len())
+                .max(1);
+            items.push(ListItem::new(Line::from(vec![
+                Span::styled(marker, Style::new().fg(theme.accent)),
+                Span::styled(format!("{:02} ", index + 1), Style::new().fg(theme.dim)),
+                Span::styled(name, Style::new().fg(theme.text)),
+                Span::styled(" ".repeat(pad), Style::new()),
+                Span::styled(count, Style::new().fg(theme.dim)),
+            ])));
         }
     }
 
     let selected = if app.sidebar_selection < SIDEBAR_STATICS.len() {
         Some(app.sidebar_selection)
     } else {
-        Some(app.sidebar_selection + 1)
+        // One blank line plus the PLAYLISTS header sit between the sections.
+        Some(app.sidebar_selection + 2)
     };
     let list = List::new(items).highlight_style(selection_style(theme));
     let mut state = ListState::default().with_selected(selected);
@@ -304,7 +337,10 @@ fn draw_tracks(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         ),
     ];
     if focused {
-        title.push(Span::styled(" ▌", Style::new().fg(theme.accent)));
+        title.push(Span::styled(
+            format!(" {}", theme.glyphs.active),
+            Style::new().fg(theme.accent),
+        ));
     }
     frame.render_widget(Paragraph::new(Line::from(title)), label);
 
@@ -320,21 +356,20 @@ fn draw_tracks(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     }
 
     let playing_id = app.status.track.as_ref().map(|track| track.id);
-    let rows: Vec<Row> = app
-        .tracks
-        .iter()
-        .enumerate()
-        .map(|(index, track)| {
+    let comfortable = theme.density == Density::Comfortable;
+    let mut rows: Vec<Row> = Vec::with_capacity(app.tracks.len() * 2);
+    for (index, track) in app.tracks.iter().enumerate() {
+        let row = {
             let (marker, marker_style) = if Some(track.id) == playing_id {
                 (
-                    glyph(app.status.status).to_owned(),
+                    glyph(app.status.status, theme).to_owned(),
                     Style::new().fg(state_colour(app.status.status, theme)),
                 )
             } else {
                 (" ".to_owned(), Style::new().fg(theme.dim))
             };
             let selected_marker = if focused && index == app.main_selection {
-                "▌"
+                theme.glyphs.active
             } else {
                 " "
             };
@@ -346,9 +381,9 @@ fn draw_tracks(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
                     format!(
                         "{}{}",
                         if Some(track.id) == playing_id && app.status.liked {
-                            "♥ "
+                            format!("{} ", theme.glyphs.liked)
                         } else {
-                            ""
+                            String::new()
                         },
                         track.name
                     ),
@@ -357,8 +392,12 @@ fn draw_tracks(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
                 Span::styled(track.artist_names(), Style::new().fg(theme.muted)),
                 Span::styled(track.duration_label(), Style::new().fg(theme.dim)),
             ])
-        })
-        .collect();
+        };
+        rows.push(row);
+        if comfortable {
+            rows.push(Row::new(Vec::<Span>::new()));
+        }
+    }
 
     let widths = [
         Constraint::Length(1),
@@ -375,8 +414,13 @@ fn draw_tracks(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         )
         .row_highlight_style(selection_style(theme));
 
+    let visual_selection = if comfortable {
+        app.main_selection * 2
+    } else {
+        app.main_selection
+    };
     let mut state = TableState::default().with_selected(if focused {
-        Some(app.main_selection)
+        Some(visual_selection)
     } else {
         None
     });
@@ -397,7 +441,11 @@ fn draw_toplists(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
                 Style::new().fg(theme.accent_alt),
             ),
             Span::styled(
-                if focused { " ▌" } else { "" },
+                if focused {
+                    format!(" {}", theme.glyphs.active)
+                } else {
+                    String::new()
+                },
                 Style::new().fg(theme.accent),
             ),
         ])),
@@ -421,7 +469,7 @@ fn draw_toplists(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         .enumerate()
         .map(|(index, chart)| {
             let marker = if focused && index == app.main_selection {
-                "▌"
+                theme.glyphs.active
             } else {
                 " "
             };
@@ -597,7 +645,11 @@ fn draw_timed_lyrics(
         };
         lines.push(Line::from(vec![
             Span::styled(
-                if is_active { "▌ " } else { "  " },
+                if is_active {
+                    format!("{} ", theme.glyphs.active)
+                } else {
+                    "  ".to_owned()
+                },
                 Style::new().fg(theme.accent),
             ),
             Span::styled(truncate_chars(&line.text, width), style),
@@ -631,7 +683,7 @@ fn draw_lyrics_placeholder(
 }
 
 fn draw_thin_rule(frame: &mut Frame, theme: &Theme, area: Rect) {
-    let rule = "─".repeat(usize::from(area.width));
+    let rule = theme.glyphs.rule.repeat(usize::from(area.width));
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(rule, Style::new().fg(theme.dim)))),
         area,
@@ -694,9 +746,7 @@ fn draw_queue(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         })
         .collect();
 
-    let list = List::new(items)
-        .highlight_style(selection_style(theme))
-        .highlight_symbol(Span::styled("▌", Style::new().fg(theme.accent)));
+    let list = List::new(items).highlight_style(selection_style(theme));
     let mut state = ListState::default().with_selected(Some(app.queue_selection));
     frame.render_stateful_widget(list, content, &mut state);
 }
@@ -705,7 +755,7 @@ fn draw_footer(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let (mode, hints) = match app.mode {
         Mode::Normal => (
             "NORMAL",
-            "j/k · ⏎ play · space pause · d/F/t/c · f ♥ · L lyrics · / · ? keys",
+            "j/k · ⏎ play · space · d/F/t/c · f ♥ · L lyrics · ^o/^i hist · ? keys",
         ),
         Mode::Search => ("SEARCH", ""),
         Mode::Command => ("CMD", ""),
@@ -727,7 +777,7 @@ fn draw_footer(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     if matches!(app.mode, Mode::Search | Mode::Command) {
         let prefix = if app.mode == Mode::Search { ">" } else { ":" };
         let cursor = if (app.frame / CURSOR_BLINK_FRAMES).is_multiple_of(2) {
-            "▌"
+            theme.glyphs.cursor
         } else {
             " "
         };
@@ -799,8 +849,8 @@ fn draw_toast(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
 }
 
 fn wave_spans<'a>(app: &App, theme: &Theme) -> Vec<Span<'a>> {
-    const BARS: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
-    const SILENT: &str = "▁";
+    let bars = theme.glyphs.wave;
+    let silent = theme.glyphs.wave[0];
 
     let wave = &app.status.wave;
     if wave.is_empty() {
@@ -810,7 +860,7 @@ fn wave_spans<'a>(app: &App, theme: &Theme) -> Vec<Span<'a>> {
             theme.dim
         };
         return vec![Span::styled(
-            SILENT.repeat(WAVE_BARS),
+            silent.repeat(WAVE_BARS),
             Style::new().fg(colour),
         )];
     }
@@ -820,7 +870,7 @@ fn wave_spans<'a>(app: &App, theme: &Theme) -> Vec<Span<'a>> {
         .iter()
         .enumerate()
         .map(|(index, level)| {
-            let bar = BARS[((level.clamp(0.0, 1.0) * 7.0).round() as usize).min(7)];
+            let bar = bars[((level.clamp(0.0, 1.0) * 7.0).round() as usize).min(7)];
             let colour = if !app.is_playing() {
                 theme.dim
             } else if index % 4 == 0 {
@@ -863,6 +913,8 @@ fn draw_help(frame: &mut Frame, theme: &Theme, area: Rect) {
         binding("ctrl-d/u", "half page"),
         binding("g / G", "top / bottom"),
         binding("tab", "library / list"),
+        binding("ctrl-o", "history back"),
+        binding("ctrl-i", "history forward"),
         Line::from(""),
         section("PLAY"),
         binding("enter", "play selection"),
@@ -918,20 +970,23 @@ fn progress_spans<'a>(app: &App, theme: &Theme) -> Vec<Span<'a>> {
     };
     let filled = (ratio * PROGRESS_CELLS as f64).round() as usize;
     vec![
-        Span::styled("█".repeat(filled), Style::new().fg(theme.meter_full)),
         Span::styled(
-            "░".repeat(PROGRESS_CELLS - filled),
+            theme.glyphs.meter_full.repeat(filled),
+            Style::new().fg(theme.meter_full),
+        ),
+        Span::styled(
+            theme.glyphs.meter_empty.repeat(PROGRESS_CELLS - filled),
             Style::new().fg(theme.meter_empty),
         ),
     ]
 }
 
-fn volume_bar(volume: f32) -> String {
+fn volume_bar(volume: f32, theme: &Theme) -> String {
     let filled = (volume.clamp(0.0, 1.0) * VOLUME_CELLS as f32).round() as usize;
     format!(
         "{}{}",
-        "█".repeat(filled),
-        "░".repeat(VOLUME_CELLS - filled)
+        theme.glyphs.meter_full.repeat(filled),
+        theme.glyphs.meter_empty.repeat(VOLUME_CELLS - filled)
     )
 }
 
@@ -942,11 +997,11 @@ fn selection_style(theme: &Theme) -> Style {
         .add_modifier(Modifier::BOLD)
 }
 
-const fn glyph(status: PlaybackStatus) -> &'static str {
+const fn glyph(status: PlaybackStatus, theme: &Theme) -> &'static str {
     match status {
-        PlaybackStatus::Playing => "▶",
-        PlaybackStatus::Paused => "‖",
-        PlaybackStatus::Stopped => "■",
+        PlaybackStatus::Playing => theme.glyphs.playing,
+        PlaybackStatus::Paused => theme.glyphs.paused,
+        PlaybackStatus::Stopped => theme.glyphs.stopped,
     }
 }
 
@@ -978,7 +1033,10 @@ mod tests {
     use crate::theme::Theme;
 
     fn render(app: &mut App, width: u16, height: u16) -> String {
-        let theme = Theme::cyber();
+        render_with(app, width, height, Theme::cyber())
+    }
+
+    fn render_with(app: &mut App, width: u16, height: u16, theme: Theme) -> String {
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| draw(frame, app, &theme)).unwrap();
@@ -1108,6 +1166,43 @@ mod tests {
         let screen = render(&mut app, 90, 24);
         assert!(screen.contains("ERROR"));
         assert!(screen.contains("provider rejected"));
+    }
+
+    #[test]
+    fn sidebar_shows_sections_and_playlist_counts() {
+        let mut app = App::new();
+        app.playlists = vec![lekima_domain::Playlist {
+            id: 1.into(),
+            name: "Late night".to_owned(),
+            description: String::new(),
+            track_count: 42,
+            cover_url: None,
+            owner: None,
+        }];
+        let screen = render(&mut app, 100, 30);
+        assert!(screen.contains("[D]"));
+        assert!(screen.contains("PLAYLISTS"));
+        assert!(screen.contains("Late night"));
+        assert!(screen.contains("42"));
+    }
+
+    #[test]
+    fn ascii_glyphs_and_comfortable_density_render() {
+        use crate::theme::Theme;
+
+        let mut app = App::new();
+        app.status.status = lekima_domain::PlaybackStatus::Playing;
+        app.status.track = Some(track("Mota"));
+        app.tracks = vec![track("Mota"), track("Teardrop")];
+        let screen = render_with(
+            &mut app,
+            100,
+            30,
+            Theme::resolve("cyber", "ascii", "comfortable"),
+        );
+        assert!(screen.contains("SIG"));
+        assert!(screen.contains("#"));
+        assert!(!screen.contains("▌"));
     }
 
     #[test]

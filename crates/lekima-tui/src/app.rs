@@ -99,6 +99,15 @@ impl LyricsState {
     }
 }
 
+#[derive(Debug, Clone)]
+struct HistoryEntry {
+    view: View,
+    tracks: Vec<Track>,
+    toplists: Vec<Toplist>,
+    source: String,
+    selection: usize,
+}
+
 /// Sidebar entries that are not playlists, in display order.
 pub const SIDEBAR_STATICS: [&str; 5] = ["DAILY", "FM", "TOPLISTS", "CLOUD", "LIKED"];
 
@@ -125,6 +134,8 @@ pub struct App {
     pub daemon_down: bool,
     /// Monotonic tick counter; drives cursor blink and subtle animation.
     pub frame: u64,
+    history_back: Vec<HistoryEntry>,
+    history_forward: Vec<HistoryEntry>,
 }
 
 impl Default for App {
@@ -151,6 +162,8 @@ impl Default for App {
             status_inflight: false,
             daemon_down: false,
             frame: 0,
+            history_back: Vec::new(),
+            history_forward: Vec::new(),
         }
     }
 }
@@ -159,6 +172,62 @@ impl App {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    fn history_snapshot(&self) -> HistoryEntry {
+        HistoryEntry {
+            view: self.view,
+            tracks: self.tracks.clone(),
+            toplists: self.toplists.clone(),
+            source: self.source.clone(),
+            selection: self.main_selection,
+        }
+    }
+
+    fn restore_history(&mut self, entry: HistoryEntry) {
+        self.view = entry.view;
+        self.tracks = entry.tracks;
+        self.toplists = entry.toplists;
+        self.source = entry.source;
+        self.main_selection = entry.selection;
+        self.focus = Focus::Main;
+    }
+
+    /// Records the current middle-pane state before navigating away.
+    fn remember(&mut self) {
+        let current = self.history_snapshot();
+        if self
+            .history_back
+            .last()
+            .is_some_and(|entry| entry.source == current.source && entry.view == current.view)
+        {
+            return;
+        }
+        self.history_forward.clear();
+        if self.history_back.len() == 32 {
+            self.history_back.remove(0);
+        }
+        self.history_back.push(current);
+    }
+
+    fn go_back(&mut self) {
+        match self.history_back.pop() {
+            Some(entry) => {
+                self.history_forward.push(self.history_snapshot());
+                self.restore_history(entry);
+            }
+            None => self.notify("oldest view", false),
+        }
+    }
+
+    fn go_forward(&mut self) {
+        match self.history_forward.pop() {
+            Some(entry) => {
+                self.history_back.push(self.history_snapshot());
+                self.restore_history(entry);
+            }
+            None => self.notify("newest view", false),
+        }
     }
 
     /// Advances animation state; called on every UI tick.
@@ -238,6 +307,7 @@ impl App {
                 }
                 match mode {
                     Mode::Search => {
+                        self.remember();
                         self.source = format!("search: {}", input.trim());
                         Action::Call(Command::Search {
                             query: input.trim().to_owned(),
@@ -343,6 +413,14 @@ impl App {
     fn handle_normal_key(&mut self, key: KeyEvent) -> Action {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         match key.code {
+            KeyCode::Char('o') if ctrl => {
+                self.go_back();
+                Action::None
+            }
+            KeyCode::Char('i') if ctrl => {
+                self.go_forward();
+                Action::None
+            }
             KeyCode::Char('c') if ctrl => Action::Quit,
             KeyCode::Char('q') => Action::Quit,
             KeyCode::Char('?') => {
@@ -374,8 +452,12 @@ impl App {
             KeyCode::Char('F') => Action::Call(Command::Fm {
                 action: lekima_ipc::FmAction::Start,
             }),
-            KeyCode::Char('t') => Action::Call(Command::Toplists),
+            KeyCode::Char('t') => {
+                self.remember();
+                Action::Call(Command::Toplists)
+            }
             KeyCode::Char('c') => {
+                self.remember();
                 self.source = "cloud".to_owned();
                 Action::Call(Command::Cloud {
                     limit: 100,
@@ -436,6 +518,7 @@ impl App {
                 Action::None
             }
             KeyCode::Char('d') => {
+                self.remember();
                 self.source = "daily".to_owned();
                 Action::Call(Command::Daily { play: false })
             }
@@ -496,8 +579,10 @@ impl App {
                 let index = self.sidebar_selection.saturating_sub(SIDEBAR_STATICS.len());
                 match self.playlists.get(index) {
                     Some(playlist) => {
-                        self.source = format!("playlist: {}", playlist.name);
-                        Action::Call(Command::PlaylistTracks { id: playlist.id })
+                        let (id, name) = (playlist.id, playlist.name.clone());
+                        self.remember();
+                        self.source = format!("playlist: {name}");
+                        Action::Call(Command::PlaylistTracks { id })
                     }
                     None => Action::None,
                 }
@@ -505,8 +590,10 @@ impl App {
             Focus::Main => match self.view {
                 View::Toplists => match self.toplists.get(self.main_selection) {
                     Some(chart) => {
-                        self.source = format!("chart: {}", chart.name);
-                        Action::Call(Command::PlaylistTracks { id: chart.id })
+                        let (id, name) = (chart.id, chart.name.clone());
+                        self.remember();
+                        self.source = format!("chart: {name}");
+                        Action::Call(Command::PlaylistTracks { id })
                     }
                     None => Action::None,
                 },
@@ -531,6 +618,9 @@ impl App {
     }
 
     fn open_static(&mut self, index: usize) -> Option<Action> {
+        if matches!(index, 0 | 2 | 3 | 4) {
+            self.remember();
+        }
         Some(match index {
             0 => {
                 self.source = "daily".to_owned();
@@ -918,6 +1008,43 @@ mod tests {
             lyrics: lekima_domain::Lyrics::default(),
         }));
         assert!(matches!(app.lyrics_state, LyricsState::Empty { .. }));
+    }
+
+    #[test]
+    fn history_navigates_back_and_forward() {
+        let mut app = App::new();
+        app.tracks = vec![sample_track(1)];
+        app.source = "search".to_owned();
+
+        app.handle_key(key(KeyCode::Char('d')));
+        app.apply(Ok(lekima_ipc::Reply::Tracks {
+            tracks: vec![sample_track(2)],
+        }));
+        app.source = "daily".to_owned();
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL));
+        assert_eq!(app.source, "search");
+        assert_eq!(app.tracks[0].id, 1.into());
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::CONTROL));
+        assert_eq!(app.source, "daily");
+        assert_eq!(app.tracks[0].id, 2.into());
+    }
+
+    #[test]
+    fn new_navigation_clears_forward_history() {
+        let mut app = App::new();
+        app.tracks = vec![sample_track(1)];
+        app.source = "search".to_owned();
+        app.handle_key(key(KeyCode::Char('d')));
+        app.source = "daily".to_owned();
+        app.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL));
+        assert_eq!(app.source, "search");
+
+        app.handle_key(key(KeyCode::Char('t')));
+        app.source = "charts".to_owned();
+        app.handle_key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::CONTROL));
+        assert_eq!(app.source, "charts");
     }
 
     #[test]

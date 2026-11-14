@@ -9,6 +9,78 @@
 
 use ratatui::style::Color;
 
+/// Glyph set: block-drawing for modern terminals, ASCII for stripped-down ones.
+#[derive(Debug, Clone, Copy)]
+pub struct Glyphs {
+    pub active: &'static str,
+    pub playing: &'static str,
+    pub paused: &'static str,
+    pub stopped: &'static str,
+    pub meter_full: &'static str,
+    pub meter_empty: &'static str,
+    pub rule: &'static str,
+    pub divider: &'static str,
+    pub wave: [&'static str; 8],
+    pub liked: &'static str,
+    pub cursor: &'static str,
+}
+
+impl Glyphs {
+    pub const UNICODE: Self = Self {
+        active: "▌",
+        playing: "▶",
+        paused: "‖",
+        stopped: "■",
+        meter_full: "█",
+        meter_empty: "░",
+        rule: "─",
+        divider: "│",
+        wave: ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"],
+        liked: "♥",
+        cursor: "▌",
+    };
+
+    pub const ASCII: Self = Self {
+        active: ">",
+        playing: ">",
+        paused: "||",
+        stopped: "[]",
+        meter_full: "#",
+        meter_empty: "-",
+        rule: "-",
+        divider: "|",
+        wave: [" ", ".", ":", "-", "=", "+", "*", "#"],
+        liked: "*",
+        cursor: "_",
+    };
+
+    #[must_use]
+    pub fn from_name(name: &str) -> Self {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "ascii" => Self::ASCII,
+            _ => Self::UNICODE,
+        }
+    }
+}
+
+/// Vertical rhythm of tables and lists.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Density {
+    #[default]
+    Compact,
+    Comfortable,
+}
+
+impl Density {
+    #[must_use]
+    pub fn from_name(name: &str) -> Self {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "comfortable" | "relaxed" | "roomy" => Self::Comfortable,
+            _ => Self::Compact,
+        }
+    }
+}
+
 /// Colours and accents for one visual theme.
 #[derive(Debug, Clone, Copy)]
 pub struct Theme {
@@ -36,6 +108,8 @@ pub struct Theme {
     /// Progress and volume meter.
     pub meter_full: Color,
     pub meter_empty: Color,
+    pub glyphs: Glyphs,
+    pub density: Density,
 }
 
 impl Theme {
@@ -58,6 +132,8 @@ impl Theme {
             badge_fg: Color::Rgb(0, 0, 0),
             meter_full: Color::Rgb(0, 255, 156),
             meter_empty: Color::Rgb(42, 54, 62),
+            glyphs: Glyphs::UNICODE,
+            density: Density::Compact,
         }
     }
 
@@ -80,6 +156,8 @@ impl Theme {
             badge_fg: Color::Rgb(0, 0, 0),
             meter_full: Color::Rgb(255, 176, 0),
             meter_empty: Color::Rgb(52, 44, 32),
+            glyphs: Glyphs::UNICODE,
+            density: Density::Compact,
         }
     }
 
@@ -102,20 +180,28 @@ impl Theme {
             badge_fg: Color::Black,
             meter_full: Color::White,
             meter_empty: Color::DarkGray,
+            glyphs: Glyphs::UNICODE,
+            density: Density::Compact,
         }
     }
 
-    /// Resolves a configured theme name, honouring `NO_COLOR`.
+    /// Resolves the configured theme, glyph set and density.
+    ///
+    /// `NO_COLOR` forces the mono palette but keeps the chosen glyphs.
     #[must_use]
-    pub fn resolve(name: &str) -> Self {
-        if std::env::var_os("NO_COLOR").is_some() {
-            return Self::mono();
-        }
-        match name.trim().to_ascii_lowercase().as_str() {
-            "amber" => Self::amber(),
-            "mono" | "none" | "monochrome" => Self::mono(),
-            _ => Self::cyber(),
-        }
+    pub fn resolve(name: &str, glyphs: &str, density: &str) -> Self {
+        let mut theme = if std::env::var_os("NO_COLOR").is_some() {
+            Self::mono()
+        } else {
+            match name.trim().to_ascii_lowercase().as_str() {
+                "amber" => Self::amber(),
+                "mono" | "none" | "monochrome" => Self::mono(),
+                _ => Self::cyber(),
+            }
+        };
+        theme.glyphs = Glyphs::from_name(glyphs);
+        theme.density = Density::from_name(density);
+        theme
     }
 
     #[must_use]
@@ -130,12 +216,28 @@ mod tests {
 
     #[test]
     fn unknown_theme_names_fall_back_to_cyber() {
-        assert_eq!(Theme::resolve("nope").accent, Theme::cyber().accent);
+        assert_eq!(
+            Theme::resolve("nope", "unicode", "compact").accent,
+            Theme::cyber().accent
+        );
     }
 
     #[test]
-    fn named_themes_resolve() {
-        assert_eq!(Theme::resolve("amber").accent, Theme::amber().accent);
-        assert!(Theme::resolve("mono").is_mono());
+    fn named_themes_and_variants_resolve() {
+        assert_eq!(
+            Theme::resolve("amber", "unicode", "compact").accent,
+            Theme::amber().accent
+        );
+        assert!(Theme::resolve("mono", "unicode", "compact").is_mono());
+        assert_eq!(
+            Theme::resolve("cyber", "ascii", "comfortable")
+                .glyphs
+                .active,
+            ">"
+        );
+        assert_eq!(
+            Theme::resolve("cyber", "ascii", "comfortable").density,
+            super::Density::Comfortable
+        );
     }
 }

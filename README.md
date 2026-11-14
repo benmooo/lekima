@@ -26,6 +26,8 @@ $ lekima status --json
   for daily/FM/likes/toplists/lyrics pane, push events, `lekima watch` and MCP.
 - [`docs/sprint-2/tui-visual-design.md`](docs/sprint-2/tui-visual-design.md) —
   the console/HUD visual language (`cyber`, `amber`, `mono` themes).
+- [`docs/terminal-setup.md`](docs/terminal-setup.md) — font families, sizes and
+  profiles for iTerm2, Ghostty, kitty, Alacritty and WezTerm.
 - [`docs/releasing.md`](docs/releasing.md) — release flow, including
   `--registry crates-io` on this USTC-mirrored machine.
 - [`docs/sessions/`](docs/sessions/) — archived OpenCode sessions (this rewrite,
