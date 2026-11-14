@@ -288,16 +288,21 @@ Security:
 
 ### 8.1 Extending `ncmapi-rs`
 
-`ncmapi` 1.0 exposes only search, track metadata, stream URLs, account and user
-playlists. v0.1 works within that surface; v0.2 requires additions, released as
-`ncmapi 1.1`:
+`ncmapi` 1.2 is published. 1.1 added playlist detail/paging, lyrics and QR
+login; 1.2 added daily recommendations, personal FM, likes and toplists.
+Endpoint calls that mutate state or whose answer changes between identical
+requests (QR polling, FM batches, likes, trashes) are marked `.uncacheable()`
+so the transport's request-hash cache cannot replay stale answers.
 
 | Endpoint | Route | Used by |
 | --- | --- | --- |
-| QR login start/poll | `/api/login/qrcode/unikey`, `/api/login/qrcode/client/login` | `lekima login --qr` |
+| QR login start/poll | `/weapi/login/qrcode/unikey`, `/weapi/login/qrcode/client/login` | `lekima login --qr` — **done in 1.1.1** |
 | Playlist detail with tracks | `/api/v6/playlist/detail` + `/api/v3/song/detail` | `playlist show`, sidebar — **done in 1.1** |
 | Lyrics | `/api/song/lyric` | `lekima lyrics` — **done in 1.1** |
-| QR login | `/api/login/qrcode/*` | `lekima login --qr` — **done in 1.1** |
+| Daily recommendations | `/api/v3/discovery/recommend/songs` | Home / `lekima daily` — **provider in 1.2** |
+| Personal FM | `/weapi/v1/radio/get`, `/weapi/radio/trash/add` | `lekima fm` — **provider in 1.2** |
+| Likes | `/api/radio/like`, `/weapi/song/like/get` | `lekima like` / liked playlist — **provider in 1.2** |
+| Toplists | `/api/toplist` | Home sidebar — **provider in 1.2** |
 | Daily recommendations | `/api/v3/discover/recommend` | Daily section — next |
 | Personal FM | `/api/v1/radio/get` | FM section — next |
 | Like / unlike | `/api/radio/like` | track actions (`f`) — next |
@@ -483,9 +488,9 @@ Working end to end against the live provider:
 - TUI: header/progress, track table, sidebar playlists, queue overlay, search
   prompt, `:` command line, help overlay, vim keys
 
-`ncmapi` 1.1 adds playlist detail/paging, lyrics and QR login with contract
-tests; it is wired through `[patch.crates-io]` locally and still needs to be
-published before lekima 0.1.
+`ncmapi` 1.2 provides daily recommendations, personal FM, likes and toplists at
+the provider layer; wiring them into the daemon/TUI is sprint 2 work.
 
-Known gaps: daily recommendations, personal FM, like/unlike, toplists, a lyrics
-pane in the TUI, and push events (the TUI polls status every 250 ms).
+Known gaps: the sprint-2 features are not wired into the daemon yet (daily/FM/
+likes/toplists), the TUI lacks a lyrics pane, and events are still polled at
+4 Hz rather than pushed.
