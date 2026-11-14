@@ -1418,7 +1418,7 @@ checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
 
 [[package]]
 name = "lekima"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1441,7 +1441,7 @@ dependencies = [
 
 [[package]]
 name = "lekima-audio"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "lekima-domain",
@@ -1454,7 +1454,7 @@ dependencies = [
 
 [[package]]
 name = "lekima-config"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "directories",
  "lekima-domain",
@@ -1465,7 +1465,7 @@ dependencies = [
 
 [[package]]
 name = "lekima-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "lekima-domain",
@@ -1476,7 +1476,7 @@ dependencies = [
 
 [[package]]
 name = "lekima-domain"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "serde",
@@ -1485,7 +1485,7 @@ dependencies = [
 
 [[package]]
 name = "lekima-ipc"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "lekima-domain",
  "serde",
@@ -1496,7 +1496,7 @@ dependencies = [
 
 [[package]]
 name = "lekima-ncm"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "lekima-domain",
@@ -1508,7 +1508,7 @@ dependencies = [
 
 [[package]]
 name = "lekima-tui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "crossterm",
  "lekima-domain",
