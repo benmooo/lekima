@@ -142,6 +142,10 @@ stateDiagram-v2
 - Transitions are serialized by a `tokio::sync::Mutex` around the inner state;
   the audio engine is called inside the critical section so observers never see
   “playing” before the sink is actually playing.
+- Starting a track stops the device **before** resolving or downloading the
+  stream (`loading = true`), so the previous track never overlaps the next
+  one's network latency. A generation counter cancels superseded loads when the
+  user skips quickly.
 - A failed URL resolution never leaves the machine in `Playing`.
 - `tick()` (called by the daemon every 500 ms) is the single place that reacts
   to end-of-track. No audio callback mutates application state.

@@ -83,7 +83,14 @@ fn draw_hud(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         (Some(track), status) => {
             spans.extend([
                 Span::styled(
-                    format!("{} ", glyph(status, theme)),
+                    format!(
+                        "{} ",
+                        if app.status.loading {
+                            theme.glyphs.loading
+                        } else {
+                            glyph(status, theme)
+                        }
+                    ),
                     Style::new().fg(state_colour(status, theme)),
                 ),
                 Span::styled(
@@ -365,7 +372,11 @@ fn draw_tracks(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         let row = {
             let (marker, marker_style) = if Some(track.id) == playing_id {
                 (
-                    glyph(app.status.status, theme).to_owned(),
+                    if app.status.loading {
+                        theme.glyphs.loading.to_owned()
+                    } else {
+                        glyph(app.status.status, theme).to_owned()
+                    },
                     Style::new().fg(state_colour(app.status.status, theme)),
                 )
             } else {

@@ -28,6 +28,9 @@ struct Inner {
     shuffle: bool,
     position_ms: u64,
     kind: QueueKind,
+    /// Incremented for every load; stale loads stop themselves.
+    generation: u64,
+    loading: bool,
 }
 
 /// Owns queue and transport state for the daemon.
@@ -63,6 +66,8 @@ impl Player {
                 shuffle: false,
                 position_ms: 0,
                 kind: QueueKind::Manual,
+                generation: 0,
+                loading: false,
             }),
             liked: Mutex::new(HashSet::new()),
             trashed: Mutex::new(HashSet::new()),
@@ -102,6 +107,7 @@ impl Player {
                 .queue
                 .current()
                 .is_some_and(|track| liked.contains(&track.id)),
+            loading: inner.loading,
             wave: self.audio.wave(),
         };
         if state.status != PlaybackStatus::Stopped
@@ -172,35 +178,79 @@ impl Player {
         inner.status = PlaybackStatus::Stopped;
         inner.position_ms = 0;
         inner.kind = QueueKind::Manual;
+        inner.loading = false;
+        inner.generation = inner.generation.wrapping_add(1);
         drop(inner);
         self.audio.stop()
     }
 
     /// Loads the queue's current track into the audio engine.
+    ///
+    /// The previous track is stopped **before** resolving or downloading the
+    /// next stream: silence first, then buffering. A generation counter makes
+    /// rapid skips cancel superseded loads.
     async fn load_current(&self) -> Result<()> {
-        let track = {
-            let inner = self.inner.lock().await;
-            inner
+        let (track, generation) = {
+            let mut inner = self.inner.lock().await;
+            let track = inner
                 .queue
                 .current()
                 .cloned()
-                .ok_or_else(|| DomainError::NotFound("current track".to_owned()))?
+                .ok_or_else(|| DomainError::NotFound("current track".to_owned()))?;
+            inner.generation = inner.generation.wrapping_add(1);
+            inner.loading = true;
+            (track, inner.generation)
         };
 
-        let url = self.music.stream_url(track.id, self.quality).await?;
+        // A must go silent now, not after B has been fetched.
+        let _ = self.audio.stop();
+
+        let url = match self.music.stream_url(track.id, self.quality).await {
+            Ok(url) => url,
+            Err(error) => {
+                self.fail_load(generation).await;
+                return Err(error);
+            }
+        };
+        if self.is_stale(generation).await {
+            return Ok(());
+        }
+
         if let Err(error) = self.audio.play_url(&url).await {
-            let mut inner = self.inner.lock().await;
-            inner.status = PlaybackStatus::Stopped;
+            self.fail_load(generation).await;
             return Err(error);
         }
 
         let mut inner = self.inner.lock().await;
-        inner.status = PlaybackStatus::Playing;
-        inner.position_ms = 0;
-        let gain = if inner.muted { 0.0 } else { inner.volume };
-        let _ = self.audio.set_volume(gain);
+        if inner.generation != generation {
+            drop(inner);
+            let _ = self.audio.stop();
+            return Ok(());
+        }
+        inner.loading = false;
+        if inner.status == PlaybackStatus::Paused {
+            let _ = self.audio.pause();
+        } else {
+            inner.status = PlaybackStatus::Playing;
+            inner.position_ms = 0;
+            let gain = if inner.muted { 0.0 } else { inner.volume };
+            let _ = self.audio.set_volume(gain);
+        }
         tracing::debug!(track = %track.id, "playback started");
         Ok(())
+    }
+
+    async fn is_stale(&self, generation: u64) -> bool {
+        self.inner.lock().await.generation != generation
+    }
+
+    async fn fail_load(&self, generation: u64) {
+        let mut inner = self.inner.lock().await;
+        if inner.generation == generation {
+            inner.status = PlaybackStatus::Stopped;
+            inner.loading = false;
+            inner.position_ms = 0;
+        }
     }
 
     pub async fn pause(&self) -> Result<()> {
@@ -237,6 +287,8 @@ impl Player {
         self.audio.stop()?;
         inner.status = PlaybackStatus::Stopped;
         inner.position_ms = 0;
+        inner.loading = false;
+        inner.generation = inner.generation.wrapping_add(1);
         Ok(())
     }
 
@@ -566,6 +618,7 @@ mod tests {
         position: AtomicU64,
         volume: Mutex<f32>,
         last_url: Mutex<Option<String>>,
+        stops: AtomicU64,
     }
 
     #[async_trait]
@@ -590,6 +643,7 @@ mod tests {
         fn stop(&self) -> Result<()> {
             self.playing.store(false, Ordering::SeqCst);
             self.finished.store(false, Ordering::SeqCst);
+            self.stops.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }
 
@@ -688,6 +742,80 @@ mod tests {
         assert_eq!(state.queue_kind, QueueKind::Daily);
         let state = player.play_cloud(10, 0).await.unwrap();
         assert_eq!(state.queue_kind, QueueKind::Cloud);
+    }
+
+    struct SlowMusic {
+        entered: Arc<tokio::sync::Notify>,
+        gate: Arc<tokio::sync::Notify>,
+    }
+
+    #[async_trait]
+    impl MusicService for SlowMusic {
+        async fn search(&self, _: &str, _: SearchKind, _: u32, _: u32) -> Result<SearchResults> {
+            Ok(SearchResults::default())
+        }
+
+        async fn tracks(&self, ids: &[TrackId]) -> Result<Vec<Track>> {
+            Ok(ids.iter().map(|id| track(id.0)).collect())
+        }
+
+        async fn stream_url(&self, id: TrackId, _: Quality) -> Result<String> {
+            self.entered.notify_one();
+            self.gate.notified().await;
+            Ok(format!("https://example.test/{id}.mp3"))
+        }
+
+        async fn playlists(&self, _: Option<UserId>) -> Result<Vec<Playlist>> {
+            Ok(Vec::new())
+        }
+
+        async fn playlist_tracks(&self, _: PlaylistId) -> Result<Vec<Track>> {
+            Ok(Vec::new())
+        }
+
+        async fn current_user(&self) -> Result<Option<UserProfile>> {
+            Ok(None)
+        }
+    }
+
+    #[tokio::test]
+    async fn starting_a_track_stops_the_previous_one_before_streaming() {
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let gate = Arc::new(tokio::sync::Notify::new());
+        let audio = Arc::new(StubAudio::default());
+        audio.playing.store(true, Ordering::SeqCst);
+
+        let player = Arc::new(Player::new(
+            Arc::new(SlowMusic {
+                entered: Arc::clone(&entered),
+                gate: Arc::clone(&gate),
+            }),
+            audio.clone(),
+            Quality::Exhigh,
+            0.5,
+        ));
+        let worker = Arc::clone(&player);
+        let task = tokio::spawn(async move {
+            worker
+                .play(PlayRequest::Tracks {
+                    tracks: vec![track(9)],
+                    kind: QueueKind::Manual,
+                })
+                .await
+        });
+
+        entered.notified().await;
+        assert!(audio.stops.load(Ordering::SeqCst) >= 1);
+        assert!(!audio.playing.load(Ordering::SeqCst));
+        let state = player.snapshot().await;
+        assert!(state.loading);
+        assert_eq!(state.track.unwrap().id, TrackId(9));
+
+        gate.notify_one();
+        task.await.unwrap().unwrap();
+        let state = player.snapshot().await;
+        assert_eq!(state.status, PlaybackStatus::Playing);
+        assert!(!state.loading);
     }
 
     #[tokio::test]

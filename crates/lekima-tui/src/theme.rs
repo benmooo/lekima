@@ -38,6 +38,7 @@ pub struct Glyphs {
     pub wave: [&'static str; 8],
     pub liked: &'static str,
     pub cursor: &'static str,
+    pub loading: &'static str,
 }
 
 impl Glyphs {
@@ -53,6 +54,7 @@ impl Glyphs {
         wave: ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"],
         liked: "♥",
         cursor: "▌",
+        loading: "◌",
     };
 
     pub const ASCII: Self = Self {
@@ -67,6 +69,7 @@ impl Glyphs {
         wave: [" ", ".", ":", "-", "=", "+", "*", "#"],
         liked: "*",
         cursor: "_",
+        loading: "~",
     };
 
     #[must_use]

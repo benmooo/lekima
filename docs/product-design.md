@@ -169,7 +169,8 @@ Global — `q`/`Ctrl-c` quit, `?` help, `/` search, `:` command line,
 ### 5.3 Interaction states
 
 - **Empty**: “Nothing queued. Press `/` to search.”
-- **Loading**: spinner in the header, skeleton rows, keys stay responsive.
+- **Loading**: the old track goes silent immediately; the header shows a
+  loading glyph until the next stream starts. Keys stay responsive.
 - **No stream**: “This track has no playable stream (VIP or region).” The queue
   skips automatically after 2 s unless `--strict`.
 - **Offline / provider down**: banner “offline — showing cached library”;

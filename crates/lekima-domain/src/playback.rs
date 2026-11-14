@@ -111,6 +111,9 @@ pub struct PlaybackState {
     /// Whether the current track is in the account's liked set.
     #[serde(default)]
     pub liked: bool,
+    /// True between starting a load and the first sample reaching the device.
+    #[serde(default)]
+    pub loading: bool,
     /// Recent amplitude envelope from the audio device (oldest first, 0..=1).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub wave: Vec<f32>,
@@ -143,6 +146,7 @@ impl Default for PlaybackState {
             queue_index: None,
             queue_kind: QueueKind::Manual,
             liked: false,
+            loading: false,
             wave: Vec::new(),
         }
     }

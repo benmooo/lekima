@@ -210,7 +210,8 @@ fn summary(reply: &Reply) -> String {
     match reply {
         Reply::Status { state } => match &state.track {
             Some(track) => format!(
-                "{} {} — {}",
+                "{}{} {} — {}",
+                if state.loading { "loading " } else { "" },
                 state.status.as_str(),
                 track.name,
                 track.artist_names()

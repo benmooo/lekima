@@ -129,6 +129,10 @@ impl RodioAudioEngine {
 #[async_trait]
 impl AudioEngine for RodioAudioEngine {
     async fn play_url(&self, url: &str) -> Result<()> {
+        // Stop the previous track before the network work: nothing should keep
+        // sounding while the next stream is being fetched.
+        let _ = self.send(Command::Stop);
+
         let response = self
             .client
             .get(url)
