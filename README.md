@@ -28,8 +28,8 @@ $ lekima status --json
 ## Status
 
 Working: search, playlists, lyrics, QR login, playback through a background
-daemon, the vim-driven TUI, and the JSON CLI contract. `ncmapi` 1.1 is developed
-in `../ncmapi-rs` through a path patch until it is published.
+daemon, the vim-driven TUI, and the JSON CLI contract. `ncmapi` 1.1 is published
+on crates.io.
 
 ```console
 $ lekima login --qr          # scan with the NetEase app

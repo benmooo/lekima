@@ -321,5 +321,5 @@ tools for agents that prefer tool calls over shell.
 4. **Lyrics rendering.** Synced highlighting requires a timed LRC parser — worth
    the dependency, or plain text first?
 5. **Windows.** WSL only, or native named pipes in v1.0?
-6. **Publishing.** `ncmapi` 1.1 is currently a path patch; publish it before
-   lekima 0.1 so `cargo install lekima` resolves from crates.io.
+6. **Publishing.** `ncmapi` 1.1 is published; `lekima` 0.1 itself still needs its
+   first crates.io release.

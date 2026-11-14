@@ -307,10 +307,10 @@ Note: `/api/playlist/track/all` is no longer served (404). Playlist detail
 returns the full ordered `trackIds` list; pages are sliced locally and hydrated
 through `/api/v3/song/detail` in batches of 500.
 
-Process: developed on a branch with a path patch (`[patch.crates-io]` in this
-workspace), contract tests per route, deterministic suite green, version bumped
-to 1.1.0. Remaining before publish: run `cargo publish --dry-run`, publish, then
-replace the path patch with `ncmapi = "1.1"`. Public API stays additive; the existing
+Process: developed on a branch, contract tests per route, deterministic suite
+green, `cargo publish --dry-run`, tag `v1.1.0`, publish, then pin
+`ncmapi = "1.1"` in this workspace (no path patch). Future additions follow the
+same flow as `1.2.0`. Public API stays additive; the existing
 `NcmClient`/service shape is preserved.
 
 ## 9. Configuration

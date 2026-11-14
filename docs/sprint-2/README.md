@@ -23,7 +23,7 @@ scrobbling, Windows named pipes.
 
 ## Dependencies
 
-- `ncmapi 1.1.0` — shipped (tag `v1.1.0`); publish to crates.io pending
+- `ncmapi 1.1.0` — published (crates.io + tag `v1.1.0`)
 - `ncmapi 1.2.0` — daily/FM/like/toplist routes (first task of the sprint)
 - Sprint 1 `lekima` 0.1 daemon, IPC v1 and TUI in place
 
@@ -35,7 +35,7 @@ scrobbling, Windows named pipes.
 - [x] Protocol v2 handshake, events and backpressure specified
 - [x] Provider routes and error mapping specified
 - [x] Testing and rollout plan specified
-- [ ] `ncmapi 1.1.0` published (blocked on crates.io sign-in)
+- [x] `ncmapi 1.1.0` published
 - [ ] Open questions in both documents resolved
 
 ## Definition of done

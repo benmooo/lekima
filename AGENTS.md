@@ -58,8 +58,10 @@ LEKIMA_CONFIG_DIR=$(mktemp -d) cargo run -p lekima-cli -- status --json
 6. Update `docs/product-design.md` (surface) and `docs/system-design.md`
    (protocol/ADR) if the contract changed.
 
-## While `ncmapi-rs` is a path/patch dependency
+## Changing `ncmapi`
 
-The crate is developed alongside this repository. Keep changes additive, run its
-deterministic test suite, and remove the `[patch.crates-io]` entry only after a
-published version is pinned here.
+`ncmapi` is a published dependency (currently `1.1`). When a feature needs a new
+endpoint, change the crate in `../ncmapi-rs`, keep the API additive, run its
+deterministic suite (`cargo test`, `cargo publish --dry-run`), publish a minor
+version, then bump the pin here. Do not reintroduce a path patch unless you are
+also preparing that release.

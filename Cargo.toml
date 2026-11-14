@@ -40,10 +40,6 @@ toml = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
-# Developed alongside lekima; removed once ncmapi 1.1 is published.
-[patch.crates-io]
-ncmapi = { path = "../ncmapi-rs" }
-
 [profile.release]
 lto = "thin"
 codegen-units = 1
