@@ -3,7 +3,7 @@
 All notable changes to lekima are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
-## 0.3.0 — unreleased
+## 0.3.0 — 2026-11-14
 
 ### Added
 
@@ -20,8 +20,6 @@ All notable changes to lekima are documented here. The format follows
   `lekima media-host` helper with an accessory AppKit run loop; `doctor` reports
   the backend.
 
-## 0.2.1 — unreleased
-
 ### Fixed
 
 - Auto-advance now fires when the sink empties: the engine clears `has_track`
@@ -34,6 +32,13 @@ All notable changes to lekima are documented here. The format follows
   volume, queue, quality, sleep and a compact 12-column spectrum.
 - Real audio visualisation: 20-band FFT spectrum (1024-point, Hann window,
   attack/decay smoothing) replaces the RMS history; TUI polls at 20 Hz.
+
+### Known limitations
+
+- MPRIS is Linux-only; macOS media keys require the bundled `media-host`
+  helper process and artwork is not published yet.
+- Gapless is guaranteed only for consecutive tracks at the same sample rate
+  that fit the preload budget (small tracks).
 
 ## 0.2.0 — 2026-11-14
 
