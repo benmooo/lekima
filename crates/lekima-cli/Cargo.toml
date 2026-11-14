@@ -19,6 +19,7 @@ lekima-config.workspace = true
 lekima-ipc.workspace = true
 lekima-ncm.workspace = true
 lekima-audio.workspace = true
+lekima-platform.workspace = true
 lekima-tui.workspace = true
 
 anyhow.workspace = true

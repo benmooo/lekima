@@ -78,6 +78,7 @@ as the plan of record.
 | `lekima-ipc` | JSON-lines protocol over a Unix socket. |
 | `lekima-ncm` | `MusicService` adapter over [`ncmapi`](https://crates.io/crates/ncmapi). |
 | `lekima-audio` | `AudioEngine` adapter over rodio. |
+| `lekima-platform` | OS media integration: MPRIS (Linux), Now Playing (macOS). |
 | `lekima-tui` | ratatui frontend. |
 | `lekima` | `lekima` binary and daemon. |
 

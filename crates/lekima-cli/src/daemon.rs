@@ -22,6 +22,7 @@ use lekima_ipc::{
     Subscription, serve_connection,
 };
 use lekima_ncm::{NcmMusicService, NcmOptions};
+use lekima_platform::{MediaCommand, MediaControls, NowPlaying};
 use tokio::{
     net::UnixListener,
     sync::{Notify, broadcast},
@@ -69,6 +70,8 @@ pub async fn run(paths: &Paths, config: &Config, socket: &Path, _detached: bool)
     let hub = Arc::new(EventHub::new());
     let sleep_until = Arc::new(StdMutex::new(None));
     let preloaded = Arc::new(AtomicBool::new(false));
+    let controls = lekima_platform::controls().await;
+    tracing::debug!(backend = controls.backend(), "media integration ready");
     let daemon = Arc::new(Daemon {
         player: Arc::clone(&player),
         credentials: FileCredentials::new(paths.session_file()),
@@ -76,6 +79,7 @@ pub async fn run(paths: &Paths, config: &Config, socket: &Path, _detached: bool)
         hub: Arc::clone(&hub),
         sleep_until: Arc::clone(&sleep_until),
         preloaded: Arc::clone(&preloaded),
+        controls,
     });
 
     {
@@ -89,6 +93,7 @@ pub async fn run(paths: &Paths, config: &Config, socket: &Path, _detached: bool)
         Arc::clone(&preloaded),
     );
     spawn_preloader(Arc::clone(&daemon));
+    spawn_platform(Arc::clone(&daemon));
 
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .context("failed to install the SIGTERM handler")?;
@@ -135,6 +140,7 @@ struct Daemon {
     hub: Arc<EventHub>,
     sleep_until: Arc<StdMutex<Option<Instant>>>,
     preloaded: Arc<AtomicBool>,
+    controls: Arc<dyn MediaControls>,
 }
 
 /// Sequenced broadcast with a replay ring.
@@ -599,6 +605,95 @@ fn spawn_ticker(
             }
         }
     });
+}
+
+/// Mirrors player state to the OS and executes media-key/MPRIS commands.
+fn spawn_platform(daemon: Arc<Daemon>) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_millis(500));
+        loop {
+            interval.tick().await;
+            let state = daemon.player.snapshot().await;
+            daemon.controls.update(&now_playing(&state));
+            for action in daemon.controls.poll() {
+                let Some(command) = platform_command(&state, action) else {
+                    continue;
+                };
+                match daemon.execute(command.clone()).await {
+                    Ok(reply) => daemon.publish(&command, &reply).await,
+                    Err(error) => tracing::debug!(error = ?error, "media command failed"),
+                }
+            }
+        }
+    });
+}
+
+fn now_playing(state: &PlaybackState) -> NowPlaying {
+    let track = state.track.as_ref();
+    NowPlaying {
+        track_id: track.map_or(0, |track| track.id.get()),
+        title: track.map_or_else(String::new, |track| track.name.clone()),
+        artist: track.map_or_else(String::new, lekima_domain::Track::artist_names),
+        album: track.map_or_else(String::new, |track| track.album_name().to_owned()),
+        duration_ms: track.map_or(0, |track| track.duration_ms),
+        position_ms: state.position_ms,
+        playing: state.status == lekima_domain::PlaybackStatus::Playing,
+        has_track: track.is_some(),
+        has_next: state
+            .queue_index
+            .is_some_and(|index| index + 1 < state.queue_length),
+        has_previous: state.queue_index.is_some_and(|index| index > 0),
+        volume: f64::from(state.volume),
+        muted: state.muted,
+        shuffle: state.shuffle,
+        repeat: match state.repeat {
+            lekima_domain::RepeatMode::Off => lekima_platform::Repeat::Off,
+            lekima_domain::RepeatMode::All => lekima_platform::Repeat::All,
+            lekima_domain::RepeatMode::One => lekima_platform::Repeat::One,
+        },
+    }
+}
+
+fn platform_command(state: &PlaybackState, action: MediaCommand) -> Option<Command> {
+    Some(match action {
+        MediaCommand::Play => Command::Resume,
+        MediaCommand::Pause => Command::Pause,
+        MediaCommand::Toggle => Command::Toggle,
+        MediaCommand::Stop => Command::Stop,
+        MediaCommand::Next => Command::Next,
+        MediaCommand::Previous => Command::Prev,
+        MediaCommand::Seek(position_ms) => Command::Seek { position_ms },
+        MediaCommand::SeekBy(delta) => {
+            let base = i64::try_from(state.position_ms).unwrap_or(i64::MAX);
+            let target = (base + delta).max(0);
+            let target = if state
+                .track
+                .as_ref()
+                .is_some_and(|track| track.duration_ms > 0)
+            {
+                target.min(
+                    i64::try_from(state.track.as_ref().map_or(0, |track| track.duration_ms))
+                        .unwrap_or(i64::MAX),
+                )
+            } else {
+                target
+            };
+            Command::Seek {
+                position_ms: u64::try_from(target).unwrap_or(0),
+            }
+        }
+        MediaCommand::SetVolume(level) => Command::SetVolume {
+            level: (level as f32).clamp(0.0, 1.0),
+        },
+        MediaCommand::SetShuffle(enabled) => Command::SetShuffle { enabled },
+        MediaCommand::SetRepeat(repeat) => Command::SetRepeat {
+            mode: match repeat {
+                lekima_platform::Repeat::Off => lekima_domain::RepeatMode::Off,
+                lekima_platform::Repeat::All => lekima_domain::RepeatMode::All,
+                lekima_platform::Repeat::One => lekima_domain::RepeatMode::One,
+            },
+        },
+    })
 }
 
 fn spawn_preloader(daemon: Arc<Daemon>) {

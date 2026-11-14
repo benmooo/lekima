@@ -430,6 +430,22 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
             Ok(())
         }
 
+        TopCommand::MediaHost => {
+            #[cfg(target_os = "macos")]
+            {
+                lekima_platform::run_host()
+                    .map_err(|error| Failure::new(ErrorCode::Internal, error.to_string()))?;
+                Ok(())
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                Err(Failure::new(
+                    ErrorCode::Unsupported,
+                    "media-host is only available on macOS",
+                ))
+            }
+        }
+
         TopCommand::Themes => {
             let themes: Vec<&str> = lekima_tui::THEMES.to_vec();
             if json {
@@ -843,12 +859,17 @@ async fn doctor(socket: &Path, paths: &Paths, config: &Config, json: bool) -> Re
         Err(error) => serde_json::json!({ "ok": false, "error": error.message }),
     };
 
+    let media = serde_json::json!({
+        "backend": lekima_platform::backend_name(),
+    });
+
     let report = serde_json::json!({
         "version": env!("CARGO_PKG_VERSION"),
         "socket": { "path": socket, "daemon_running": daemon_running },
         "session": { "present": session_present, "file": paths.session_file() },
         "config": { "file": paths.config_file(), "loaded": true },
         "audio": audio,
+        "media": media,
         "provider": provider,
         "log": paths.log_file(),
     });
@@ -883,6 +904,7 @@ async fn doctor(socket: &Path, paths: &Paths, config: &Config, json: bool) -> Re
     );
     crate::say!("config   {}", paths.config_file().display());
     crate::say!("audio    {audio}");
+    crate::say!("media    {}", lekima_platform::backend_name());
     crate::say!("provider {provider}");
     crate::say!("log      {}", paths.log_file().display());
     Ok(())

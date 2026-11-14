@@ -210,6 +210,10 @@ pub enum TopCommand {
     /// Show the signed-in account.
     Whoami,
 
+    /// Internal: host macOS Now Playing and media keys.
+    #[command(hide = true)]
+    MediaHost,
+
     /// List audio output devices.
     Devices,
 

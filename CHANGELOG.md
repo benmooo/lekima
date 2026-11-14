@@ -15,6 +15,10 @@ All notable changes to lekima are documented here. The format follows
 - Range seeks for streamed tracks: the spool tracks downloaded byte ranges, a
   background range worker fetches the seek target, and the decoder runs on its
   own thread so the audio callback never blocks.
+- OS media integration (`lekima-platform`): MPRIS on Linux
+  (`org.mpris.MediaPlayer2.lekima`) and macOS Now Playing + media keys via a
+  `lekima media-host` helper with an accessory AppKit run loop; `doctor` reports
+  the backend.
 
 ## 0.2.1 — unreleased
 

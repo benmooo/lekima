@@ -11,7 +11,7 @@ Status: **Approved for design**
 
 | Constraint | Consequence |
 | --- | --- |
-| Daemon is headless, no window | macOS media APIs need a run-loop thread; no app delegate |
+| Daemon is headless, no window | macOS media APIs need an accessory app with a main-thread run loop, so a helper process owns them |
 | Audio thread must not block on network | Range fetches happen in background; reader waits on condvars |
 | rodio `Player` queues sources | Gapless = append prepared source + boundary notification |
 | MPRIS is Linux/D-Bus only | `cfg(target_os = "linux")`, mock-bus tests in CI |
@@ -52,7 +52,7 @@ Dependency sketch:
 | OS | Crates | Notes |
 | --- | --- | --- |
 | Linux | `mpris-server` (zbus) | `org.mpris.MediaPlayer2.lekima` |
-| macOS | `objc2`, `objc2-foundation`, `objc2-media-player` | run-loop thread |
+| macOS | `objc2`, `objc2-foundation`, `objc2-media-player`, `objc2-app-kit` | helper process with an AppKit run loop |
 | other | none | no-op adapter |
 
 MPRIS property mapping:
@@ -69,11 +69,34 @@ MPRIS property mapping:
 Commands (`PlayPause`, `Next`, `Previous`, `Seek`, `SetPosition`, `Volume`)
 are translated into `Command` values and executed by the daemon.
 
-macOS: `MPNowPlayingInfoCenter` updated on the run-loop thread via
-`performSelectorOnMainThread` (or a dedicated thread's run loop);
-`MPRemoteCommandCenter` handlers push `MediaCommand` into an mpsc channel that
-the daemon polls. `NSApplicationLoad()` is called once. If remote commands are
-unavailable (no bundle), log a warning and keep Now Playing read-only.
+### macOS helper process
+
+`MPNowPlayingInfoCenter` only becomes visible to the system when an
+`NSApplication` owns the main thread and a Cocoa run loop is running. A daemon's
+main thread belongs to the async runtime, and moving it would restructure
+startup for every platform. Instead the daemon spawns a helper:
+
+```
+lekima daemon ──stdin: {"track_id":…,"title":…,"position_ms":…}\n──▶ lekima media-host
+               ◀─stdout: {"Toggle"}\n / {"Seek":123000}\n────────────┘
+```
+
+- `lekima media-host` (hidden command) runs on the main thread: shared
+  `NSApplication` with `Accessory` policy, `finishLaunching()`, registers
+  `MPRemoteCommandCenter` handlers (play, pause, toggle, stop, next, previous,
+  change-position), then `NSApplication::run()`.
+- A reader thread parses state snapshots and updates
+  `MPNowPlayingInfoCenter` (`title`, `artist`, `album`, duration, elapsed time,
+  playback rate) plus the macOS-only `playbackState`.
+- Handlers write one JSON command per line to stdout; the daemon drains them in
+  its platform task and executes them through the same `Command` path as the
+  CLI/TUI.
+- Closing stdin (daemon exit) terminates the helper, so no orphan process keeps
+  the Now Playing entry alive.
+- Verified live with `nowplaying-cli`: title/artist/duration are published, and
+  `togglePlayPause`, `play` and `next` drive the daemon.
+- Artwork is not published yet (would need an extra HTTP fetch and
+  `MPMediaItemArtwork`); it remains an opt-in follow-up.
 
 ## 3. Device selection
 
@@ -229,7 +252,7 @@ struct Preloaded {
 | --- | --- | --- |
 | 040 | Separate `lekima-platform` crate | Keeps OS deps out of the core/TUI |
 | 041 | MPRIS via `mpris-server` | Typed interfaces, fewer hand-rolled D-Bus strings |
-| 042 | Media keys on a run-loop thread | MPNowPlaying needs a run loop; daemon stays async |
+| 042 | macOS media integration in a helper process | AppKit needs the main thread; the async daemon keeps its runtime |
 | 043 | Sparse spool with fetch-on-seek | Works with the decoder's byte-level seeks |
 | 044 | Gapless via rodio queue append | Sample-accurate without a custom mixer |
 | 045 | Claim gapless only for matching rates | Honest guarantees, no artefacts |

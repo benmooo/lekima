@@ -49,11 +49,12 @@ This sprint makes it a first-class OS citizen and finishes the playback engine.
   artwork, playback rate.
 - `MPRemoteCommandCenter` handles media keys and Control Center:
   play/pause/toggle, next/previous, change-playback-position.
-- Implemented on a dedicated thread with an `NSRunLoop`; the daemon stays
-  headless. Artwork is fetched/decoded lazily and cached by track id.
-- If the process is not bundled as an `.app`, media keys may be unavailable;
-  ship a tiny helper bundle or accept Control Center-only support. Documented
-  fallback: `brew services`/login item wrapper (future).
+- Implemented in a small helper process (`lekima media-host`) that owns an
+  accessory `NSApplication` and a main-thread run loop, which is what makes the
+  process eligible to become the system Now Playing app; the daemon stays
+  headless and talks JSON over pipes. Artwork is a follow-up.
+- Verified without an `.app` bundle: Control Center metadata and media keys
+  work for the helper process.
 
 ### 3.3 Notifications (stretch)
 
