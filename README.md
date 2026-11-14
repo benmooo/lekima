@@ -34,7 +34,7 @@ $ lekima status --json
 ## Status
 
 Working: search, playlists, lyrics, QR login, playback through a background
-daemon, the vim-driven TUI, and the JSON CLI contract. `ncmapi` 1.1 is published
+daemon, the vim-driven TUI, and the JSON CLI contract. `ncmapi` 1.2 is published
 on crates.io.
 
 ```console

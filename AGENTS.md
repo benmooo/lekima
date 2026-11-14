@@ -74,7 +74,7 @@ LEKIMA_CONFIG_DIR=$(mktemp -d) cargo run -p lekima-cli -- status --json
 
 ## Changing `ncmapi`
 
-`ncmapi` is a published dependency (currently `1.1`). When a feature needs a new
+`ncmapi` is a published dependency (currently `1.2`). When a feature needs a new
 endpoint, change the crate in `../ncmapi-rs`, keep the API additive, run its
 deterministic suite (`cargo test`, `cargo publish --dry-run`), publish a minor
 version, then bump the pin here. Do not reintroduce a path patch unless you are

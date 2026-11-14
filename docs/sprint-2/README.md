@@ -24,8 +24,8 @@ scrobbling, Windows named pipes.
 
 ## Dependencies
 
-- `ncmapi 1.1.0` — published (crates.io + tag `v1.1.0`)
-- `ncmapi 1.2.0` — daily/FM/like/toplist routes (first task of the sprint)
+- `ncmapi 1.2.1` — published (crates.io + tags `v1.1.0` … `v1.2.1`)
+- `ncmapi 1.2.x` — daily/FM/like/toplist routes: **done**
 - Sprint 1 `lekima` 0.1 daemon, IPC v1 and TUI in place
 
 ## Definition of ready
