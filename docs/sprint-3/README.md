@@ -5,12 +5,15 @@
 | [`product-design.md`](./product-design.md) | Audience, distribution channels, CI, queue editing, translation, docs, risks |
 | [`system-design.md`](./system-design.md) | Release pipeline, CI, integration harness, queue invariants, lyric merge, ADRs |
 
-Status: **In progress.**
+Status: **Shipped — 0.1.1.**
 
-- Design approved.
-- Queue editing (TUI/CLI/MCP) and lyric translation implemented and tested.
-- Repo renamed: old Go project is `benmooo/lekima-go`; Rust project is
-  `benmooo/lekima`. CI is green on macOS + Linux + MSRV.
-- Remaining: cargo-dist release workflow, crates.io publishing (the workspace
-  crates must be published in dependency order), Homebrew tap, install/
-  first-run/agents docs, `v0.1.0` tag.
+- Queue editing (TUI/CLI/MCP) and lyric translation implemented.
+- Repo renamed: `benmooo/lekima-go` (archived Go project) and
+  `benmooo/lekima` (Rust). CI green on macOS + Linux + MSRV.
+- `ncmapi 1.6` is pure Rust: no OpenSSL, rustls for TLS; ciphertext fixtures
+  unchanged.
+- Published: `lekima` + all workspace crates on crates.io; GitHub release
+  `v0.1.1` with four platform tarballs + checksums; Homebrew formula in
+  `benmooo/homebrew-tap`.
+- Verified: `brew install benmooo/tap/lekima`, `cargo install lekima`, binary
+  has no OpenSSL linkage, Homebrew test passes.

@@ -21,6 +21,11 @@ $ lekima status --json
 {"ok":true,"data":{"status":"playing","track":{…},"volume":0.7}}
 ```
 
+## Status
+
+`0.1.1` is the first public release: crates.io, GitHub release binaries and a
+Homebrew tap. See [install](docs/install.md) and [first run](docs/first-run.md).
+
 ## Design documents
 
 - [`docs/product-design.md`](docs/product-design.md) — users, principles, feature
