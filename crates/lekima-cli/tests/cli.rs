@@ -33,7 +33,10 @@ fn capabilities_are_machine_readable() {
         .filter_map(|command| command["name"].as_str())
         .collect();
     for expected in ["play", "search", "queue", "daemon", "tui"] {
-        assert!(names.contains(&expected), "missing `{expected}` in {names:?}");
+        assert!(
+            names.contains(&expected),
+            "missing `{expected}` in {names:?}"
+        );
     }
 }
 
