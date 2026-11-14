@@ -22,6 +22,8 @@ $ lekima status --json
 - [`docs/system-design.md`](docs/system-design.md) — crate graph, playback state
   machine, daemon lifecycle, IPC protocol, provider adapter, security, testing,
   ADRs.
+- [`docs/sprint-2/`](docs/sprint-2/) — **design only**: product and system design
+  for daily/FM/likes/toplists/lyrics pane, push events, `lekima watch` and MCP.
 
 ## Status
 

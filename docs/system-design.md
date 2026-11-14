@@ -455,6 +455,12 @@ account.
 | TUI killed with SIGKILL | Terminal may be left in raw mode; `lekima doctor --fix` and `reset` documented |
 | Malformed provider JSON | Mapping returns `Unavailable`, never panics |
 
+## 17b. Sprint 2
+
+Design for the next increment lives in
+[`sprint-2/system-design.md`](./sprint-2/system-design.md): protocol v2 push
+events, FM queue mode, likes, daily/toplists, lyrics pane and the MCP server.
+
 ## 18. What exists today (honest status)
 
 All eight crates build and are covered by 35 unit tests, 24 `ncmapi` contract

@@ -84,6 +84,9 @@ provider, done well, with a UI that never gets in the way.
 
 ### v0.2 — “it feels finished”
 
+> Detailed specification: [`sprint-2/product-design.md`](./sprint-2/product-design.md)
+> and [`sprint-2/system-design.md`](./sprint-2/system-design.md).
+
 Synced lyrics pane, daily recommendations, personal FM, liked playlist,
 like/unlike, playlist search, mouse-optional scroll, themes, `NO_COLOR`,
 `lekima mcp` stdio server, push events from the daemon instead of polling.
