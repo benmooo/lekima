@@ -238,7 +238,13 @@ fn audio_thread(
             Ok(Command::Load { bytes, ack }) => {
                 player.stop();
                 let len = bytes.len();
-                match Decoder::try_from(Cursor::new(bytes)) {
+                let byte_len = bytes.len() as u64;
+                let decoder = Decoder::builder()
+                    .with_data(Cursor::new(bytes))
+                    .with_byte_len(byte_len)
+                    .with_seekable(true)
+                    .build();
+                match decoder {
                     Ok(decoder) => {
                         shared.loaded.store(true, Ordering::Relaxed);
                         shared.finished.store(false, Ordering::Relaxed);

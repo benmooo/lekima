@@ -30,6 +30,8 @@ fn main() {
     app.status.repeat = RepeatMode::All;
     app.status.queue_length = 25;
     app.status.queue_index = Some(0);
+    app.frame = 7;
+    app.notify("queued 3 tracks", false);
     app.source = "search: mota".to_owned();
     app.tracks = vec![
         track(1, "Cigarettes and lighters", "LoMo", 109_000),

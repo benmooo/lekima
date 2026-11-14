@@ -71,10 +71,14 @@ impl Player {
         let mut state = PlaybackState {
             status: inner.status,
             track: inner.queue.current().cloned(),
+            // The device is the source of truth while a track is loaded; `max`
+            // here made backward seeks look like no-ops.
             position_ms: if inner.status == PlaybackStatus::Stopped {
                 0
+            } else if self.audio.has_track() {
+                self.audio.position_ms()
             } else {
-                self.audio.position_ms().max(inner.position_ms)
+                inner.position_ms
             },
             volume: inner.volume,
             muted: inner.muted,

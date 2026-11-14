@@ -54,7 +54,8 @@ async fn event_loop(
     dispatch(&socket, Command::Queue, &sender);
     dispatch(&socket, Command::Whoami, &sender);
 
-    let mut ticker = tokio::time::interval(std::time::Duration::from_millis(250));
+    // 20 fps for the signal visualiser; status still polls at 4 Hz.
+    let mut ticker = tokio::time::interval(std::time::Duration::from_millis(50));
     ticker.tick().await;
 
     loop {
@@ -75,7 +76,7 @@ async fn event_loop(
             }
             _ = ticker.tick() => {
                 app.tick();
-                if !app.status_inflight && !app.daemon_down {
+                if app.frame.is_multiple_of(5) && !app.status_inflight && !app.daemon_down {
                     app.status_inflight = true;
                     dispatch(&socket, Command::Status, &sender);
                 }

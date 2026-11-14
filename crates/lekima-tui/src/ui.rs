@@ -11,7 +11,8 @@ use ratatui::{
     style::{Modifier, Style},
     text::{Line, Span, Text},
     widgets::{
-        Block, BorderType, Clear, List, ListItem, ListState, Paragraph, Row, Table, TableState,
+        Block, BorderType, Clear, List, ListItem, ListState, Padding, Paragraph, Row, Table,
+        TableState, Wrap,
     },
 };
 
@@ -54,6 +55,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, theme: &Theme) {
     draw_rule(frame, theme, rule);
     draw_body(frame, app, theme, body);
     draw_footer(frame, app, theme, footer);
+    draw_toast(frame, app, theme, area);
 
     if app.mode == Mode::Help {
         draw_help(frame, theme, area);
@@ -140,6 +142,13 @@ fn draw_hud(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             Style::new().fg(theme.accent_alt),
         ),
     ]);
+
+    if app.status.track.is_some() {
+        spans.extend([
+            Span::styled("  SIG ", Style::new().fg(theme.dim)),
+            Span::styled(signal_bars(app), Style::new().fg(theme.accent_alt)),
+        ]);
+    }
 
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
@@ -412,33 +421,79 @@ fn draw_footer(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         spans.push(Span::styled(hints, Style::new().fg(theme.dim)));
     }
 
-    if let Some(message) = &app.message {
-        let (symbol, colour) = if message.error {
-            ("!", theme.hot)
-        } else {
-            ("+", theme.accent)
-        };
-        spans.extend([
-            Span::styled("  ", Style::new()),
-            Span::styled(symbol, Style::new().fg(colour)),
-            Span::styled(
-                format!(" {}", message.text),
-                Style::new().fg(if message.error {
-                    theme.hot
-                } else {
-                    theme.muted
-                }),
-            ),
-        ]);
-    }
-    if app.daemon_down {
-        spans.extend([
-            Span::styled("  ! ", Style::new().fg(theme.warn)),
-            Span::styled("daemon offline [R]", Style::new().fg(theme.warn)),
-        ]);
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+/// Notification panel: bottom-right, above the command bar, auto-dismissed.
+fn draw_toast(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    let message = app
+        .message
+        .as_ref()
+        .filter(|message| message.is_visible(app.frame));
+
+    let (text, is_error, title, colour) = if app.daemon_down {
+        (
+            "daemon offline — press R to start".to_owned(),
+            true,
+            " ! OFFLINE ",
+            theme.warn,
+        )
+    } else {
+        match message {
+            Some(message) if message.error => (message.text.clone(), true, " ! ERROR ", theme.hot),
+            Some(message) => (message.text.clone(), false, " + NOTICE ", theme.panel),
+            None => return,
+        }
+    };
+
+    if area.height < 10 || area.width < 40 {
+        return;
     }
 
-    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+    let width = 54.min(area.width.saturating_sub(2));
+    let height = 4;
+    let toast = Rect {
+        x: area.width.saturating_sub(width + 1),
+        y: area.height.saturating_sub(height + 1),
+        width,
+        height,
+    };
+
+    frame.render_widget(Clear, toast);
+    let block = Block::bordered()
+        .border_type(BorderType::Double)
+        .border_style(Style::new().fg(colour))
+        .padding(Padding::horizontal(1))
+        .title(Span::styled(
+            title,
+            Style::new().fg(colour).add_modifier(Modifier::BOLD),
+        ));
+    let body = Paragraph::new(Span::styled(
+        text,
+        Style::new().fg(if is_error { theme.text } else { theme.muted }),
+    ))
+    .block(block)
+    .wrap(Wrap { trim: true });
+    frame.render_widget(body, toast);
+}
+
+fn signal_bars(app: &App) -> String {
+    const BARS: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+    const COUNT: usize = 10;
+
+    if !app.is_playing() {
+        let level = usize::from(app.status.status == PlaybackStatus::Paused);
+        return BARS[level].repeat(COUNT);
+    }
+
+    (0..COUNT)
+        .map(|index| {
+            let phase = app.frame as f32 * 0.45 + index as f32 * 1.9;
+            let wobble = (phase.sin() * 0.5 + 0.5) * (phase * 1.7).cos().abs();
+            let level = (wobble * 6.0).round() as usize;
+            BARS[(level + 1).min(BARS.len() - 1)]
+        })
+        .collect()
 }
 
 fn draw_help(frame: &mut Frame, theme: &Theme, area: Rect) {
@@ -639,6 +694,29 @@ mod tests {
         assert!(screen.contains("mota"));
         app.focus = Focus::Sidebar;
         let _ = render(&mut app, 20, 8);
+    }
+
+    #[test]
+    fn notices_render_as_toasts_not_in_the_command_bar() {
+        let mut app = App::new();
+        app.frame = 10;
+        app.notify("queued 3 tracks", false);
+        let screen = render(&mut app, 90, 24);
+        assert!(screen.contains("NOTICE"));
+        assert!(screen.contains("queued 3 tracks"));
+
+        app.frame = 200;
+        let screen = render(&mut app, 90, 24);
+        assert!(!screen.contains("queued 3 tracks"));
+    }
+
+    #[test]
+    fn errors_use_the_error_toast() {
+        let mut app = App::new();
+        app.notify("provider rejected the request", true);
+        let screen = render(&mut app, 90, 24);
+        assert!(screen.contains("ERROR"));
+        assert!(screen.contains("provider rejected"));
     }
 
     #[test]

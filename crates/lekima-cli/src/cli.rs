@@ -75,7 +75,7 @@ pub enum TopCommand {
     /// Seek to an absolute position or by a relative offset.
     Seek {
         /// `1:23`, `83`, `83s`, `+10s`, `-10s`, `2m`.
-        #[arg(value_name = "POSITION")]
+        #[arg(value_name = "POSITION", allow_hyphen_values = true)]
         position: String,
     },
 

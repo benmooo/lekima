@@ -37,6 +37,18 @@ pub enum Action {
 pub struct Message {
     pub text: String,
     pub error: bool,
+    /// Frame the message was created on, for auto-dismissal.
+    pub created: u64,
+}
+
+/// How long a toast stays on screen (50 ms ticks × 80 = 4 s).
+pub const TOAST_FRAMES: u64 = 80;
+
+impl Message {
+    #[must_use]
+    pub const fn is_visible(&self, now: u64) -> bool {
+        now.saturating_sub(self.created) < TOAST_FRAMES
+    }
 }
 
 pub struct App {
@@ -102,6 +114,7 @@ impl App {
         self.message = Some(Message {
             text: text.into(),
             error,
+            created: self.frame,
         });
     }
 

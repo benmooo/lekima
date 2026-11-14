@@ -132,8 +132,28 @@ Breakpoints:
   `[HELP]`.
 - Normal: key hints in `dim`, separated by `·`.
 - Search/command: `>` or `:` in accent, input in `text`, blinking `▌`.
-- Transient message: `!` hot or `+` accent, then muted text.
-- Daemon offline: `! daemon offline [R]` in warm.
+- The footer never carries application messages: it is input and state, not a
+  log.
+
+### Signal visualiser
+
+- Ten block bars in the HUD (`SIG ▁▂▃▄▅▆▇█`), animated at 20 fps while playing.
+- Deterministic pseudo-spectrum (phase from the tick plus bar index): it is a
+  sign of life, not an FFT. Frozen at `▁` when paused or stopped, dim when
+  stopped.
+- Never wider than ~14 cells; on narrow terminals it is the first HUD segment to
+  clip.
+
+### Toasts
+
+- Application messages appear as a toast in the **bottom-right**, above the
+  command bar — never inline in the search/prompt line.
+- Double border: `hot` for errors and offline, `panel` for notices.
+- Title: ` ! ERROR `, ` + NOTICE `, ` ! OFFLINE `.
+- 54 columns max, 4 rows, wrapped text, `Clear` behind.
+- Auto-dismiss after 4 seconds (80 ticks at 50 ms). The daemon-offline toast
+  persists until the daemon answers again.
+- Hidden below 40 columns or 10 rows; the CLI still reports failures there.
 
 ### Overlays
 
@@ -174,8 +194,8 @@ Breakpoints:
 | Concern | Location |
 | --- | --- |
 | Palette, theme resolution, `NO_COLOR` | `crates/lekima-tui/src/theme.rs` |
-| Layout, HUD, meters, footer, overlays | `crates/lekima-tui/src/ui.rs` |
-| Blink/tick state | `App::frame`, `App::tick` |
+| Layout, HUD, meters, signal bars, toasts, overlays | `crates/lekima-tui/src/ui.rs` |
+| Blink/tick state, toast timestamps | `App::frame`, `App::notify`, `Message::is_visible` |
 | Theme selection | `[ui] theme` → `lekima_tui::Theme::resolve` |
 | Render tests | `ui.rs` tests with `TestBackend` |
 
@@ -187,6 +207,8 @@ Breakpoints:
 - [x] Meters are block glyphs, not `Gauge` widgets.
 - [x] Overlays use the double border and magenta title.
 - [x] `mono` and `NO_COLOR` render identically in structure.
-- [x] Render tests cover empty, playing, narrow, tiny, search and queue states.
+- [x] Render tests cover empty, playing, narrow, tiny, search, queue and toast states.
+- [x] Signal bars animate at 20 fps; paused/stopped are visually distinct.
+- [x] Messages are bottom-right toasts, not command-bar text.
 - [ ] Sprint 2: liked `♥`, FM trash confirmation, lyrics pane inherits this
       grammar (labels `//`, no boxes, one accent).
