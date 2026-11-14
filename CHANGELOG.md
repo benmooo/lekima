@@ -13,8 +13,8 @@ All notable changes to lekima are documented here. The format follows
 
 ### Changed
 
-- HUD redesigned into two rows: title/spectrum, then a playhead progress line
-  with `[⟲ ALL]` / `[⇄]` badges, time, volume, queue, quality and sleep.
+- HUD keeps a single row: playhead progress, `[⟲ ALL]` / `[⇄]` badges, time,
+  volume, queue, quality, sleep and a compact 12-column spectrum.
 - Real audio visualisation: 20-band FFT spectrum (1024-point, Hann window,
   attack/decay smoothing) replaces the RMS history; TUI polls at 20 Hz.
 

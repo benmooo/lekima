@@ -102,17 +102,16 @@ Breakpoints:
 
 ### HUD
 
-Two rows, so transport information never competes with the title.
+One row, ordered by importance. Everything after the spectrum may clip on narrow
+terminals; the title is clipped first only when the terminal is very small.
 
-- Row 1: brand chip (` LEKIMA `), state glyph, bold title, artist, queue kind,
-  and the live spectrum (`SIG` + 20 bands).
-- Row 2: a 20-cell progress line with a distinct playhead (`━━━━●────`), time,
-  mode badges (`[⟲ ALL]`, `[⇄]`), volume meter, queue count, quality and sleep
-  countdown.
-- Repeat badge: `[⟲ OFF]` dim, `[⟲ ALL]` cyan, `[⟲ 1]` accent. Shuffle is
-  `[⇄]` hot when on, dim when off (still discoverable).
-- Playhead is `●`; ASCII mode uses `>` with `=`/`-` rails.
-- Quality is always shown for a loaded stream (`320K`-style class names).
+- Brand chip (` LEKIMA `), state glyph, bold title, artist.
+- A 12-cell progress rail with a distinct playhead (`━━━━●──────`), followed by
+  `position/duration`.
+- Mode badges: `[⟲ OFF|ALL|1]` (dim / cyan / accent) and `[⇄]` (hot when on,
+  dim when off). Playhead `●`; ASCII mode uses `>` with `=`/`-` rails.
+- `VOL` meter, queue count, quality class (`EXHIGH`), sleep countdown, then a
+  compact 12-column spectrum strip (`SIG`).
 
 ### Library sidebar
 
@@ -195,9 +194,10 @@ Two rows, so transport information never competes with the title.
 - 20 bands from a real 1024-point FFT (Hann window) of the mono mix, computed
   ~43×/s in the audio thread and smoothed with fast attack / slow decay.
   `PlaybackState.wave` carries the bands; the TUI polls at 20 Hz while playing.
-- Low bands render in accent, high bands in the secondary accent. Frozen when
-  paused or stopped; flat and dim without audio.
-- On narrow terminals the signal area is the first HUD segment to clip.
+- The one-row HUD downsamples them to a 12-column strip (max of each group).
+  Low bands render in accent, high bands in the secondary accent; frozen when
+  paused/stopped, flat and dim without audio.
+- The spectrum is the last HUD segment, so it clips first on narrow terminals.
 
 ### Toasts
 
