@@ -294,16 +294,57 @@ impl Queue {
         self.current()
     }
 
+    /// Removes a queued track by index, keeping the cursor on the same
+    /// position (or the new tail).
+    pub fn remove_at(&mut self, index: usize) -> Option<Track> {
+        if index >= self.tracks.len() {
+            return None;
+        }
+        let removed = self.tracks.remove(index);
+        self.current = match self.current {
+            None => None,
+            Some(_) if self.tracks.is_empty() => None,
+            Some(current) => Some(match index.cmp(&current) {
+                std::cmp::Ordering::Less => current - 1,
+                std::cmp::Ordering::Equal => index.min(self.tracks.len() - 1),
+                std::cmp::Ordering::Greater => current,
+            }),
+        };
+        Some(removed)
+    }
+
     /// Pops the current track, keeping the cursor on the same position.
     pub fn remove_current(&mut self) -> Option<Track> {
         let index = self.current?;
-        let removed = self.tracks.remove(index);
-        self.current = if self.tracks.is_empty() {
-            None
-        } else {
-            Some(index.min(self.tracks.len() - 1))
-        };
-        Some(removed)
+        self.remove_at(index)
+    }
+
+    /// Moves a track to a new index, preserving which track is current.
+    ///
+    /// Returns `false` for out-of-range indices or a no-op move.
+    pub fn move_item(&mut self, from: usize, to: usize) -> bool {
+        if from >= self.tracks.len() || to >= self.tracks.len() || from == to {
+            return false;
+        }
+        let track = self.tracks.remove(from);
+        self.tracks.insert(to, track);
+        if let Some(current) = self.current {
+            if from == current {
+                self.current = Some(to);
+                return true;
+            }
+            // Removing before the cursor shifts it left; inserting at or before
+            // the (post-removal) cursor shifts it right.
+            let mut cursor = current;
+            if from < cursor {
+                cursor -= 1;
+            }
+            if to <= cursor {
+                cursor += 1;
+            }
+            self.current = Some(cursor.min(self.tracks.len() - 1));
+        }
+        true
     }
 }
 
@@ -350,6 +391,43 @@ mod tests {
         queue.insert_next(track(2));
         assert_eq!(queue.tracks()[1].id.get(), 2);
         assert_eq!(queue.tracks()[2].id.get(), 3);
+    }
+
+    #[test]
+    fn remove_at_keeps_the_cursor_on_the_same_track() {
+        let mut queue = Queue::new(vec![track(1), track(2), track(3)]);
+        queue.jump(1);
+        assert_eq!(queue.remove_at(0).unwrap().id.get(), 1);
+        assert_eq!(queue.current().unwrap().id.get(), 2);
+        assert_eq!(queue.current_index(), Some(0));
+
+        assert_eq!(queue.remove_at(1).unwrap().id.get(), 3);
+        assert_eq!(queue.current().unwrap().id.get(), 2);
+
+        queue.remove_at(0);
+        assert!(queue.is_empty());
+        assert_eq!(queue.current_index(), None);
+    }
+
+    #[test]
+    fn moving_tracks_preserves_the_current_identity() {
+        let mut queue = Queue::new(vec![track(1), track(2), track(3)]);
+        queue.jump(1); // current 2
+        assert!(queue.move_item(1, 2));
+        assert_eq!(queue.tracks()[2].id.get(), 2);
+        assert_eq!(queue.current().unwrap().id.get(), 2);
+
+        // Move another item across the current one: cursor shifts, identity stays.
+        assert!(queue.move_item(0, 2));
+        assert_eq!(queue.current().unwrap().id.get(), 2);
+        assert_eq!(queue.current_index(), Some(1));
+
+        // Moving the tail above the current one also shifts the cursor.
+        assert!(queue.move_item(2, 0));
+        assert_eq!(queue.current().unwrap().id.get(), 2);
+
+        assert!(!queue.move_item(0, 0));
+        assert!(!queue.move_item(0, 9));
     }
 
     #[test]

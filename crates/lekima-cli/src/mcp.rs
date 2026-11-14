@@ -135,6 +135,13 @@ fn build_command(name: &str, args: &Value) -> Result<Command, String> {
             level: (number_arg(args, "level").unwrap_or(70.0) / 100.0).clamp(0.0, 1.0) as f32,
         },
         "queue_list" => Command::Queue,
+        "queue_remove" => Command::QueueRemove {
+            index: usize_arg(args, "index")?,
+        },
+        "queue_move" => Command::QueueMove {
+            from: usize_arg(args, "from")?,
+            to: usize_arg(args, "to")?,
+        },
         "queue_add" => Command::Enqueue {
             tracks: id_list(args)?,
             next: args.get("next").and_then(Value::as_bool).unwrap_or(false),
@@ -192,6 +199,13 @@ fn id_list(args: &Value) -> Result<Vec<TrackId>, String> {
                 .ok_or_else(|| "track ids must be integers".to_owned())
         })
         .collect()
+}
+
+fn usize_arg(args: &Value, name: &str) -> Result<usize, String> {
+    args.get(name)
+        .and_then(Value::as_u64)
+        .map(|value| value as usize)
+        .ok_or_else(|| format!("`{name}` is required"))
 }
 
 fn string_arg(args: &Value, name: &str) -> Result<String, String> {

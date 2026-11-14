@@ -62,6 +62,13 @@ pub enum Command {
         enabled: bool,
     },
     Queue,
+    QueueRemove {
+        index: usize,
+    },
+    QueueMove {
+        from: usize,
+        to: usize,
+    },
     Enqueue {
         tracks: Vec<TrackId>,
         next: bool,

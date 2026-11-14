@@ -24,6 +24,7 @@ pub struct UiPreferences {
     pub theme: String,
     pub glyphs: String,
     pub density: String,
+    pub lyrics_translation: bool,
 }
 
 impl Default for UiPreferences {
@@ -32,6 +33,7 @@ impl Default for UiPreferences {
             theme: "cyber".to_owned(),
             glyphs: "unicode".to_owned(),
             density: "compact".to_owned(),
+            lyrics_translation: false,
         }
     }
 }
@@ -304,7 +306,7 @@ impl App {
                 Action::None
             }
             KeyCode::Char('j') | KeyCode::Down => {
-                self.settings_selection = (self.settings_selection + 1).min(2);
+                self.settings_selection = (self.settings_selection + 1).min(3);
                 Action::None
             }
             KeyCode::Char('k') | KeyCode::Up => {
@@ -465,6 +467,11 @@ impl App {
                 self.settings_dirty = true;
                 Action::UiChanged
             }
+            "translate" => {
+                self.preferences.lyrics_translation = !self.preferences.lyrics_translation;
+                self.settings_dirty = true;
+                Action::UiChanged
+            }
             "ui" | "settings" => {
                 self.mode = Mode::Settings;
                 self.settings_selection = 0;
@@ -504,6 +511,33 @@ impl App {
             KeyCode::Char('G') => {
                 self.queue_selection = self.queue.len().saturating_sub(1);
                 Action::None
+            }
+            KeyCode::Char('x') => Action::Call(Command::QueueRemove {
+                index: self.queue_selection,
+            }),
+            KeyCode::Char('J') => {
+                if self.queue_selection + 1 < self.queue.len() {
+                    let from = self.queue_selection;
+                    self.queue_selection += 1;
+                    Action::Call(Command::QueueMove {
+                        from,
+                        to: self.queue_selection,
+                    })
+                } else {
+                    Action::None
+                }
+            }
+            KeyCode::Char('K') => {
+                if self.queue_selection > 0 {
+                    let from = self.queue_selection;
+                    self.queue_selection -= 1;
+                    Action::Call(Command::QueueMove {
+                        from,
+                        to: self.queue_selection,
+                    })
+                } else {
+                    Action::None
+                }
             }
             KeyCode::Enter => {
                 self.mode = Mode::Normal;
@@ -557,14 +591,21 @@ impl App {
             }
             KeyCode::Char('Q') => {
                 self.mode = Mode::Queue;
+                self.queue_selection = self.status.queue_index.unwrap_or(0);
                 Action::Call(Command::Queue)
             }
             KeyCode::Char('F') => Action::Call(Command::Fm {
                 action: lekima_ipc::FmAction::Start,
             }),
             KeyCode::Char('t') => {
-                self.remember();
-                Action::Call(Command::Toplists)
+                if self.lyrics_open {
+                    self.preferences.lyrics_translation = !self.preferences.lyrics_translation;
+                    self.settings_dirty = true;
+                    Action::UiChanged
+                } else {
+                    self.remember();
+                    Action::Call(Command::Toplists)
+                }
             }
             KeyCode::Char('c') => {
                 self.remember();
@@ -862,9 +903,10 @@ impl App {
                     Reply::Playlists { playlists } => {
                         self.playlists = playlists;
                     }
-                    Reply::Queue { tracks, index } => {
+                    Reply::Queue { tracks, .. } => {
                         self.queue = tracks;
-                        self.queue_selection = index.unwrap_or(0);
+                        self.queue_selection =
+                            self.queue_selection.min(self.queue.len().saturating_sub(1));
                     }
                     Reply::User { user } => {
                         self.user = user.map(|user| user.nickname);
@@ -1167,6 +1209,37 @@ mod tests {
         assert!(matches!(action, Action::UiChanged));
         assert_eq!(app.preferences.theme, "amber");
         assert!(app.changed_preferences().is_some());
+    }
+
+    #[test]
+    fn queue_editing_emits_remove_and_move_commands() {
+        let mut app = App::new();
+        app.mode = Mode::Queue;
+        app.queue = vec![sample_track(1), sample_track(2), sample_track(3)];
+        app.queue_selection = 1;
+
+        match app.handle_key(key(KeyCode::Char('J'))) {
+            Action::Call(lekima_ipc::Command::QueueMove { from, to }) => {
+                assert_eq!((from, to), (1, 2));
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        assert_eq!(app.queue_selection, 2);
+
+        match app.handle_key(key(KeyCode::Char('K'))) {
+            Action::Call(lekima_ipc::Command::QueueMove { from, to }) => {
+                assert_eq!((from, to), (2, 1));
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+
+        app.queue_selection = 1;
+        match app.handle_key(key(KeyCode::Char('x'))) {
+            Action::Call(lekima_ipc::Command::QueueRemove { index }) => {
+                assert_eq!(index, 1);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
     }
 
     #[test]

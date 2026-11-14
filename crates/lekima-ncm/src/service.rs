@@ -5,7 +5,7 @@ use std::{path::PathBuf, time::Duration};
 use async_trait::async_trait;
 use lekima_domain::{
     self as domain, DomainError, Lyrics, MusicService, PlaylistId, QrLogin, QrStatus, Quality,
-    SearchKind, Toplist, TrackId, UserId, UserProfile, parse_lrc,
+    SearchKind, Toplist, TrackId, UserId, UserProfile,
 };
 use ncmapi::{
     ApiResponse, NcmClient, Page, SearchKind as ProviderSearchKind, SearchQuery,
@@ -256,7 +256,11 @@ impl MusicService for NcmMusicService {
             .map_err(provider_error)?;
         let response = ensure_success(response)?;
         // An empty document is a valid answer: the TUI renders its empty state.
-        Ok(parse_lrc(response.body.text()))
+        let translation = response.body.translation().map(str::to_owned);
+        Ok(lekima_domain::parse_lrc_with_translation(
+            response.body.text(),
+            translation.as_deref(),
+        ))
     }
 
     async fn daily(&self) -> domain::Result<Vec<domain::Track>> {

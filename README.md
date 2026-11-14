@@ -7,6 +7,12 @@ Go player as a layered Rust workspace. A small daemon owns playback; the TUI and
 every CLI command are clients of the same local protocol, so music keeps playing
 when you close the UI — and a code agent can drive it with one command.
 
+```bash
+brew install benmooo/tap/lekima      # or: cargo install lekima
+lekima login --qr                    # or: pbpaste | lekima login --cookie-file -
+lekima tui
+```
+
 ```console
 $ lekima play "bohemian rhapsody"
 ▶ Bohemian Rhapsody · Queen · A Night at the Opera   0:00 / 5:55
@@ -28,6 +34,8 @@ $ lekima status --json
   the console/HUD visual language (`cyber`, `amber`, `mono` themes).
 - [`docs/terminal-setup.md`](docs/terminal-setup.md) — font families, sizes and
   profiles for iTerm2, Ghostty, kitty, Alacritty and WezTerm.
+- [`docs/sprint-3/`](docs/sprint-3/) — **Ship 0.1**: distribution, CI,
+  integration harness, queue editing, lyric translation.
 - [`docs/releasing.md`](docs/releasing.md) — release flow, including
   `--registry crates-io` on this USTC-mirrored machine.
 - [`docs/sessions/`](docs/sessions/) — archived OpenCode sessions (this rewrite,

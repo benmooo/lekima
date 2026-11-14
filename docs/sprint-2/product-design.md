@@ -242,7 +242,7 @@ survives a daemon restart (reconnects on the next call).
 | `f` | Normal (track) | Like / unlike current or selected |
 | `L` | Normal | Toggle lyrics pane |
 | `[` / `]` | Lyrics | Offset −250 / +250 ms |
-| `t` | Lyrics | Toggle translation |
+| `t` | Lyrics | Toggle translation (else open charts) |
 | `w` | Lyrics | Toggle wrap |
 | `x` | FM | Trash current track (confirm) |
 | `u` | FM | Undo last trash (session) |

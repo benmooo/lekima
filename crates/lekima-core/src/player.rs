@@ -172,6 +172,46 @@ impl Player {
         (inner.queue.tracks().to_vec(), inner.queue.current_index())
     }
 
+    /// Removes a queued track. Removing the current one stops it and loads the
+    /// following track (or stops if the queue becomes empty).
+    pub async fn remove_at(&self, index: usize) -> Result<()> {
+        let (was_current, has_next) = {
+            let mut inner = self.inner.lock().await;
+            if index >= inner.queue.len() {
+                return Err(DomainError::InvalidInput(format!(
+                    "queue index {index} is out of range"
+                )));
+            }
+            let was_current = inner.queue.current_index() == Some(index);
+            if was_current {
+                inner.status = PlaybackStatus::Stopped;
+                inner.loading = false;
+                inner.generation = inner.generation.wrapping_add(1);
+            }
+            inner.queue.remove_at(index);
+            (was_current, !inner.queue.is_empty())
+        };
+
+        if was_current {
+            self.audio.stop()?;
+            if has_next {
+                self.load_current().await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Moves a queued track; the currently playing track is never restarted.
+    pub async fn move_item(&self, from: usize, to: usize) -> Result<()> {
+        let mut inner = self.inner.lock().await;
+        if !inner.queue.move_item(from, to) {
+            return Err(DomainError::InvalidInput(format!(
+                "cannot move queue item {from} to {to}"
+            )));
+        }
+        Ok(())
+    }
+
     pub async fn clear_queue(&self) -> Result<()> {
         let mut inner = self.inner.lock().await;
         inner.queue.clear();

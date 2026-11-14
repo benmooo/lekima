@@ -172,6 +172,9 @@ pub enum TopCommand {
     Lyrics {
         #[arg(long, value_name = "ID")]
         id: Option<u64>,
+        /// Include translations when the provider has them.
+        #[arg(long)]
+        translate: bool,
     },
 
     /// Show the current playback state.
@@ -269,6 +272,18 @@ pub enum QueueCommand {
         /// Insert after the current track instead of at the end.
         #[arg(long)]
         next: bool,
+    },
+    /// Remove a queued track by index.
+    Remove {
+        #[arg(value_name = "INDEX")]
+        index: usize,
+    },
+    /// Move a queued track to a new index.
+    Move {
+        #[arg(value_name = "FROM")]
+        from: usize,
+        #[arg(value_name = "TO")]
+        to: usize,
     },
     /// Remove everything from the queue.
     Clear,

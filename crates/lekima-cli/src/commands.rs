@@ -33,6 +33,7 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
                 theme: config.ui.theme.clone(),
                 glyphs: config.ui.glyphs.clone(),
                 density: config.ui.density.clone(),
+                lyrics_translation: config.ui.lyrics_translation,
             };
             let changed = lekima_tui::run(socket, preferences)
                 .await
@@ -43,6 +44,7 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
                     &preferences.theme,
                     &preferences.glyphs,
                     &preferences.density,
+                    preferences.lyrics_translation,
                 )
             {
                 tracing::warn!(%error, "failed to persist UI settings");
@@ -253,6 +255,18 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
                 output::print_reply(&reply, json);
                 Ok(())
             }
+            QueueCommand::Remove { index } => {
+                let reply =
+                    daemon_call(&socket, &paths, &config, Command::QueueRemove { index }).await?;
+                output::print_reply(&reply, json);
+                Ok(())
+            }
+            QueueCommand::Move { from, to } => {
+                let reply =
+                    daemon_call(&socket, &paths, &config, Command::QueueMove { from, to }).await?;
+                output::print_reply(&reply, json);
+                Ok(())
+            }
             QueueCommand::Clear => {
                 simple(&socket, &paths, &config, Command::ClearQueue, json).await
             }
@@ -286,7 +300,7 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
             Ok(())
         }
 
-        TopCommand::Lyrics { id } => {
+        TopCommand::Lyrics { id, translate } => {
             let reply = daemon_call(
                 &socket,
                 &paths,
@@ -296,7 +310,18 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
                 },
             )
             .await?;
-            output::print_reply(&reply, json);
+            if json {
+                output::print_reply(&reply, true);
+            } else if let Reply::Lyrics { lyrics, .. } = &reply {
+                let text = if translate {
+                    lyrics.plain_translated()
+                } else {
+                    lyrics.plain()
+                };
+                crate::say!("{text}");
+            } else {
+                output::print_reply(&reply, false);
+            }
             Ok(())
         }
 

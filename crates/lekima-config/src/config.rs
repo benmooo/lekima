@@ -62,6 +62,8 @@ pub struct UiConfig {
     pub glyphs: String,
     /// `compact` (default) or `comfortable` row rhythm.
     pub density: String,
+    /// Show translated lyrics under the original when available.
+    pub lyrics_translation: bool,
     /// `true` keeps the terminal contents when the TUI exits.
     pub alternate_screen: bool,
     pub show_help_on_start: bool,
@@ -73,6 +75,7 @@ impl Default for UiConfig {
             theme: "cyber".to_owned(),
             glyphs: "unicode".to_owned(),
             density: "compact".to_owned(),
+            lyrics_translation: false,
             alternate_screen: true,
             show_help_on_start: false,
         }
@@ -101,7 +104,13 @@ impl Default for DaemonConfig {
 /// # Errors
 ///
 /// Returns [`PathError`] when the file cannot be read, parsed or written.
-pub fn save_ui(path: &Path, theme: &str, glyphs: &str, density: &str) -> Result<(), PathError> {
+pub fn save_ui(
+    path: &Path,
+    theme: &str,
+    glyphs: &str,
+    density: &str,
+    lyrics_translation: bool,
+) -> Result<(), PathError> {
     let mut root: toml::Value = match std::fs::read_to_string(path) {
         Ok(raw) => toml::from_str(&raw).map_err(|source| PathError::Parse {
             path: path.to_path_buf(),
@@ -131,6 +140,10 @@ pub fn save_ui(path: &Path, theme: &str, glyphs: &str, density: &str) -> Result<
     ui.insert(
         "density".to_owned(),
         toml::Value::String(density.to_owned()),
+    );
+    ui.insert(
+        "lyrics_translation".to_owned(),
+        toml::Value::Boolean(lyrics_translation),
     );
 
     let encoded = toml::to_string_pretty(&root).map_err(|source| PathError::Serialize {
@@ -189,11 +202,12 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("config.toml");
         std::fs::write(&path, "[playback]\nvolume = 0.25\n").unwrap();
-        save_ui(&path, "amber", "ascii", "comfortable").unwrap();
+        save_ui(&path, "amber", "ascii", "comfortable", true).unwrap();
         let config = super::load(&path).unwrap();
         assert_eq!(config.ui.theme, "amber");
         assert_eq!(config.ui.glyphs, "ascii");
         assert_eq!(config.ui.density, "comfortable");
+        assert!(config.ui.lyrics_translation);
         assert!((config.playback.volume - 0.25).abs() < f32::EPSILON);
         let _ = std::fs::remove_dir_all(dir);
     }

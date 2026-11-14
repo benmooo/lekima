@@ -590,6 +590,10 @@ fn draw_lyrics(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     }
 
     draw_thin_rule(frame, theme, bottom_rule);
+    let has_translation = app
+        .lyrics_state
+        .ready()
+        .is_some_and(|lyrics| lyrics.lines.iter().any(|line| line.translation.is_some()));
     let offset = app.lyrics_offset_ms;
     let duration = app
         .status
@@ -608,6 +612,26 @@ fn draw_lyrics(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         ),
         Span::styled("  ·  [ ] · L", Style::new().fg(theme.dim)),
     ]);
+    if has_translation {
+        let mut footer_line = footer_line;
+        footer_line
+            .spans
+            .push(Span::styled("  ·  T:", Style::new().fg(theme.dim)));
+        footer_line.spans.push(Span::styled(
+            if app.preferences.lyrics_translation {
+                "ON"
+            } else {
+                "OFF"
+            },
+            Style::new().fg(if app.preferences.lyrics_translation {
+                theme.accent_alt
+            } else {
+                theme.dim
+            }),
+        ));
+        frame.render_widget(Paragraph::new(footer_line), footer);
+        return;
+    }
     frame.render_widget(Paragraph::new(footer_line), footer);
 }
 
@@ -626,13 +650,26 @@ fn draw_timed_lyrics(
     let position =
         (i64::try_from(app.status.position_ms).unwrap_or(0) + app.lyrics_offset_ms).max(0) as u64;
     let active = lyrics.active_index(position);
-    let total = lyrics.lines.len();
+    let show_translation = app.preferences.lyrics_translation;
 
-    let (start, padding) = if total <= height {
-        (0, (height - total) / 2)
+    let mut visual: Vec<(usize, &str, bool)> = Vec::with_capacity(lyrics.lines.len() * 2);
+    for (index, line) in lyrics.lines.iter().enumerate() {
+        visual.push((index, line.text.as_str(), false));
+        if show_translation && let Some(translation) = &line.translation {
+            visual.push((index, translation.as_str(), true));
+        }
+    }
+    if visual.is_empty() {
+        return;
+    }
+
+    let active_visual =
+        active.and_then(|index| visual.iter().rposition(|(lyric, _, _)| *lyric == index));
+    let (start, padding) = if visual.len() <= height {
+        (0, (height - visual.len()) / 2)
     } else {
         (
-            active.map_or(0, |index| index.saturating_sub(height / 2)),
+            active_visual.map_or(0, |index| index.saturating_sub(height / 2)),
             0,
         )
     };
@@ -641,33 +678,35 @@ fn draw_timed_lyrics(
     for _ in 0..padding {
         lines.push(Line::from(""));
     }
-    for (offset, line) in lyrics
-        .lines
-        .iter()
-        .skip(start)
-        .take(height - padding)
-        .enumerate()
+    for (offset, (lyric_index, text, is_translation)) in
+        visual.iter().skip(start).take(height - padding).enumerate()
     {
-        let index = start + offset;
-        let is_active = active == Some(index);
-        let style = if is_active {
+        let is_active = Some(*lyric_index) == active;
+        let style = if *is_translation {
+            Style::new().fg(if is_active {
+                theme.accent_alt
+            } else {
+                theme.dim
+            })
+        } else if is_active {
             Style::new().fg(theme.accent).add_modifier(Modifier::BOLD)
-        } else if active.is_some_and(|current| index < current) {
+        } else if active.is_some_and(|current| *lyric_index < current) {
             Style::new().fg(theme.dim)
         } else {
             Style::new().fg(theme.muted)
         };
+        let marker = if is_active && !is_translation {
+            format!("{} ", theme.glyphs.active)
+        } else if *is_translation {
+            "    ".to_owned()
+        } else {
+            "  ".to_owned()
+        };
         lines.push(Line::from(vec![
-            Span::styled(
-                if is_active {
-                    format!("{} ", theme.glyphs.active)
-                } else {
-                    "  ".to_owned()
-                },
-                Style::new().fg(theme.accent),
-            ),
-            Span::styled(truncate_chars(&line.text, width), style),
+            Span::styled(marker, Style::new().fg(theme.accent)),
+            Span::styled(truncate_chars(text, width.saturating_sub(2)), style),
         ]));
+        let _ = offset;
     }
 
     frame.render_widget(Paragraph::new(Text::from(lines)), area);
@@ -774,7 +813,7 @@ fn draw_footer(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         Mode::Search => ("SEARCH", ""),
         Mode::Command => ("CMD", ""),
         Mode::Help => ("HELP", "? or esc to close"),
-        Mode::Queue => ("QUEUE", "j/k nav · ⏎ jump · esc close"),
+        Mode::Queue => ("QUEUE", "j/k nav · x remove · J/K move · ⏎ jump · esc"),
         Mode::Settings => ("UI", "j/k select · h/l change · esc close"),
     };
 
@@ -899,7 +938,7 @@ fn wave_spans<'a>(app: &App, theme: &Theme) -> Vec<Span<'a>> {
 }
 
 fn draw_settings(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
-    let popup = centred(area, 56, 34);
+    let popup = centred(area, 58, 40);
     frame.render_widget(Clear, popup);
     let block = Block::bordered()
         .border_type(BorderType::Double)
@@ -911,9 +950,17 @@ fn draw_settings(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         ));
 
     let rows = [
-        ("THEME", app.preferences.theme.as_str()),
-        ("GLYPHS", app.preferences.glyphs.as_str()),
-        ("DENSITY", app.preferences.density.as_str()),
+        ("THEME", app.preferences.theme.clone()),
+        ("GLYPHS", app.preferences.glyphs.clone()),
+        ("DENSITY", app.preferences.density.clone()),
+        (
+            "TRANSLATION",
+            if app.preferences.lyrics_translation {
+                "on".to_owned()
+            } else {
+                "off".to_owned()
+            },
+        ),
     ];
     let mut lines: Vec<Line> = Vec::new();
     for (index, (label, value)) in rows.iter().enumerate() {
@@ -930,7 +977,7 @@ fn draw_settings(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             Span::styled(if selected { theme.glyphs.active } else { " " }, style),
             Span::styled(format!(" {label:<9}"), style),
             Span::styled("< ", Style::new().fg(theme.dim)),
-            Span::styled((*value).to_owned(), style),
+            Span::styled(value.clone(), style),
             Span::styled(" >", Style::new().fg(theme.dim)),
         ]));
     }

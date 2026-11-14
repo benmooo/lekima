@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 pub struct LyricLine {
     pub at_ms: u64,
     pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub translation: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -23,6 +25,21 @@ impl Lyrics {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.lines.is_empty()
+    }
+
+    /// Printable text without timestamps, with translations when present.
+    #[must_use]
+    pub fn plain_translated(&self) -> String {
+        let mut output = String::new();
+        for line in &self.lines {
+            output.push_str(&line.text);
+            if let Some(translation) = &line.translation {
+                output.push('\n');
+                output.push_str(translation);
+            }
+            output.push('\n');
+        }
+        output.trim_end().to_owned()
     }
 
     /// Printable text without timestamps.
@@ -59,6 +76,16 @@ impl Lyrics {
 ///   pane still has something to show.
 #[must_use]
 pub fn parse_lrc(raw: &str) -> Lyrics {
+    parse_with_translation(raw, None)
+}
+
+/// Parses original and translation documents, merging by exact timestamp.
+#[must_use]
+pub fn parse_lrc_with_translation(original: &str, translation: Option<&str>) -> Lyrics {
+    parse_with_translation(original, translation)
+}
+
+fn parse_with_translation(raw: &str, translation: Option<&str>) -> Lyrics {
     let mut offset: i64 = 0;
     let mut entries: Vec<(i64, String, bool)> = Vec::new();
 
@@ -107,10 +134,25 @@ pub fn parse_lrc(raw: &str) -> Lyrics {
                 0
             },
             text,
+            translation: None,
         })
         .collect();
 
     lines.sort_by_key(|line| line.at_ms);
+
+    if let Some(translation) = translation {
+        let translated = parse_with_translation(translation, None);
+        let lookup = |at: u64| {
+            translated
+                .lines
+                .iter()
+                .find(|line| line.at_ms == at)
+                .map(|line| line.text.clone())
+        };
+        for line in &mut lines {
+            line.translation = lookup(line.at_ms);
+        }
+    }
     Lyrics {
         lines,
         raw: raw.to_owned(),
@@ -172,6 +214,17 @@ mod tests {
         let lyrics = parse_lrc("first line\n\nsecond line");
         assert_eq!(lyrics.plain(), "first line\nsecond line");
         assert!(lyrics.lines.iter().all(|line| line.at_ms == 0));
+    }
+
+    #[test]
+    fn merges_translations_by_exact_timestamp() {
+        let lyrics = super::parse_lrc_with_translation(
+            "[00:01.00]hello\n[00:02.00]world",
+            Some("[00:01.00]你好\n[00:03.00]ignored"),
+        );
+        assert_eq!(lyrics.lines[0].translation.as_deref(), Some("你好"));
+        assert_eq!(lyrics.lines[1].translation, None);
+        assert_eq!(lyrics.plain_translated(), "hello\n你好\nworld");
     }
 
     #[test]

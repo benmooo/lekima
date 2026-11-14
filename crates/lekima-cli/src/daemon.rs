@@ -232,6 +232,8 @@ impl Daemon {
                 | Command::Jump { .. }
                 | Command::Next
                 | Command::Prev
+                | Command::QueueRemove { .. }
+                | Command::QueueMove { .. }
         ) {
             let (tracks, index) = self.player.queue().await;
             self.hub.publish(Event::Queue { tracks, index });
@@ -309,6 +311,21 @@ impl Daemon {
                 Ok(self.status().await)
             }
             Command::Queue => {
+                let (tracks, index) = self.player.queue().await;
+                Ok(Reply::Queue { tracks, index })
+            }
+            Command::QueueRemove { index } => {
+                let was_current = self.player.queue().await.1 == Some(index);
+                self.player.remove_at(index).await?;
+                if was_current {
+                    Ok(self.status().await)
+                } else {
+                    let (tracks, index) = self.player.queue().await;
+                    Ok(Reply::Queue { tracks, index })
+                }
+            }
+            Command::QueueMove { from, to } => {
+                self.player.move_item(from, to).await?;
                 let (tracks, index) = self.player.queue().await;
                 Ok(Reply::Queue { tracks, index })
             }

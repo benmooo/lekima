@@ -19,7 +19,7 @@ pub mod playback;
 pub mod ports;
 
 pub use error::{DomainError, Result};
-pub use lyrics::{LyricLine, Lyrics, parse_lrc};
+pub use lyrics::{LyricLine, Lyrics, parse_lrc, parse_lrc_with_translation};
 pub use model::{
     Album, AlbumId, Artist, ArtistId, Playlist, PlaylistId, QrLogin, QrStatus, Quality, SearchKind,
     SearchResults, Toplist, Track, TrackId, UserId, UserProfile, format_duration_ms,
