@@ -167,6 +167,11 @@ pub trait AudioEngine: Send + Sync {
     fn wave(&self) -> Vec<f32> {
         Vec::new()
     }
+
+    /// True while the decoder is waiting for network data mid-track.
+    fn is_buffering(&self) -> bool {
+        false
+    }
 }
 
 /// Extension point for `status` output in frontends that do not own the daemon.

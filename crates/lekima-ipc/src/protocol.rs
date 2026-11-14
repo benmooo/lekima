@@ -6,8 +6,8 @@
 //! agents all speak the same language.
 
 use lekima_domain::{
-    Lyrics, PlaybackState, Playlist, PlaylistId, RepeatMode, SearchKind, SearchResults, Toplist,
-    Track, TrackId, UserProfile,
+    Lyrics, PlaybackState, Playlist, PlaylistId, Quality, RepeatMode, SearchKind, SearchResults,
+    Toplist, Track, TrackId, UserProfile,
 };
 use serde::{Deserialize, Serialize};
 
@@ -102,6 +102,14 @@ pub enum Command {
     /// Protocol handshake.
     Hello {
         protocol: u16,
+    },
+    /// Configure or cancel the sleep timer (`None` cancels).
+    Sleep {
+        minutes: Option<u32>,
+    },
+    /// Bitrate class for subsequent tracks.
+    SetQuality {
+        quality: Quality,
     },
     /// Stream sequenced events on this connection after the ack.
     Subscribe {

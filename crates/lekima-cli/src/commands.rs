@@ -325,6 +325,30 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
             Ok(())
         }
 
+        TopCommand::Sleep { spec } => {
+            let minutes = parse_sleep(&spec)?;
+            let reply = daemon_call(&socket, &paths, &config, Command::Sleep { minutes }).await?;
+            output::print_reply(&reply, json);
+            Ok(())
+        }
+
+        TopCommand::Quality { quality } => {
+            let Some(quality) = quality else {
+                let reply = daemon_call(&socket, &paths, &config, Command::Status).await?;
+                output::print_reply(&reply, json);
+                return Ok(());
+            };
+            let quality: lekima_domain::Quality = quality.into();
+            if let Err(error) = lekima_config::save_quality(&paths.config_file(), quality.as_str())
+            {
+                tracing::warn!(%error, "failed to persist quality");
+            }
+            let reply =
+                daemon_call(&socket, &paths, &config, Command::SetQuality { quality }).await?;
+            output::print_reply(&reply, json);
+            Ok(())
+        }
+
         TopCommand::Status => {
             let reply = daemon_call(&socket, &paths, &config, Command::Status).await?;
             output::print_reply(&reply, json);
@@ -826,6 +850,35 @@ fn command_tree(command: &clap::Command) -> serde_json::Value {
     })
 }
 
+/// Parses `off`, `30m`, `1h`, `90s` or a bare number of minutes.
+fn parse_sleep(spec: &str) -> Result<Option<u32>, Failure> {
+    let spec = spec.trim().to_ascii_lowercase();
+    if spec == "off" || spec == "0" {
+        return Ok(None);
+    }
+    let (value, unit) = if let Some(value) = spec.strip_suffix('h') {
+        (value, "h")
+    } else if let Some(value) = spec.strip_suffix('m') {
+        (value, "m")
+    } else if let Some(value) = spec.strip_suffix('s') {
+        (value, "s")
+    } else {
+        (spec.as_str(), "m")
+    };
+    let value: f64 = value
+        .parse()
+        .map_err(|_| Failure::usage(format!("`{spec}` is not a duration")))?;
+    let minutes = match unit {
+        "h" => value * 60.0,
+        "s" => value / 60.0,
+        _ => value,
+    };
+    if minutes <= 0.0 {
+        return Err(Failure::usage("sleep duration must be positive"));
+    }
+    Ok(Some(minutes.ceil().clamp(1.0, 24.0 * 60.0) as u32))
+}
+
 fn parse_event_kinds(raw: Option<&str>) -> Result<Vec<EventKind>, Failure> {
     let Some(raw) = raw else {
         return Ok(Vec::new());
@@ -925,6 +978,16 @@ mod tests {
         assert_eq!(parse_position("2m").unwrap(), 120_000);
         assert_eq!(parse_position("+10s").unwrap(), 10_000);
         assert_eq!(parse_position("-10s").unwrap(), -10_000);
+    }
+
+    #[test]
+    fn sleep_durations_parse() {
+        assert_eq!(super::parse_sleep("30m").unwrap(), Some(30));
+        assert_eq!(super::parse_sleep("1h").unwrap(), Some(60));
+        assert_eq!(super::parse_sleep("90s").unwrap(), Some(2));
+        assert_eq!(super::parse_sleep("45").unwrap(), Some(45));
+        assert_eq!(super::parse_sleep("off").unwrap(), None);
+        assert!(super::parse_sleep("soon").is_err());
     }
 
     #[test]

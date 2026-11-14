@@ -85,7 +85,7 @@ fn draw_hud(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                 Span::styled(
                     format!(
                         "{} ",
-                        if app.status.loading {
+                        if app.status.loading || app.status.buffering {
                             theme.glyphs.loading
                         } else {
                             glyph(status, theme)
@@ -169,6 +169,19 @@ fn draw_hud(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     if app.status.track.is_some() {
         spans.push(Span::styled("  SIG ", Style::new().fg(theme.dim)));
         spans.extend(wave_spans(app, theme));
+        spans.extend([
+            Span::styled("  ", Style::new()),
+            Span::styled(
+                app.status.quality.as_str().to_ascii_uppercase(),
+                Style::new().fg(theme.accent_alt),
+            ),
+        ]);
+    }
+    if let Some(remaining) = app.status.sleep_remaining_ms {
+        spans.extend([
+            Span::styled("  SLEEP ", Style::new().fg(theme.dim)),
+            Span::styled(clock(remaining), Style::new().fg(theme.warn)),
+        ]);
     }
 
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
@@ -372,7 +385,7 @@ fn draw_tracks(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         let row = {
             let (marker, marker_style) = if Some(track.id) == playing_id {
                 (
-                    if app.status.loading {
+                    if app.status.loading || app.status.buffering {
                         theme.glyphs.loading.to_owned()
                     } else {
                         glyph(app.status.status, theme).to_owned()

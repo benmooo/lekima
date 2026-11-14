@@ -64,18 +64,20 @@ pub async fn run(paths: &Paths, config: &Config, socket: &Path, _detached: bool)
     ));
 
     let hub = Arc::new(EventHub::new());
+    let sleep_until = Arc::new(StdMutex::new(None));
     let daemon = Arc::new(Daemon {
         player: Arc::clone(&player),
         credentials: FileCredentials::new(paths.session_file()),
         shutdown: Notify::new(),
         hub: Arc::clone(&hub),
+        sleep_until: Arc::clone(&sleep_until),
     });
 
     {
         let likes = Arc::clone(&player);
         tokio::spawn(async move { likes.load_likes().await });
     }
-    spawn_ticker(Arc::clone(&player), Arc::clone(&hub));
+    spawn_ticker(Arc::clone(&player), Arc::clone(&hub), sleep_until);
 
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .context("failed to install the SIGTERM handler")?;
@@ -120,6 +122,7 @@ struct Daemon {
     credentials: FileCredentials,
     shutdown: Notify,
     hub: Arc<EventHub>,
+    sleep_until: Arc<StdMutex<Option<Instant>>>,
 }
 
 /// Sequenced broadcast with a replay ring.
@@ -446,6 +449,18 @@ impl Daemon {
                 lekima_ipc::ErrorCode::BadRequest,
                 "subscriptions are handled on the connection",
             )),
+            Command::Sleep { minutes } => {
+                let deadline = minutes
+                    .map(|minutes| Instant::now() + Duration::from_secs(u64::from(minutes) * 60));
+                if let Ok(mut slot) = self.sleep_until.lock() {
+                    *slot = deadline;
+                }
+                Ok(self.status().await)
+            }
+            Command::SetQuality { quality } => {
+                self.player.set_quality(quality).await;
+                Ok(self.status().await)
+            }
             Command::Shutdown => {
                 self.shutdown.notify_waiters();
                 Ok(Reply::Ack)
@@ -498,12 +513,26 @@ impl Daemon {
     }
 
     async fn status(&self) -> Reply {
-        let state: PlaybackState = self.player.snapshot().await;
+        let mut state: PlaybackState = self.player.snapshot().await;
+        state.sleep_remaining_ms = self.sleep_until.lock().ok().and_then(|slot| {
+            slot.map(|deadline| {
+                u64::try_from(
+                    deadline
+                        .saturating_duration_since(Instant::now())
+                        .as_millis(),
+                )
+                .unwrap_or(u64::MAX)
+            })
+        });
         Reply::Status { state }
     }
 }
 
-fn spawn_ticker(player: Arc<Player>, hub: Arc<EventHub>) {
+fn spawn_ticker(
+    player: Arc<Player>,
+    hub: Arc<EventHub>,
+    sleep_until: Arc<StdMutex<Option<Instant>>>,
+) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_millis(500));
         loop {
@@ -519,6 +548,19 @@ fn spawn_ticker(player: Arc<Player>, hub: Arc<EventHub>) {
             }
             if let Err(error) = player.fm_maybe_prefetch().await {
                 tracing::debug!(%error, "fm prefetch skipped");
+            }
+            let expired = sleep_until
+                .lock()
+                .ok()
+                .is_some_and(|slot| slot.is_some_and(|deadline| Instant::now() >= deadline));
+            if expired {
+                if let Ok(mut slot) = sleep_until.lock() {
+                    *slot = None;
+                }
+                let _ = player.pause().await;
+                hub.publish(Event::Status {
+                    state: player.snapshot().await,
+                });
             }
         }
     });

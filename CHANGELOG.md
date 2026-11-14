@@ -3,6 +3,22 @@
 All notable changes to lekima are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## 0.2.0 — unreleased
+
+### Added
+
+- Streaming playback: tracks over 64 MiB spool to an anonymous temp file and
+  start after a small buffer; the 1 GB cloud WAV now plays with flat memory.
+- `buffering` state mid-track; `loading` while the first samples arrive.
+- Sleep timer (`lekima sleep 30m`, `:sleep`, MCP) with status/HUD countdown.
+- Live quality switching (`lekima quality`, `:quality`, MCP), persisted.
+- Seek within the buffered region; explicit error beyond it.
+
+### Known limitations
+
+- Seek beyond the buffered window and HTTP Range restart are not implemented.
+- No gapless playback, device picker, MPRIS or Now Playing yet.
+
 ## 0.1.1 — 2026-11-14
 
 ### Changed

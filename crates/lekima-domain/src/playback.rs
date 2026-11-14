@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::Track;
+use crate::model::{Quality, Track};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -114,6 +114,14 @@ pub struct PlaybackState {
     /// True between starting a load and the first sample reaching the device.
     #[serde(default)]
     pub loading: bool,
+    /// True while a streaming track is waiting for more network data.
+    #[serde(default)]
+    pub buffering: bool,
+    #[serde(default)]
+    pub quality: Quality,
+    /// Active sleep timer, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sleep_remaining_ms: Option<u64>,
     /// Recent amplitude envelope from the audio device (oldest first, 0..=1).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub wave: Vec<f32>,
@@ -147,6 +155,9 @@ impl Default for PlaybackState {
             queue_kind: QueueKind::Manual,
             liked: false,
             loading: false,
+            buffering: false,
+            quality: Quality::Exhigh,
+            sleep_remaining_ms: None,
             wave: Vec::new(),
         }
     }

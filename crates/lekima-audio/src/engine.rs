@@ -1,9 +1,10 @@
 //! The rodio-backed [`AudioEngine`] implementation.
 
 use std::{
+    fs::File,
     io::Cursor,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
         mpsc::{Receiver, RecvTimeoutError, Sender, channel},
     },
@@ -14,11 +15,20 @@ use async_trait::async_trait;
 use lekima_domain::{AudioEngine, DomainError, Result};
 use rodio::{Decoder, DeviceSinkBuilder, Player};
 
-use crate::wave::{Metered, WAVE_CAPACITY, Waveform};
+use crate::{
+    spool::{GrowingFile, Spool},
+    wave::{Metered, WAVE_CAPACITY, Waveform},
+};
+use tempfile::NamedTempFile;
 use tokio::sync::oneshot;
 
-/// Refuse absurd downloads. NetEase lossless tracks stay well below this.
-pub const MAX_TRACK_BYTES: u64 = 64 * 1024 * 1024;
+/// Tracks at or below this size are downloaded fully into memory (fast seeks).
+pub const MAX_MEMORY_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Bytes to buffer before starting a spooled stream.
+const SPOOL_THRESHOLD: u64 = 512 * 1024;
+/// Give the network this long to reach the threshold.
+const SPOOL_TIMEOUT: Duration = Duration::from_secs(30);
 
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 const DEVICE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -29,6 +39,12 @@ const REFERER: &str = "https://music.163.com/";
 enum Command {
     Load {
         bytes: Vec<u8>,
+        ack: oneshot::Sender<std::result::Result<(), String>>,
+    },
+    LoadStream {
+        reader: File,
+        total: Option<u64>,
+        spool: Arc<Spool>,
         ack: oneshot::Sender<std::result::Result<(), String>>,
     },
     Pause,
@@ -73,6 +89,7 @@ pub struct RodioAudioEngine {
     commands: Sender<Command>,
     shared: Arc<Shared>,
     client: reqwest::Client,
+    spool: Mutex<Option<Arc<Spool>>>,
 }
 
 impl RodioAudioEngine {
@@ -116,7 +133,16 @@ impl RodioAudioEngine {
             commands,
             shared,
             client,
+            spool: Mutex::new(None),
         })
+    }
+
+    fn cancel_spool(&self) {
+        if let Ok(mut slot) = self.spool.lock()
+            && let Some(spool) = slot.take()
+        {
+            spool.cancel();
+        }
     }
 
     fn send(&self, command: Command) -> Result<()> {
@@ -129,8 +155,8 @@ impl RodioAudioEngine {
 #[async_trait]
 impl AudioEngine for RodioAudioEngine {
     async fn play_url(&self, url: &str) -> Result<()> {
-        // Stop the previous track before the network work: nothing should keep
-        // sounding while the next stream is being fetched.
+        self.cancel_spool();
+        // Stop the previous track before the network work.
         let _ = self.send(Command::Stop);
 
         let response = self
@@ -149,40 +175,87 @@ impl AudioEngine for RodioAudioEngine {
                 response.status()
             )));
         }
-        if response
-            .content_length()
-            .is_some_and(|len| len > MAX_TRACK_BYTES)
-        {
-            return Err(DomainError::Playback(format!(
-                "refusing to buffer more than {} MiB",
-                MAX_TRACK_BYTES / (1024 * 1024)
-            )));
+
+        let total = response.content_length();
+        let memory = total.is_some_and(|length| length <= MAX_MEMORY_BYTES);
+
+        if memory {
+            let bytes = response.bytes().await.map_err(|error| {
+                DomainError::Playback(format!("failed to read the stream: {error}"))
+            })?;
+            if bytes.is_empty() {
+                return Err(DomainError::Playback("stream is empty".to_owned()));
+            }
+            let (ack, ack_rx) = oneshot::channel();
+            self.send(Command::Load {
+                bytes: bytes.to_vec(),
+                ack,
+            })?;
+            return await_load(ack_rx).await;
         }
 
-        let bytes = response.bytes().await.map_err(|error| {
-            DomainError::Playback(format!("failed to read the stream: {error}"))
+        // Large or unknown-length stream: spool to an anonymous temp file.
+        let temp = NamedTempFile::new().map_err(|error| {
+            DomainError::Playback(format!("failed to create the stream spool: {error}"))
         })?;
-        if bytes.len() as u64 > MAX_TRACK_BYTES {
-            return Err(DomainError::Playback(
-                "stream exceeds the size limit".to_owned(),
-            ));
+        let mut writer = temp.reopen().map_err(|error| {
+            DomainError::Playback(format!("failed to open the stream spool: {error}"))
+        })?;
+        let reader = temp.reopen().map_err(|error| {
+            DomainError::Playback(format!("failed to open the stream spool: {error}"))
+        })?;
+
+        let spool = Spool::new(total);
+        if let Ok(mut slot) = self.spool.lock() {
+            *slot = Some(Arc::clone(&spool));
         }
-        if bytes.is_empty() {
-            return Err(DomainError::Playback("stream is empty".to_owned()));
+
+        let writer_spool = Arc::clone(&spool);
+        tokio::spawn(async move {
+            let mut response = response;
+            loop {
+                if writer_spool.is_cancelled() {
+                    break;
+                }
+                match response.chunk().await {
+                    Ok(Some(chunk)) => {
+                        if let Err(error) = writer_spool.push(&mut writer, &chunk) {
+                            writer_spool.fail(format!("failed to write the stream spool: {error}"));
+                            break;
+                        }
+                    }
+                    Ok(None) => {
+                        writer_spool.finish();
+                        break;
+                    }
+                    Err(error) => {
+                        writer_spool.fail(format!("failed to read the stream: {error}"));
+                        break;
+                    }
+                }
+            }
+        });
+
+        let wait_spool = Arc::clone(&spool);
+        let ready = tokio::task::spawn_blocking(move || {
+            wait_spool.wait_ready(SPOOL_THRESHOLD, SPOOL_TIMEOUT)
+        })
+        .await
+        .map_err(|error| DomainError::Playback(format!("buffering task failed: {error}")))?;
+
+        if let Err(message) = ready {
+            spool.cancel();
+            return Err(DomainError::Playback(message));
         }
 
         let (ack, ack_rx) = oneshot::channel();
-        self.send(Command::Load {
-            bytes: bytes.to_vec(),
+        self.send(Command::LoadStream {
+            reader,
+            total,
+            spool: Arc::clone(&spool),
             ack,
         })?;
-        match ack_rx.await {
-            Ok(Ok(())) => Ok(()),
-            Ok(Err(message)) => Err(DomainError::Playback(message)),
-            Err(_) => Err(DomainError::Playback(
-                "the audio thread dropped the load request".to_owned(),
-            )),
-        }
+        await_load(ack_rx).await
     }
 
     fn pause(&self) -> Result<()> {
@@ -194,6 +267,7 @@ impl AudioEngine for RodioAudioEngine {
     }
 
     fn stop(&self) -> Result<()> {
+        self.cancel_spool();
         self.send(Command::Stop)
     }
 
@@ -221,10 +295,29 @@ impl AudioEngine for RodioAudioEngine {
     fn wave(&self) -> Vec<f32> {
         self.shared.wave.snapshot()
     }
+
+    fn is_buffering(&self) -> bool {
+        self.spool
+            .lock()
+            .ok()
+            .and_then(|slot| slot.as_ref().map(|spool| spool.is_buffering()))
+            .unwrap_or(false)
+    }
+}
+
+async fn await_load(ack_rx: oneshot::Receiver<std::result::Result<(), String>>) -> Result<()> {
+    match ack_rx.await {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(message)) => Err(DomainError::Playback(message)),
+        Err(_) => Err(DomainError::Playback(
+            "the audio thread dropped the load request".to_owned(),
+        )),
+    }
 }
 
 impl Drop for RodioAudioEngine {
     fn drop(&mut self) {
+        self.cancel_spool();
         let _ = self.commands.send(Command::Shutdown);
     }
 }
@@ -270,6 +363,37 @@ fn audio_thread(
                     Err(error) => {
                         shared.loaded.store(false, Ordering::Relaxed);
                         let _ = ack.send(Err(format!("audio format not supported: {error}")));
+                    }
+                }
+            }
+            Ok(Command::LoadStream {
+                reader,
+                total,
+                spool,
+                ack,
+            }) => {
+                player.stop();
+                let mut builder = Decoder::builder()
+                    .with_data(GrowingFile::new(reader, spool))
+                    .with_seekable(true);
+                if let Some(total) = total {
+                    builder = builder.with_byte_len(total);
+                }
+                match builder.build() {
+                    Ok(decoder) => {
+                        shared.loaded.store(true, Ordering::Relaxed);
+                        shared.finished.store(false, Ordering::Relaxed);
+                        shared.position_ms.store(0, Ordering::Relaxed);
+                        shared.wave.reset();
+                        player.append(Metered::new(decoder, Arc::clone(&shared.wave)));
+                        player.play();
+                        tracing::debug!("stream loaded from spool");
+                        let _ = ack.send(Ok(()));
+                    }
+                    Err(error) => {
+                        shared.loaded.store(false, Ordering::Relaxed);
+                        let _ =
+                            ack.send(Err(format!("streamed audio format not supported: {error}")));
                     }
                 }
             }

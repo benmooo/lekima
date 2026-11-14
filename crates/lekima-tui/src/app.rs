@@ -453,6 +453,34 @@ impl App {
                 self.mode = Mode::Queue;
                 Action::Call(Command::Queue)
             }
+            "sleep" => match parse_sleep_minutes(rest.trim()) {
+                Ok(minutes) => Action::Call(Command::Sleep { minutes }),
+                Err(message) => {
+                    self.notify(message, true);
+                    Action::None
+                }
+            },
+            "quality" => match rest.trim() {
+                "standard" => Action::Call(Command::SetQuality {
+                    quality: lekima_domain::Quality::Standard,
+                }),
+                "higher" => Action::Call(Command::SetQuality {
+                    quality: lekima_domain::Quality::Higher,
+                }),
+                "exhigh" => Action::Call(Command::SetQuality {
+                    quality: lekima_domain::Quality::Exhigh,
+                }),
+                "lossless" => Action::Call(Command::SetQuality {
+                    quality: lekima_domain::Quality::Lossless,
+                }),
+                other => {
+                    self.notify(
+                        format!("usage: :quality standard|higher|exhigh|lossless (got `{other}`)"),
+                        true,
+                    );
+                    Action::None
+                }
+            },
             "help" => {
                 self.mode = Mode::Help;
                 Action::None
@@ -972,6 +1000,28 @@ impl App {
     pub fn clamp(&mut self) {
         self.clamp_selection();
     }
+}
+
+fn parse_sleep_minutes(spec: &str) -> Result<Option<u32>, String> {
+    if spec.is_empty() || spec == "off" || spec == "0" {
+        return Ok(None);
+    }
+    let (value, multiplier) = if let Some(value) = spec.strip_suffix('h') {
+        (value, 60.0)
+    } else if let Some(value) = spec.strip_suffix('m') {
+        (value, 1.0)
+    } else if let Some(value) = spec.strip_suffix('s') {
+        (value, 1.0 / 60.0)
+    } else {
+        (spec, 1.0)
+    };
+    let value: f64 = value
+        .parse()
+        .map_err(|_| format!("`{spec}` is not a duration"))?;
+    if value <= 0.0 {
+        return Err("sleep duration must be positive".to_owned());
+    }
+    Ok(Some((value * multiplier).ceil().clamp(1.0, 1440.0) as u32))
 }
 
 fn error_message(error: &IpcError) -> String {

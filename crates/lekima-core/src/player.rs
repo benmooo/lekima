@@ -37,7 +37,7 @@ struct Inner {
 pub struct Player {
     music: Arc<dyn MusicService>,
     audio: Arc<dyn AudioEngine>,
-    quality: Quality,
+    quality: Mutex<Quality>,
     inner: Mutex<Inner>,
     liked: Mutex<HashSet<TrackId>>,
     trashed: Mutex<HashSet<TrackId>>,
@@ -56,7 +56,7 @@ impl Player {
         Self {
             music,
             audio,
-            quality,
+            quality: Mutex::new(quality),
             inner: Mutex::new(Inner {
                 queue: Queue::default(),
                 status: PlaybackStatus::Stopped,
@@ -108,6 +108,9 @@ impl Player {
                 .current()
                 .is_some_and(|track| liked.contains(&track.id)),
             loading: inner.loading,
+            buffering: self.audio.is_buffering(),
+            quality: *self.quality.lock().await,
+            sleep_remaining_ms: None,
             wave: self.audio.wave(),
         };
         if state.status != PlaybackStatus::Stopped
@@ -245,7 +248,8 @@ impl Player {
         // A must go silent now, not after B has been fetched.
         let _ = self.audio.stop();
 
-        let url = match self.music.stream_url(track.id, self.quality).await {
+        let quality = *self.quality.lock().await;
+        let url = match self.music.stream_url(track.id, quality).await {
             Ok(url) => url,
             Err(error) => {
                 self.fail_load(generation).await;
@@ -429,6 +433,16 @@ impl Player {
             self.load_current().await?;
         }
         Ok(())
+    }
+
+    /// Changes the bitrate class for the next track.
+    pub async fn set_quality(&self, quality: Quality) {
+        *self.quality.lock().await = quality;
+    }
+
+    #[must_use]
+    pub async fn quality(&self) -> Quality {
+        *self.quality.lock().await
     }
 
     /// Daily recommendations, played immediately.

@@ -168,8 +168,11 @@ fn print_status(state: &PlaybackState) {
         || "nothing playing".to_owned(),
         |track| format!("{} — {}", track.name, track.artist_names()),
     );
+    let sleep = state
+        .sleep_remaining_ms
+        .map_or_else(String::new, |ms| format!("  sleep {}", format_clock(ms)));
     crate::say!(
-        "{}  {}  [{}/{}]  vol {:.0}%  repeat {}  queue {}",
+        "{}  {}  [{}/{}]  vol {:.0}%  repeat {}  queue {}  {}{}",
         icon(state),
         track,
         format_ms(state.position_ms),
@@ -180,6 +183,8 @@ fn print_status(state: &PlaybackState) {
         state.effective_volume() * 100.0,
         state.repeat.as_str(),
         state.queue_length,
+        state.quality.as_str(),
+        sleep,
     );
 }
 
@@ -235,6 +240,11 @@ fn print_queue(tracks: &[Track], index: Option<usize>) {
             track.artist_names()
         );
     }
+}
+
+fn format_clock(ms: u64) -> String {
+    let seconds = ms / 1000;
+    format!("{:02}:{:02}", seconds / 60, seconds % 60)
 }
 
 fn format_ms(ms: u64) -> String {

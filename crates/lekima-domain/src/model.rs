@@ -226,6 +226,16 @@ pub enum Quality {
 
 impl Quality {
     #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Standard => "standard",
+            Self::Higher => "higher",
+            Self::Exhigh => "exhigh",
+            Self::Lossless => "lossless",
+        }
+    }
+
+    #[must_use]
     pub const fn bitrate(self) -> u32 {
         match self {
             Self::Standard => 128_000,

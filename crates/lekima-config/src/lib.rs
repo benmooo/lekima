@@ -13,4 +13,4 @@ pub use config::{Config, DaemonConfig, PlaybackConfig, ProviderConfig, UiConfig}
 pub use paths::{PathError, Paths};
 pub use session::FileCredentials;
 
-pub use config::{load as load_config, save_ui};
+pub use config::{load as load_config, save_quality, save_ui};

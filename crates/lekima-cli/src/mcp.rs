@@ -135,6 +135,24 @@ fn build_command(name: &str, args: &Value) -> Result<Command, String> {
             level: (number_arg(args, "level").unwrap_or(70.0) / 100.0).clamp(0.0, 1.0) as f32,
         },
         "queue_list" => Command::Queue,
+        "sleep" => Command::Sleep {
+            minutes: args
+                .get("minutes")
+                .and_then(Value::as_u64)
+                .map(|minutes| u32::try_from(minutes).unwrap_or(u32::MAX)),
+        },
+        "set_quality" => Command::SetQuality {
+            quality: match args
+                .get("quality")
+                .and_then(Value::as_str)
+                .unwrap_or("exhigh")
+            {
+                "standard" => lekima_domain::Quality::Standard,
+                "higher" => lekima_domain::Quality::Higher,
+                "lossless" => lekima_domain::Quality::Lossless,
+                _ => lekima_domain::Quality::Exhigh,
+            },
+        },
         "queue_remove" => Command::QueueRemove {
             index: usize_arg(args, "index")?,
         },

@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
+use lekima_domain::Quality;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -177,6 +178,18 @@ pub enum TopCommand {
         translate: bool,
     },
 
+    /// Stop (pause) playback after a delay. `30m`, `1h`, `90s`, `off`.
+    Sleep {
+        #[arg(value_name = "DURATION")]
+        spec: String,
+    },
+
+    /// Show or set the streaming quality for subsequent tracks.
+    Quality {
+        #[arg(value_enum)]
+        quality: Option<QualityArg>,
+    },
+
     /// Show the current playback state.
     Status,
 
@@ -319,6 +332,25 @@ pub enum DaemonCommand {
         #[arg(long, default_value_t = 40)]
         lines: usize,
     },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum QualityArg {
+    Standard,
+    Higher,
+    Exhigh,
+    Lossless,
+}
+
+impl From<QualityArg> for Quality {
+    fn from(value: QualityArg) -> Self {
+        match value {
+            QualityArg::Standard => Self::Standard,
+            QualityArg::Higher => Self::Higher,
+            QualityArg::Exhigh => Self::Exhigh,
+            QualityArg::Lossless => Self::Lossless,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
