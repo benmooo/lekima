@@ -74,8 +74,8 @@ provider, done well, with a UI that never gets in the way.
 
 | Area | Included |
 | --- | --- |
-| Session | Reuse an existing browser cookie (`lekima login --cookie`), `whoami`, `logout`; QR login in v0.2 |
-| Catalogue | Search tracks; track metadata; playlist listing and playlist tracks |
+| Session | QR login (`lekima login --qr`) or a pasted browser cookie (`--cookie-file -`), `whoami`, `logout` |
+| Catalogue | Search tracks, playlists and artists; track metadata; playlist listing and full playlist paging; lyrics |
 | Playback | Play/pause/resume/stop, next/previous, seek, volume, mute, repeat off/all/one, autoplay next |
 | Queue | View, enqueue (append or “play next”), clear, jump |
 | TUI | Now-playing bar with progress, track table, sidebar (playlists), search prompt, help overlay, vim keybindings, resize-safe layout |
@@ -84,10 +84,9 @@ provider, done well, with a UI that never gets in the way.
 
 ### v0.2 — “it feels finished”
 
-QR login, lyrics pane (synced), daily recommendations, personal FM, liked
-playlist, like/unlike, playlist search, mouse-optional scroll, themes,
-`NO_COLOR`, `lekima mcp` stdio server, client-side response of live events
-(push protocol) instead of polling.
+Synced lyrics pane, daily recommendations, personal FM, liked playlist,
+like/unlike, playlist search, mouse-optional scroll, themes, `NO_COLOR`,
+`lekima mcp` stdio server, push events from the daemon instead of polling.
 
 ### Later
 
@@ -222,7 +221,7 @@ lekima playlist list [--json]
 lekima playlist show <ID> [--json]
 lekima lyrics [--id ID] [--json]           (v0.2)
 lekima status [--json]
-lekima login [--cookie-file PATH|-] [--qr] (--qr in v0.2)
+lekima login [--qr | --cookie-file PATH|-]
 lekima logout
 lekima whoami [--json]
 lekima daemon start|stop|status|logs
@@ -293,7 +292,7 @@ tools for agents that prefer tool calls over shell.
 | **M1 Playback** | ncm adapter, rodio engine, daemon, CLI play/status | Sound from the CLI |
 | **M2 TUI** | ratatui shell, keymap, search, queue, help | Daily-drivable |
 | **M3 Agent surface** | JSON everywhere, capabilities, exit codes, doctor | Scripted demo passes |
-| **M4 Provider completeness** | ncmapi-rs 1.1: QR login, playlist detail, lyrics, daily/FM | TUI feature parity with old app |
+| **M4 Provider completeness** | ncmapi-rs 1.1: QR login, playlist detail, lyrics (done); daily/FM/like next | TUI feature parity with old app |
 | **M5 Release** | Packaging, docs, CI matrix, 0.1.0 tag | Installable from crates.io + release binaries |
 
 ## 9. Risks & mitigations
@@ -319,3 +318,5 @@ tools for agents that prefer tool calls over shell.
 4. **Lyrics rendering.** Synced highlighting requires a timed LRC parser — worth
    the dependency, or plain text first?
 5. **Windows.** WSL only, or native named pipes in v1.0?
+6. **Publishing.** `ncmapi` 1.1 is currently a path patch; publish it before
+   lekima 0.1 so `cargo install lekima` resolves from crates.io.

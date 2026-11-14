@@ -19,8 +19,8 @@ pub mod ports;
 
 pub use error::{DomainError, Result};
 pub use model::{
-    Album, AlbumId, Artist, ArtistId, Playlist, PlaylistId, Quality, SearchKind, SearchResults,
-    Track, TrackId, UserId, UserProfile, format_duration_ms,
+    Album, AlbumId, Artist, ArtistId, Playlist, PlaylistId, QrLogin, QrStatus, Quality, SearchKind,
+    SearchResults, Track, TrackId, UserId, UserProfile, format_duration_ms,
 };
 pub use playback::{PlaybackState, PlaybackStatus, Queue, RepeatMode};
 pub use ports::{AudioEngine, CredentialsStore, MusicService};

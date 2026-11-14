@@ -4,8 +4,8 @@ use std::{path::PathBuf, time::Duration};
 
 use async_trait::async_trait;
 use lekima_domain::{
-    self as domain, DomainError, MusicService, PlaylistId, Quality, SearchKind, TrackId, UserId,
-    UserProfile,
+    self as domain, DomainError, MusicService, PlaylistId, QrLogin, QrStatus, Quality, SearchKind,
+    TrackId, UserId, UserProfile,
 };
 use ncmapi::{
     ApiResponse, NcmClient, Page, SearchKind as ProviderSearchKind, SearchQuery,
@@ -193,10 +193,36 @@ impl MusicService for NcmMusicService {
     }
 
     async fn playlist_tracks(&self, id: PlaylistId) -> domain::Result<Vec<domain::Track>> {
-        let _ = id;
-        Err(DomainError::Unsupported(
-            "playlist tracks require ncmapi 1.1 (`/api/v6/playlist/detail`)".to_owned(),
-        ))
+        const PAGE: u16 = 500;
+        const MAX_PAGES: u32 = 40;
+
+        let mut tracks = Vec::new();
+        let mut offset = 0u32;
+        for _ in 0..MAX_PAGES {
+            let response = self
+                .client
+                .library()
+                .playlist_tracks(id.0, PAGE, offset)
+                .await
+                .map_err(provider_error)?;
+            let response = ensure_success(response)?;
+            let received = response.body.songs.len();
+            if received == 0 {
+                break;
+            }
+            tracks.extend(response.body.songs.into_iter().map(map::track));
+            if received < usize::from(PAGE) {
+                break;
+            }
+            offset = offset.saturating_add(u32::try_from(received).unwrap_or(0));
+        }
+
+        if tracks.is_empty() {
+            return Err(DomainError::NotFound(format!(
+                "playlist {id} has no tracks"
+            )));
+        }
+        Ok(tracks)
     }
 
     async fn current_user(&self) -> domain::Result<Option<UserProfile>> {
@@ -218,10 +244,57 @@ impl MusicService for NcmMusicService {
     }
 
     async fn lyrics(&self, id: TrackId) -> domain::Result<String> {
-        let _ = id;
-        Err(DomainError::Unsupported(
-            "lyrics require ncmapi 1.1 (`/api/song/lyric`)".to_owned(),
-        ))
+        let response = self
+            .client
+            .library()
+            .lyrics(id.0)
+            .await
+            .map_err(provider_error)?;
+        let response = ensure_success(response)?;
+        let text = map::plain_lyrics(response.body.text());
+        if text.trim().is_empty() {
+            return Err(DomainError::NotFound(format!("track {id} has no lyrics")));
+        }
+        Ok(text)
+    }
+
+    async fn qr_start(&self) -> domain::Result<QrLogin> {
+        let response = self
+            .client
+            .auth()
+            .qr_start()
+            .await
+            .map_err(provider_error)?;
+        let response = ensure_success(response)?;
+        if response.body.unikey.is_empty() {
+            return Err(DomainError::Unavailable(
+                "the provider returned an empty QR key".to_owned(),
+            ));
+        }
+        Ok(QrLogin {
+            key: response.body.unikey.clone(),
+            url: response.body.login_url(),
+        })
+    }
+
+    async fn qr_poll(&self, key: &str) -> domain::Result<QrStatus> {
+        let response = self
+            .client
+            .auth()
+            .qr_poll(key)
+            .await
+            .map_err(provider_error)?;
+        match response.code {
+            800 => Ok(QrStatus::Expired),
+            801 => Ok(QrStatus::Waiting),
+            802 => Ok(QrStatus::Scanned),
+            803 => Ok(QrStatus::Confirmed {
+                nickname: response.body.nickname,
+            }),
+            code => Err(DomainError::Unavailable(format!(
+                "the provider returned code {code} while polling the QR login"
+            ))),
+        }
     }
 }
 
@@ -229,7 +302,7 @@ impl MusicService for NcmMusicService {
 mod tests {
     use std::time::Duration;
 
-    use lekima_domain::{MusicService, PlaylistId, TrackId};
+    use lekima_domain::MusicService;
 
     use super::{NcmMusicService, NcmOptions};
 
@@ -243,16 +316,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unimplemented_provider_features_report_unsupported() {
+    async fn blank_qr_keys_are_rejected_before_any_network_call() {
         let service = service();
-        assert!(matches!(
-            service.playlist_tracks(PlaylistId(1)).await,
-            Err(lekima_domain::DomainError::Unsupported(_))
-        ));
-        assert!(matches!(
-            service.lyrics(TrackId(1)).await,
-            Err(lekima_domain::DomainError::Unsupported(_))
-        ));
+        let error = service.qr_poll(" ").await.unwrap_err();
+        assert!(matches!(error, lekima_domain::DomainError::InvalidInput(_)));
     }
 
     #[tokio::test]

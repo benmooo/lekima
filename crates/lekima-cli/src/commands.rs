@@ -202,7 +202,7 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
         }
 
         TopCommand::Login { cookie_file, qr } => {
-            login(&paths, &socket, cookie_file, qr, json).await
+            login(&paths, &socket, &config, cookie_file, qr, json).await
         }
 
         TopCommand::Logout => logout(&paths, &socket, json).await,
@@ -227,7 +227,7 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
             } else {
                 let encoded = serde_json::to_string_pretty(&tree)
                     .map_err(|error| Failure::internal(error.to_string()))?;
-                println!("{encoded}");
+                crate::say!("{encoded}");
             }
             Ok(())
         }
@@ -323,15 +323,13 @@ fn state_of(reply: &Reply) -> Result<PlaybackState, Failure> {
 async fn login(
     paths: &Paths,
     socket: &Path,
+    config: &Config,
     cookie_file: Option<PathBuf>,
     qr: bool,
     json: bool,
 ) -> Result<(), Failure> {
     if qr {
-        return Err(Failure::new(
-            ErrorCode::Unsupported,
-            "QR login requires ncmapi 1.1; for now use `lekima login --cookie-file -` with a browser cookie",
-        ));
+        return login_with_qr(paths, socket, config, json).await;
     }
 
     let cookie = match cookie_file {
@@ -358,12 +356,84 @@ async fn login(
             None,
         );
     } else {
-        println!(
+        crate::say!(
             "session saved to {}; the next command starts a fresh daemon",
             paths.session_file().display()
         );
     }
     Ok(())
+}
+
+async fn login_with_qr(
+    paths: &Paths,
+    socket: &Path,
+    config: &Config,
+    json: bool,
+) -> Result<(), Failure> {
+    use lekima_domain::QrStatus;
+
+    let service = service(paths, config)?;
+    let started = bounded(service.qr_start()).await?;
+    if json {
+        output::emit_json(
+            true,
+            Some(serde_json::json!({ "key": started.key, "url": started.url })),
+            None,
+        );
+    } else {
+        crate::say!("Scan with the NetEase Cloud Music mobile app:\n");
+        crate::say!("{}", render_qr(&started.url)?);
+        crate::say!("or open {}\n", started.url);
+    }
+
+    let mut announced_scanned = false;
+    for _ in 0..90 {
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        match bounded(service.qr_poll(&started.key)).await {
+            Ok(QrStatus::Waiting) => {}
+            Ok(QrStatus::Scanned) => {
+                if !announced_scanned {
+                    announced_scanned = true;
+                    if !json {
+                        crate::say!("scanned — confirm on your phone");
+                    }
+                }
+            }
+            Ok(QrStatus::Confirmed { nickname }) => {
+                restart_daemon(socket).await;
+                if json {
+                    output::emit_json(
+                        true,
+                        Some(serde_json::json!({ "signed_in": true, "nickname": nickname })),
+                        None,
+                    );
+                } else {
+                    let label = nickname.map_or_else(String::new, |name| format!(" as {name}"));
+                    crate::say!("signed in{label}");
+                }
+                return Ok(());
+            }
+            Ok(QrStatus::Expired) => {
+                return Err(Failure::new(
+                    ErrorCode::Unauthorized,
+                    "the QR code expired; run `lekima login --qr` again",
+                ));
+            }
+            Err(failure) => return Err(failure),
+        }
+    }
+
+    Err(Failure::new(
+        ErrorCode::Backend,
+        "timed out waiting for QR confirmation",
+    ))
+}
+
+fn render_qr(url: &str) -> Result<String, Failure> {
+    use qrcode::render::unicode;
+    let code = qrcode::QrCode::new(url.as_bytes())
+        .map_err(|error| Failure::internal(format!("failed to encode the QR code: {error}")))?;
+    Ok(code.render::<unicode::Dense1x2>().quiet_zone(true).build())
 }
 
 async fn logout(paths: &Paths, socket: &Path, json: bool) -> Result<(), Failure> {
@@ -372,7 +442,7 @@ async fn logout(paths: &Paths, socket: &Path, json: bool) -> Result<(), Failure>
     if json {
         output::emit_json(true, Some(serde_json::json!({ "saved": false })), None);
     } else {
-        println!("session removed");
+        crate::say!("session removed");
     }
     Ok(())
 }
@@ -411,7 +481,7 @@ async fn daemon_command(
                 if json {
                     output::emit_json(true, Some(serde_json::json!({ "running": false })), None);
                 } else {
-                    println!("daemon is not running");
+                    crate::say!("daemon is not running");
                 }
                 return Ok(());
             }
@@ -425,7 +495,7 @@ async fn daemon_command(
             if json {
                 output::emit_json(true, Some(serde_json::json!({ "running": false })), None);
             } else {
-                println!("daemon stopped");
+                crate::say!("daemon stopped");
             }
             Ok(())
         }
@@ -443,7 +513,7 @@ async fn daemon_command(
                 .into_iter()
                 .rev()
                 .collect();
-            println!("{}", tail.join("\n"));
+            crate::say!("{}", tail.join("\n"));
             Ok(())
         }
     }
@@ -462,9 +532,9 @@ fn report_running(socket: &Path, started: bool, json: bool) -> Result<(), Failur
             None,
         );
     } else if running {
-        println!("daemon running at {}", socket.display());
+        crate::say!("daemon running at {}", socket.display());
     } else {
-        println!("daemon is not running");
+        crate::say!("daemon is not running");
     }
     Ok(())
 }
@@ -510,12 +580,12 @@ async fn doctor(socket: &Path, paths: &Paths, config: &Config, json: bool) -> Re
         return Ok(());
     }
 
-    println!(
+    crate::say!(
         "lekima {} ({})",
         env!("CARGO_PKG_VERSION"),
         std::env::consts::OS
     );
-    println!(
+    crate::say!(
         "daemon   {} at {}",
         if daemon_running {
             "running"
@@ -524,7 +594,7 @@ async fn doctor(socket: &Path, paths: &Paths, config: &Config, json: bool) -> Re
         },
         socket.display()
     );
-    println!(
+    crate::say!(
         "session  {} ({})",
         if session_present {
             "present"
@@ -533,10 +603,10 @@ async fn doctor(socket: &Path, paths: &Paths, config: &Config, json: bool) -> Re
         },
         paths.session_file().display()
     );
-    println!("config   {}", paths.config_file().display());
-    println!("audio    {audio}");
-    println!("provider {provider}");
-    println!("log      {}", paths.log_file().display());
+    crate::say!("config   {}", paths.config_file().display());
+    crate::say!("audio    {audio}");
+    crate::say!("provider {provider}");
+    crate::say!("log      {}", paths.log_file().display());
     Ok(())
 }
 

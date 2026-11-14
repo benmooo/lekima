@@ -18,6 +18,18 @@ use crate::{
     output::{Failure, print_failure},
 };
 
+/// Writes a line to stdout, ignoring a closed pipe (`| head`).
+///
+/// Rust ignores SIGPIPE, so an unhandled `println!` would panic when the
+/// downstream process exits early. That is noise, not a failure.
+#[macro_export]
+macro_rules! say {
+    ($($argument:tt)*) => {{
+        use std::io::Write as _;
+        let _ = writeln!(std::io::stdout().lock(), $($argument)*);
+    }};
+}
+
 fn main() -> std::process::ExitCode {
     match tokio::runtime::Builder::new_multi_thread()
         .enable_all()

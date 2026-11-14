@@ -295,16 +295,22 @@ playlists. v0.1 works within that surface; v0.2 requires additions, released as
 | Endpoint | Route | Used by |
 | --- | --- | --- |
 | QR login start/poll | `/api/login/qrcode/unikey`, `/api/login/qrcode/client/login` | `lekima login --qr` |
-| Playlist detail with tracks | `/api/v6/playlist/detail` | `playlist show`, sidebar |
-| Lyrics | `/api/song/lyric` | lyrics pane |
-| Daily recommendations | `/api/v3/discover/recommend` | Daily section |
-| Personal FM | `/api/v1/radio/get` | FM section |
-| Like / unlike | `/api/radio/like` | track actions (`f`) |
-| Toplists | `/api/toplist` | sidebar |
+| Playlist detail with tracks | `/api/v6/playlist/detail` + `/api/v3/song/detail` | `playlist show`, sidebar — **done in 1.1** |
+| Lyrics | `/api/song/lyric` | `lekima lyrics` — **done in 1.1** |
+| QR login | `/api/login/qrcode/*` | `lekima login --qr` — **done in 1.1** |
+| Daily recommendations | `/api/v3/discover/recommend` | Daily section — next |
+| Personal FM | `/api/v1/radio/get` | FM section — next |
+| Like / unlike | `/api/radio/like` | track actions (`f`) — next |
+| Toplists | `/api/toplist` | sidebar — next |
 
-Process: develop with a path patch, add contract tests (wiremock fixtures),
-run the crate’s deterministic suite, bump minor version, publish, then pin
-`ncmapi = "1.1"` and delete the patch. Public API stays additive; the existing
+Note: `/api/playlist/track/all` is no longer served (404). Playlist detail
+returns the full ordered `trackIds` list; pages are sliced locally and hydrated
+through `/api/v3/song/detail` in batches of 500.
+
+Process: developed on a branch with a path patch (`[patch.crates-io]` in this
+workspace), contract tests per route, deterministic suite green, version bumped
+to 1.1.0. Remaining before publish: run `cargo publish --dry-run`, publish, then
+replace the path patch with `ncmapi = "1.1"`. Public API stays additive; the existing
 `NcmClient`/service shape is preserved.
 
 ## 9. Configuration
@@ -451,10 +457,23 @@ account.
 
 ## 18. What exists today (honest status)
 
-Implemented and compiling: `lekima-domain` (model, queue, state, ports),
-`lekima-config` (paths, TOML, 0600 session file), `lekima-ipc` (protocol,
-client, server loop), `lekima-core` (`Player` with transition tests).
+All eight crates build and are covered by 35 unit tests, 24 `ncmapi` contract
+tests, TUI render tests and CLI contract tests (`cargo test --workspace`).
 
-Next: `lekima-ncm`, `lekima-audio`, daemon in `lekima-cli` (play/status/pause),
-then `lekima-tui`, then the agent surface (`capabilities`, JSON snapshots),
-then the `ncmapi-rs` 1.1 work.
+Working end to end against the live provider:
+
+- search, stream URL resolution, playlist listing, full playlist paging, lyrics
+- playback (rodio/CoreAudio verified), pause/resume/stop/next/prev/seek/volume,
+  repeat cycle, queue add/jump/clear, auto-advance on track end
+- daemon lifecycle (autostart, socket permissions, SIGTERM, log file, autostart
+  race handling), CLI JSON contract and exit codes, `doctor`, `capabilities`,
+  completions, `login --qr`, `login --cookie-file -`, `logout`
+- TUI: header/progress, track table, sidebar playlists, queue overlay, search
+  prompt, `:` command line, help overlay, vim keys
+
+`ncmapi` 1.1 adds playlist detail/paging, lyrics and QR login with contract
+tests; it is wired through `[patch.crates-io]` locally and still needs to be
+published before lekima 0.1.
+
+Known gaps: daily recommendations, personal FM, like/unlike, toplists, a lyrics
+pane in the TUI, and push events (the TUI polls status every 250 ms).

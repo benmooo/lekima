@@ -8,7 +8,7 @@ use async_trait::async_trait;
 
 use crate::{
     Result,
-    model::{Quality, SearchKind, SearchResults, Track, TrackId},
+    model::{QrLogin, QrStatus, Quality, SearchKind, SearchResults, Track, TrackId},
     playback::PlaybackState,
 };
 
@@ -55,6 +55,25 @@ pub trait MusicService: Send + Sync {
 
     /// Plain-text lyrics, when the provider exposes them.
     async fn lyrics(&self, id: TrackId) -> Result<String>;
+
+    /// Starts a QR login flow.
+    ///
+    /// Providers without QR support report
+    /// [`crate::DomainError::Unsupported`]; the default implementation does
+    /// exactly that so adapters only implement what they can do.
+    async fn qr_start(&self) -> Result<QrLogin> {
+        Err(crate::DomainError::Unsupported(
+            "QR login is not supported by this provider".to_owned(),
+        ))
+    }
+
+    /// Polls a QR login started by [`MusicService::qr_start`].
+    async fn qr_poll(&self, key: &str) -> Result<QrStatus> {
+        let _ = key;
+        Err(crate::DomainError::Unsupported(
+            "QR login is not supported by this provider".to_owned(),
+        ))
+    }
 }
 
 /// Decides what to play and how the device reports progress.

@@ -25,9 +25,19 @@ $ lekima status --json
 
 ## Status
 
-Early. The foundation (domain, configuration, IPC, player rules) is in place;
-playback, TUI and the CLI surface are being implemented. The design documents
-mark what is **now**, **next** and **later** — treat them as the plan of record.
+Working: search, playlists, lyrics, QR login, playback through a background
+daemon, the vim-driven TUI, and the JSON CLI contract. `ncmapi` 1.1 is developed
+in `../ncmapi-rs` through a path patch until it is published.
+
+```console
+$ lekima login --qr          # scan with the NetEase app
+$ lekima playlist list
+$ lekima playlist show 3778678 | head
+$ lekima tui
+```
+
+The design documents mark what is **now**, **next** and **later** — treat them
+as the plan of record.
 
 ## Workspace
 

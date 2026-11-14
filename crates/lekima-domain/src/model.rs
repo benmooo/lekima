@@ -182,6 +182,26 @@ pub struct SearchResults {
     pub total: u64,
 }
 
+/// A started QR login: `key` is polled, `url` is encoded as a QR code.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QrLogin {
+    pub key: String,
+    pub url: String,
+}
+
+/// Progress of a QR login.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "lowercase")]
+pub enum QrStatus {
+    Expired,
+    Waiting,
+    Scanned,
+    Confirmed {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        nickname: Option<String>,
+    },
+}
+
 /// Requested streaming bitrate class.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

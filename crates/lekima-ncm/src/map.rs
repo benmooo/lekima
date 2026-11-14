@@ -36,12 +36,27 @@ pub(crate) fn track(track: provider::Track) -> domain::Track {
 
 pub(crate) fn search_results(body: provider::SearchBody) -> domain::SearchResults {
     let tracks: Vec<_> = body.result.songs.into_iter().map(track).collect();
+    let playlists: Vec<_> = body.result.playlists.into_iter().map(playlist).collect();
+    let artists: Vec<_> = body
+        .result
+        .artists
+        .into_iter()
+        .map(|artist| domain::Artist {
+            id: domain::ArtistId(artist.id),
+            name: artist.name,
+        })
+        .collect();
+    let total = tracks.len() + playlists.len() + artists.len();
     domain::SearchResults {
-        total: u64::try_from(tracks.len()).unwrap_or(u64::MAX),
+        total: u64::try_from(total).unwrap_or(u64::MAX),
         tracks,
-        playlists: Vec::new(),
-        artists: Vec::new(),
+        playlists,
+        artists,
     }
+}
+
+fn non_empty(value: String) -> Option<String> {
+    (!value.is_empty()).then_some(value)
 }
 
 pub(crate) fn playlist(playlist: provider::Playlist) -> domain::Playlist {
@@ -49,10 +64,28 @@ pub(crate) fn playlist(playlist: provider::Playlist) -> domain::Playlist {
         id: domain::PlaylistId(playlist.id),
         name: playlist.name,
         description: playlist.description.unwrap_or_default(),
-        track_count: 0,
-        cover_url: None,
-        owner: None,
+        track_count: playlist.track_count,
+        cover_url: non_empty(playlist.cover_img_url),
+        owner: playlist
+            .creator
+            .map(|creator| creator.nickname)
+            .filter(|nickname| !nickname.is_empty()),
     }
+}
+
+/// Turns an LRC document into printable text by dropping timestamp tags.
+pub(crate) fn plain_lyrics(raw: &str) -> String {
+    raw.lines()
+        .filter_map(|line| {
+            let mut rest = line.trim();
+            while rest.starts_with('[') {
+                let end = rest.find(']')?;
+                rest = rest[end + 1..].trim_start();
+            }
+            (!rest.is_empty()).then(|| rest.to_owned())
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[cfg(test)]
@@ -118,5 +151,29 @@ mod tests {
         assert_eq!(playlist.id, domain::PlaylistId(5));
         assert_eq!(playlist.track_count, 0);
         assert_eq!(playlist.description, "");
+        assert_eq!(playlist.owner, None);
+    }
+
+    #[test]
+    fn maps_playlist_metadata() {
+        let raw = serde_json::json!({
+            "id": 5,
+            "name": "Focus",
+            "trackCount": 42,
+            "coverImgUrl": "https://img/5.jpg",
+            "creator": {"nickname": "ben"}
+        });
+        let provider_playlist: provider::Playlist = serde_json::from_value(raw).unwrap();
+        let playlist = playlist(provider_playlist);
+        assert_eq!(playlist.track_count, 42);
+        assert_eq!(playlist.cover_url.as_deref(), Some("https://img/5.jpg"));
+        assert_eq!(playlist.owner.as_deref(), Some("ben"));
+    }
+
+    #[test]
+    fn strips_lrc_timestamps_and_blank_lines() {
+        let raw = "[00:00.00]first\n[00:10.00]second\n\n[ar:artist]\n";
+        assert_eq!(plain_lyrics(raw), "first\nsecond");
+        assert_eq!(plain_lyrics(""), "");
     }
 }

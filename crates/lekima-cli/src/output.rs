@@ -109,10 +109,10 @@ pub fn print_reply(reply: &Reply, json: bool) {
         Reply::Playlists { playlists } => print_playlists(playlists),
         Reply::Queue { tracks, index } => print_queue(tracks, *index),
         Reply::User { user } => match user {
-            Some(user) => println!("{} ({})", user.nickname, user.id),
-            None => println!("not signed in"),
+            Some(user) => crate::say!("{} ({})", user.nickname, user.id),
+            None => crate::say!("not signed in"),
         },
-        Reply::Lyrics { text } => println!("{text}"),
+        Reply::Lyrics { text } => crate::say!("{text}"),
         Reply::Ack | Reply::Pong => {}
     }
 }
@@ -134,8 +134,8 @@ pub fn emit_json(data_ok: bool, data: Option<Value>, error: Option<ApiError>) {
         error,
     };
     match serde_json::to_string(&envelope) {
-        Ok(encoded) => println!("{encoded}"),
-        Err(_) => println!(
+        Ok(encoded) => crate::say!("{encoded}"),
+        Err(_) => crate::say!(
             r#"{{"ok":false,"error":{{"code":"internal","message":"serialization failed"}}}}"#
         ),
     }
@@ -154,7 +154,7 @@ fn print_status(state: &PlaybackState) {
         || "nothing playing".to_owned(),
         |track| format!("{} — {}", track.name, track.artist_names()),
     );
-    println!(
+    crate::say!(
         "{}  {}  [{}/{}]  vol {:.0}%  repeat {}  queue {}",
         icon(state),
         track,
@@ -179,7 +179,7 @@ fn icon(state: &PlaybackState) -> &'static str {
 
 fn print_tracks(tracks: &[Track]) {
     for (index, track) in tracks.iter().enumerate() {
-        println!(
+        crate::say!(
             "{:>4}  {:<40} {:<22} {:>6}  {}",
             index + 1,
             truncate(&track.name, 40),
@@ -189,7 +189,7 @@ fn print_tracks(tracks: &[Track]) {
         );
     }
     if tracks.is_empty() {
-        println!("no tracks");
+        crate::say!("no tracks");
     }
 }
 
@@ -199,7 +199,7 @@ fn print_search(results: &SearchResults) {
 
 fn print_playlists(playlists: &[Playlist]) {
     for playlist in playlists {
-        println!(
+        crate::say!(
             "{:>10}  {:<40} {}",
             playlist.id,
             truncate(&playlist.name, 40),
@@ -207,14 +207,14 @@ fn print_playlists(playlists: &[Playlist]) {
         );
     }
     if playlists.is_empty() {
-        println!("no playlists");
+        crate::say!("no playlists");
     }
 }
 
 fn print_queue(tracks: &[Track], index: Option<usize>) {
     for (position, track) in tracks.iter().enumerate() {
         let marker = if Some(position) == index { "▶" } else { " " };
-        println!(
+        crate::say!(
             "{marker} {:>3}  {} — {}",
             position + 1,
             track.name,

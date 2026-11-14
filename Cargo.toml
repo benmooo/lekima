@@ -27,7 +27,8 @@ async-trait = "0.1"
 clap = { version = "4", features = ["derive", "env", "wrap_help"] }
 crossterm = "0.29"
 directories = "6"
-ncmapi = "1"
+ncmapi = "1.1"
+qrcode = "0.14"
 ratatui = "0.30"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream", "socks"] }
 rodio = { version = "0.23", features = ["tracing"] }
@@ -38,6 +39,10 @@ tokio = { version = "1", features = ["full"] }
 toml = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+# Developed alongside lekima; removed once ncmapi 1.1 is published.
+[patch.crates-io]
+ncmapi = { path = "../ncmapi-rs" }
 
 [profile.release]
 lto = "thin"
