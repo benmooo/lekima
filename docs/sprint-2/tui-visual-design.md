@@ -102,15 +102,17 @@ Breakpoints:
 
 ### HUD
 
-- Brand chip: black on accent, bold, ` LEKIMA `.
-- State glyph colour: accent (playing), warn (paused), muted (stopped).
-- Title bold `text`; artist `muted`; separators `dim`.
-- Position `accent_alt`, duration `muted`, progress meter 12 cells.
-- `R:OFF|ALL|ONE`; `S` only when shuffle is on (hot).
-- `VOL` + 6-cell meter; `Q:n`.
-- Overflow is clipped from the right; the queue count and volume are the first
-  things to disappear on narrow terminals — acceptable, they are also in the
-  footer/queue pane.
+Two rows, so transport information never competes with the title.
+
+- Row 1: brand chip (` LEKIMA `), state glyph, bold title, artist, queue kind,
+  and the live spectrum (`SIG` + 20 bands).
+- Row 2: a 20-cell progress line with a distinct playhead (`━━━━●────`), time,
+  mode badges (`[⟲ ALL]`, `[⇄]`), volume meter, queue count, quality and sleep
+  countdown.
+- Repeat badge: `[⟲ OFF]` dim, `[⟲ ALL]` cyan, `[⟲ 1]` accent. Shuffle is
+  `[⇄]` hot when on, dim when off (still discoverable).
+- Playhead is `●`; ASCII mode uses `>` with `=`/`-` rails.
+- Quality is always shown for a loaded stream (`320K`-style class names).
 
 ### Library sidebar
 
@@ -190,12 +192,11 @@ Breakpoints:
 
 ### Signal visualiser
 
-- 24 block bars in the HUD (`SIG ▁▂▃▄▅▆▇█`) fed by the audio thread's real RMS
-  envelope (50 ms buckets, 20 Hz), not an animation. The daemon samples the
-  envelope and ships it in `PlaybackState.wave`; the TUI polls at 10 Hz while
-  playing.
-- The most recent 24 buckets are drawn; every fourth bar uses the secondary
-  accent. Frozen and dim when paused or stopped.
+- 20 bands from a real 1024-point FFT (Hann window) of the mono mix, computed
+  ~43×/s in the audio thread and smoothed with fast attack / slow decay.
+  `PlaybackState.wave` carries the bands; the TUI polls at 20 Hz while playing.
+- Low bands render in accent, high bands in the secondary accent. Frozen when
+  paused or stopped; flat and dim without audio.
 - On narrow terminals the signal area is the first HUD segment to clip.
 
 ### Toasts

@@ -3,6 +3,21 @@
 All notable changes to lekima are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## 0.2.1 — unreleased
+
+### Fixed
+
+- Auto-advance now fires when the sink empties: the engine clears `has_track`
+  before `tick`, so the old gate (`finished && has_track`) never advanced.
+  Repeat/all and plain queues both continue.
+
+### Changed
+
+- HUD redesigned into two rows: title/spectrum, then a playhead progress line
+  with `[⟲ ALL]` / `[⇄]` badges, time, volume, queue, quality and sleep.
+- Real audio visualisation: 20-band FFT spectrum (1024-point, Hann window,
+  attack/decay smoothing) replaces the RMS history; TUI polls at 20 Hz.
+
 ## 0.2.0 — 2026-11-14
 
 ### Added

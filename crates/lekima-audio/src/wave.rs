@@ -1,65 +1,79 @@
-//! Amplitude envelope sampled from the decoded stream.
+//! Real spectrum analysis from the decoded stream.
 //!
-//! This is a real RMS measurement of the samples that reach the mixer — not a
-//! decorative animation. The ring buffer keeps the last ~2.4 s of 20 Hz buckets
-//! so the HUD can draw a moving history.
+//! A mono mix of the samples is windowed (Hann) and transformed with a 1024
+//! point FFT ~43 times per second. Magnitudes are folded into 20 log-spaced
+//! bands and smoothed with a fast attack / slow decay, so the HUD shows the
+//! actual spectral shape of the music rather than a decorative animation.
 
 use std::{
-    collections::VecDeque,
+    f32::consts::PI,
     sync::{Arc, Mutex},
     time::Duration,
 };
 
 use rodio::{ChannelCount, SampleRate, Source, source::SeekError};
+use rustfft::{Fft, FftPlanner, num_complex::Complex};
 
-/// Buckets kept in the ring (20 Hz × 2.4 s).
-pub const WAVE_CAPACITY: usize = 48;
+/// Number of rendered spectrum bands.
+pub const SPECTRUM_BANDS: usize = 20;
+const FFT_SIZE: usize = 1024;
+const LOW_HZ: f32 = 60.0;
+const HIGH_HZ: f32 = 16_000.0;
 
 pub struct Waveform {
-    capacity: usize,
-    levels: Mutex<VecDeque<f32>>,
+    levels: Mutex<[f32; SPECTRUM_BANDS]>,
+}
+
+impl Default for Waveform {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Waveform {
     #[must_use]
-    pub fn new(capacity: usize) -> Self {
+    pub fn new() -> Self {
         Self {
-            capacity,
-            levels: Mutex::new(VecDeque::with_capacity(capacity)),
+            levels: Mutex::new([0.0; SPECTRUM_BANDS]),
         }
     }
 
-    pub fn push(&self, level: f32) {
+    fn update(&self, targets: &[f32; SPECTRUM_BANDS]) {
         let Ok(mut levels) = self.levels.lock() else {
             return;
         };
-        if levels.len() == self.capacity {
-            levels.pop_front();
+        for (level, target) in levels.iter_mut().zip(targets.iter().copied()) {
+            let factor = if target > *level { 0.55 } else { 0.12 };
+            *level += (target - *level) * factor;
         }
-        levels.push_back(level.clamp(0.0, 1.0));
     }
 
     #[must_use]
     pub fn snapshot(&self) -> Vec<f32> {
         self.levels
             .lock()
-            .map_or_else(|_| Vec::new(), |levels| levels.iter().copied().collect())
+            .map_or_else(|_| Vec::new(), |levels| levels.to_vec())
     }
 
     pub fn reset(&self) {
         if let Ok(mut levels) = self.levels.lock() {
-            levels.clear();
+            *levels = [0.0; SPECTRUM_BANDS];
         }
     }
 }
 
-/// Wraps a source, measuring RMS per ~50 ms bucket without touching the samples.
+/// Wraps a source, computing an FFT spectrum without altering the samples.
 pub struct Metered<S> {
     inner: S,
     wave: Arc<Waveform>,
-    accumulator: f32,
-    samples: usize,
-    bucket: usize,
+    channels: usize,
+    frame_sum: f32,
+    frame_samples: usize,
+    window: Vec<f32>,
+    buffer: Vec<Complex<f32>>,
+    fft: Arc<dyn Fft<f32>>,
+    bands: Vec<(usize, usize)>,
+    hud: Vec<f32>,
 }
 
 impl<S> Metered<S>
@@ -68,14 +82,63 @@ where
 {
     #[must_use]
     pub fn new(inner: S, wave: Arc<Waveform>) -> Self {
-        let frames = inner.sample_rate().get() as usize * inner.channels().get() as usize;
+        let channels = usize::from(inner.channels().get());
+        let sample_rate = inner.sample_rate().get() as f32;
+        let fft = FftPlanner::<f32>::new().plan_fft_forward(FFT_SIZE);
+
+        // Log-spaced bin ranges, clamped to the FFT's positive half.
+        let bands = (0..SPECTRUM_BANDS)
+            .map(|band| {
+                let low = LOW_HZ * (HIGH_HZ / LOW_HZ).powf(band as f32 / SPECTRUM_BANDS as f32);
+                let high =
+                    LOW_HZ * (HIGH_HZ / LOW_HZ).powf((band + 1) as f32 / SPECTRUM_BANDS as f32);
+                let to_bin = |hz: f32| {
+                    ((hz * FFT_SIZE as f32 / sample_rate).round() as usize).clamp(1, FFT_SIZE / 2)
+                };
+                let start = to_bin(low);
+                let end = to_bin(high).max(start + 1).min(FFT_SIZE / 2);
+                (start, end)
+            })
+            .collect();
+
         Self {
             inner,
             wave,
-            accumulator: 0.0,
-            samples: 0,
-            bucket: (frames / 20).max(1),
+            channels: channels.max(1),
+            frame_sum: 0.0,
+            frame_samples: 0,
+            window: Vec::with_capacity(FFT_SIZE),
+            buffer: vec![Complex::new(0.0, 0.0); FFT_SIZE],
+            fft,
+            bands,
+            hud: vec![0.0; SPECTRUM_BANDS],
         }
+    }
+
+    fn analyze(&mut self) {
+        for (index, sample) in self.window.iter().enumerate() {
+            let hann = 0.5 - 0.5 * (2.0 * PI * index as f32 / (FFT_SIZE - 1) as f32).cos();
+            self.buffer[index] = Complex::new(sample * hann, 0.0);
+        }
+        self.fft.process(&mut self.buffer);
+
+        let scale = FFT_SIZE as f32 * 0.25;
+        for (band, (start, end)) in self.bands.iter().copied().enumerate() {
+            let peak = (start..end)
+                .map(|bin| self.buffer[bin].norm())
+                .fold(0.0_f32, f32::max);
+            self.hud[band] = (peak / scale).sqrt().min(1.0);
+        }
+        self.wave.update(&self.hud_array());
+        self.window.clear();
+    }
+
+    fn hud_array(&self) -> [f32; SPECTRUM_BANDS] {
+        let mut array = [0.0; SPECTRUM_BANDS];
+        for (slot, value) in array.iter_mut().zip(self.hud.iter()) {
+            *slot = *value;
+        }
+        array
     }
 }
 
@@ -87,14 +150,16 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         let sample = self.inner.next()?;
-        self.accumulator += sample * sample;
-        self.samples += 1;
-        if self.samples >= self.bucket {
-            let rms = (self.accumulator / self.samples as f32).sqrt();
-            // Music RMS is typically 0.05–0.3; scale it into a visible meter.
-            self.wave.push((rms * 3.0).min(1.0));
-            self.accumulator = 0.0;
-            self.samples = 0;
+        self.frame_sum += sample;
+        self.frame_samples += 1;
+        if self.frame_samples >= self.channels {
+            let mono = self.frame_sum / self.channels as f32;
+            self.frame_sum = 0.0;
+            self.frame_samples = 0;
+            self.window.push(mono);
+            if self.window.len() >= FFT_SIZE {
+                self.analyze();
+            }
         }
         Some(sample)
     }
@@ -125,6 +190,7 @@ where
     }
 
     fn try_seek(&mut self, position: Duration) -> Result<(), SeekError> {
+        self.window.clear();
         self.inner.try_seek(position)
     }
 }
@@ -133,36 +199,40 @@ where
 mod tests {
     use std::sync::Arc;
 
-    use super::{Metered, WAVE_CAPACITY, Waveform};
+    use super::{Metered, SPECTRUM_BANDS, Waveform};
 
     #[test]
-    fn ring_keeps_the_most_recent_values() {
-        let wave = Waveform::new(3);
-        for level in [0.1, 0.2, 0.3, 0.4] {
-            wave.push(level);
-        }
-        assert_eq!(wave.snapshot(), vec![0.2, 0.3, 0.4]);
-        wave.reset();
-        assert!(wave.snapshot().is_empty());
-    }
-
-    #[test]
-    fn levels_are_clamped() {
-        let wave = Waveform::new(WAVE_CAPACITY);
-        wave.push(2.0);
-        wave.push(-1.0);
-        assert_eq!(wave.snapshot(), vec![1.0, 0.0]);
-    }
-
-    #[test]
-    fn metered_source_emits_levels_and_passes_samples_through() {
-        let wave = Arc::new(Waveform::new(WAVE_CAPACITY));
+    fn a_sine_wave_produces_a_non_empty_spectrum() {
+        let wave = Arc::new(Waveform::new());
         let source = rodio::source::SineWave::new(440.0);
         let mut metered = Metered::new(source, Arc::clone(&wave));
-        let samples: Vec<f32> = (&mut metered).take(48_000).collect();
-        assert_eq!(samples.len(), 48_000);
+        let samples: Vec<f32> = (&mut metered).take(44_100).collect();
+        assert_eq!(samples.len(), 44_100);
         let levels = wave.snapshot();
-        assert!(!levels.is_empty());
+        assert_eq!(levels.len(), SPECTRUM_BANDS);
+        assert!(levels.iter().any(|level| *level > 0.1), "{levels:?}");
         assert!(levels.iter().all(|level| (0.0..=1.0).contains(level)));
+    }
+
+    #[test]
+    fn silence_stays_flat() {
+        let wave = Arc::new(Waveform::new());
+        let source = rodio::buffer::SamplesBuffer::new(
+            std::num::NonZero::new(2).unwrap(),
+            std::num::NonZero::new(44_100).unwrap(),
+            vec![0.0_f32; 44_100 * 2],
+        );
+        let mut metered = Metered::new(source, Arc::clone(&wave));
+        (&mut metered).take(44_100).for_each(drop);
+        let levels = wave.snapshot();
+        assert!(levels.iter().all(|level| *level < 0.01), "{levels:?}");
+    }
+
+    #[test]
+    fn reset_clears_all_bands() {
+        let wave = Waveform::new();
+        wave.update(&[1.0; SPECTRUM_BANDS]);
+        wave.reset();
+        assert!(wave.snapshot().iter().all(|level| *level == 0.0));
     }
 }

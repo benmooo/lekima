@@ -4,7 +4,7 @@
 //! widgets in the main chrome — structure comes from dim rules and section
 //! labels, state from neon accents. See `docs/sprint-2/tui-visual-design.md`.
 
-use lekima_domain::PlaybackStatus;
+use lekima_domain::{PlaybackStatus, RepeatMode};
 use ratatui::{
     Frame,
     layout::{Constraint, Flex, Layout, Rect},
@@ -22,16 +22,15 @@ use crate::theme::{Density, Theme};
 const MIN_WIDTH: u16 = 24;
 const SIDEBAR_WIDTH: u16 = 24;
 const SIDEBAR_BREAKPOINT: u16 = 64;
-const PROGRESS_CELLS: usize = 12;
 const VOLUME_CELLS: usize = 6;
-const WAVE_BARS: usize = 24;
+const SPECTRUM_BARS: usize = 20;
 const CURSOR_BLINK_FRAMES: u64 = 10;
 
 pub fn draw(frame: &mut Frame, app: &mut App, theme: &Theme) {
     app.clamp();
     let area = frame.area();
 
-    if area.width < MIN_WIDTH || area.height < 4 {
+    if area.width < MIN_WIDTH || area.height < 5 {
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 "LEKIMA",
@@ -46,7 +45,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, theme: &Theme) {
     }
 
     let [hud, rule, body, footer] = Layout::vertical([
-        Constraint::Length(1),
+        Constraint::Length(2),
         Constraint::Length(1),
         Constraint::Min(1),
         Constraint::Length(1),
@@ -68,7 +67,10 @@ pub fn draw(frame: &mut Frame, app: &mut App, theme: &Theme) {
 }
 
 fn draw_hud(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
-    let mut spans = vec![
+    let [top, bottom] =
+        Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).areas(area);
+
+    let mut top_spans = vec![
         Span::styled(
             " LEKIMA ",
             Style::new()
@@ -78,10 +80,9 @@ fn draw_hud(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         ),
         Span::styled(" ┃ ", Style::new().fg(theme.dim)),
     ];
-
     match (&app.status.track, app.status.status) {
         (Some(track), status) => {
-            spans.extend([
+            top_spans.extend([
                 Span::styled(
                     format!(
                         "{} ",
@@ -101,16 +102,13 @@ fn draw_hud(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                 Span::styled(track.artist_names(), Style::new().fg(theme.muted)),
             ]);
         }
-        (None, _) => {
-            spans.push(Span::styled(
-                "■ nothing playing",
-                Style::new().fg(theme.muted),
-            ));
-        }
+        (None, _) => top_spans.push(Span::styled(
+            "■ nothing playing",
+            Style::new().fg(theme.muted),
+        )),
     }
-
     if app.status.queue_kind != lekima_domain::QueueKind::Manual {
-        spans.extend([
+        top_spans.extend([
             Span::styled("  ⟨", Style::new().fg(theme.dim)),
             Span::styled(
                 app.status.queue_kind.as_str().to_ascii_uppercase(),
@@ -119,41 +117,46 @@ fn draw_hud(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             Span::styled("⟩", Style::new().fg(theme.dim)),
         ]);
     }
-
     if app.status.track.is_some() {
-        spans.extend([
-            Span::styled("  ", Style::new()),
-            Span::styled(
-                clock(app.status.position_ms),
-                Style::new().fg(theme.accent_alt),
-            ),
-            Span::styled("/", Style::new().fg(theme.dim)),
-            Span::styled(
-                clock(
-                    app.status
-                        .track
-                        .as_ref()
-                        .map_or(0, |track| track.duration_ms),
-                ),
-                Style::new().fg(theme.muted),
-            ),
-            Span::styled("  ", Style::new()),
-        ]);
-        spans.extend(progress_spans(app, theme));
+        top_spans.push(Span::styled("  SIG ", Style::new().fg(theme.dim)));
+        top_spans.extend(wave_spans(app, theme));
     }
+    frame.render_widget(Paragraph::new(Line::from(top_spans)), top);
 
+    let mut spans = vec![Span::raw(" ")];
+    let duration = app
+        .status
+        .track
+        .as_ref()
+        .map_or(0, |track| track.duration_ms);
+    spans.extend(progress_spans(app, duration, theme));
     spans.extend([
-        Span::styled("  R:", Style::new().fg(theme.dim)),
         Span::styled(
-            app.status.repeat.as_str().to_ascii_uppercase(),
-            Style::new().fg(theme.accent_alt),
+            format!("  {} / {}", clock(app.status.position_ms), clock(duration)),
+            Style::new().fg(theme.muted),
         ),
+        Span::styled("  ", Style::new()),
     ]);
-    if app.status.shuffle {
-        spans.push(Span::styled("  S", Style::new().fg(theme.hot)));
-    }
 
+    let (repeat_label, repeat_colour) = match app.status.repeat {
+        RepeatMode::Off => ("OFF", theme.dim),
+        RepeatMode::All => ("ALL", theme.accent_alt),
+        RepeatMode::One => ("1", theme.accent),
+    };
     spans.extend([
+        Span::styled(
+            format!("[{} {}]", theme.glyphs.repeat, repeat_label),
+            Style::new().fg(repeat_colour),
+        ),
+        Span::styled(" ", Style::new()),
+        Span::styled(
+            format!("[{}]", theme.glyphs.shuffle),
+            Style::new().fg(if app.status.shuffle {
+                theme.hot
+            } else {
+                theme.dim
+            }),
+        ),
         Span::styled("  VOL ", Style::new().fg(theme.dim)),
         Span::styled(
             volume_bar(app.status.effective_volume(), theme),
@@ -165,10 +168,7 @@ fn draw_hud(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             Style::new().fg(theme.accent_alt),
         ),
     ]);
-
     if app.status.track.is_some() {
-        spans.push(Span::styled("  SIG ", Style::new().fg(theme.dim)));
-        spans.extend(wave_spans(app, theme));
         spans.extend([
             Span::styled("  ", Style::new()),
             Span::styled(
@@ -179,12 +179,14 @@ fn draw_hud(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     }
     if let Some(remaining) = app.status.sleep_remaining_ms {
         spans.extend([
-            Span::styled("  SLEEP ", Style::new().fg(theme.dim)),
+            Span::styled(
+                format!("  {} ", theme.glyphs.sleep),
+                Style::new().fg(theme.dim),
+            ),
             Span::styled(clock(remaining), Style::new().fg(theme.warn)),
         ]);
     }
-
-    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+    frame.render_widget(Paragraph::new(Line::from(spans)), bottom);
 }
 
 fn draw_rule(frame: &mut Frame, theme: &Theme, area: Rect) {
@@ -917,37 +919,38 @@ fn draw_toast(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
 
 fn wave_spans<'a>(app: &App, theme: &Theme) -> Vec<Span<'a>> {
     let bars = theme.glyphs.wave;
-    let silent = theme.glyphs.wave[0];
-
     let wave = &app.status.wave;
-    if wave.is_empty() {
-        let colour = if app.is_playing() {
+    let colour_for = |index: usize| {
+        if index + 1 < SPECTRUM_BARS / 2 {
             theme.accent
         } else {
-            theme.dim
-        };
+            theme.accent_alt
+        }
+    };
+
+    if wave.is_empty() {
         return vec![Span::styled(
-            silent.repeat(WAVE_BARS),
-            Style::new().fg(colour),
+            bars[0].repeat(SPECTRUM_BARS),
+            Style::new().fg(theme.dim),
         )];
     }
 
-    let start = wave.len().saturating_sub(WAVE_BARS);
-    wave[start..]
+    let mut spans: Vec<Span> = wave
         .iter()
         .enumerate()
         .map(|(index, level)| {
             let bar = bars[((level.clamp(0.0, 1.0) * 7.0).round() as usize).min(7)];
-            let colour = if !app.is_playing() {
-                theme.dim
-            } else if index % 4 == 0 {
-                theme.accent_alt
-            } else {
-                theme.accent
-            };
-            Span::styled(bar, Style::new().fg(colour))
+            Span::styled(bar, Style::new().fg(colour_for(index)))
         })
-        .collect()
+        .collect();
+    let missing = SPECTRUM_BARS.saturating_sub(spans.len());
+    if missing > 0 {
+        spans.push(Span::styled(
+            bars[0].repeat(missing),
+            Style::new().fg(theme.dim),
+        ));
+    }
+    spans
 }
 
 fn draw_settings(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
@@ -1078,25 +1081,29 @@ fn centred(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
     area
 }
 
-fn progress_spans<'a>(app: &App, theme: &Theme) -> Vec<Span<'a>> {
-    let duration = app
-        .status
-        .track
-        .as_ref()
-        .map_or(0, |track| track.duration_ms);
+fn progress_spans<'a>(app: &App, duration: u64, theme: &Theme) -> Vec<Span<'a>> {
+    const CELLS: usize = 20;
     let ratio = if duration == 0 {
         0.0
     } else {
         (app.status.position_ms as f64 / duration as f64).clamp(0.0, 1.0)
     };
-    let filled = (ratio * PROGRESS_CELLS as f64).round() as usize;
+    let filled = (ratio * CELLS as f64).round() as usize;
+    let full = filled.min(CELLS - 1);
+    let empty = CELLS - 1 - full;
     vec![
         Span::styled(
-            theme.glyphs.meter_full.repeat(filled),
+            theme.glyphs.progress_full.repeat(full),
             Style::new().fg(theme.meter_full),
         ),
         Span::styled(
-            theme.glyphs.meter_empty.repeat(PROGRESS_CELLS - filled),
+            theme.glyphs.progress_head,
+            Style::new()
+                .fg(theme.accent_alt)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            theme.glyphs.progress_empty.repeat(empty),
             Style::new().fg(theme.meter_empty),
         ),
     ]
@@ -1201,7 +1208,7 @@ mod tests {
         assert!(screen.contains("Mota"));
         assert!(screen.contains("Russian Circles"));
         assert!(screen.contains("VOL"));
-        assert!(screen.contains("R:"));
+        assert!(screen.contains("OFF"));
         assert!(screen.contains("SIG"));
     }
 

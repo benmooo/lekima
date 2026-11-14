@@ -16,4 +16,4 @@ mod wave;
 
 pub use engine::{MAX_MEMORY_BYTES, RodioAudioEngine};
 pub use spool::{GrowingFile, Spool};
-pub use wave::{WAVE_CAPACITY, Waveform};
+pub use wave::{SPECTRUM_BANDS, Waveform};

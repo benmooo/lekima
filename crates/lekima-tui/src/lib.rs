@@ -106,8 +106,8 @@ async fn event_loop(
             }
             _ = ticker.tick() => {
                 app.tick();
-                // 10 Hz while playing so the waveform moves; 2 Hz otherwise.
-                let every = if app.is_playing() { 2 } else { 10 };
+                // 20 Hz while playing for the spectrum; 2 Hz otherwise.
+                let every = if app.is_playing() { 1 } else { 10 };
                 if app.frame.is_multiple_of(every) && !app.status_inflight && !app.daemon_down {
                     app.status_inflight = true;
                     dispatch(&socket, Command::Status, &sender);

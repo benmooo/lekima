@@ -17,7 +17,7 @@ use rodio::{Decoder, DeviceSinkBuilder, Player};
 
 use crate::{
     spool::{GrowingFile, Spool},
-    wave::{Metered, WAVE_CAPACITY, Waveform},
+    wave::{Metered, Waveform},
 };
 use tempfile::NamedTempFile;
 use tokio::sync::oneshot;
@@ -70,7 +70,7 @@ impl Shared {
             loaded: AtomicBool::new(false),
             finished: AtomicBool::new(false),
             volume_bits: AtomicU32::new(volume.clamp(0.0, 1.0).to_bits()),
-            wave: Arc::new(Waveform::new(WAVE_CAPACITY)),
+            wave: Arc::new(Waveform::new()),
         }
     }
 

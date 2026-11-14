@@ -39,6 +39,12 @@ pub struct Glyphs {
     pub liked: &'static str,
     pub cursor: &'static str,
     pub loading: &'static str,
+    pub progress_full: &'static str,
+    pub progress_empty: &'static str,
+    pub progress_head: &'static str,
+    pub repeat: &'static str,
+    pub shuffle: &'static str,
+    pub sleep: &'static str,
 }
 
 impl Glyphs {
@@ -55,6 +61,12 @@ impl Glyphs {
         liked: "♥",
         cursor: "▌",
         loading: "◌",
+        progress_full: "━",
+        progress_empty: "─",
+        progress_head: "●",
+        repeat: "⟲",
+        shuffle: "⇄",
+        sleep: "☾",
     };
 
     pub const ASCII: Self = Self {
@@ -70,6 +82,12 @@ impl Glyphs {
         liked: "*",
         cursor: "_",
         loading: "~",
+        progress_full: "=",
+        progress_empty: "-",
+        progress_head: ">",
+        repeat: "R",
+        shuffle: "S",
+        sleep: "Z",
     };
 
     #[must_use]

@@ -410,9 +410,11 @@ impl Player {
     pub async fn tick(&self) -> Result<Option<Track>> {
         let (finished, playing) = {
             let inner = self.inner.lock().await;
+            // `has_track` is already false when the sink reports finished, so it
+            // must not gate the advance.
             (
                 self.audio.is_finished(),
-                inner.status == PlaybackStatus::Playing && self.audio.has_track(),
+                inner.status == PlaybackStatus::Playing && inner.queue.current().is_some(),
             )
         };
         if finished && playing {
@@ -893,6 +895,24 @@ mod tests {
         let (player, _) = player();
         let state = player.fm_start().await.unwrap();
         assert_eq!(state.queue_kind, QueueKind::Fm);
+    }
+
+    #[tokio::test]
+    async fn finished_track_advances_even_after_the_engine_unloads() {
+        let (player, audio) = player();
+        player
+            .play(PlayRequest::Tracks {
+                tracks: vec![track(1), track(2)],
+                kind: QueueKind::Manual,
+            })
+            .await
+            .unwrap();
+        // The audio thread clears `loaded` when the sink empties and sets
+        // `finished`; auto-advance must still fire.
+        audio.playing.store(false, Ordering::SeqCst);
+        audio.finished.store(true, Ordering::SeqCst);
+        let rolled = player.tick().await.unwrap();
+        assert_eq!(rolled.unwrap().id, TrackId(2));
     }
 
     #[tokio::test]
