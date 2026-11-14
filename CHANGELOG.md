@@ -3,6 +3,14 @@
 All notable changes to lekima are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## 0.1.1 — 2026-11-14
+
+### Changed
+
+- `ncmapi 1.6` with pure-Rust protocol crypto: no OpenSSL anywhere in the
+  dependency graph, byte-identical request encryption. Release binaries are
+  portable (no Homebrew OpenSSL linkage) and cross-compiled on macOS.
+
 ## 0.1.0 — 2026-11-14
 
 ### Added
