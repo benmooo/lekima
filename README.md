@@ -28,6 +28,8 @@ $ lekima status --json
   the console/HUD visual language (`cyber`, `amber`, `mono` themes).
 - [`docs/releasing.md`](docs/releasing.md) — release flow, including
   `--registry crates-io` on this USTC-mirrored machine.
+- [`docs/sessions/`](docs/sessions/) — archived OpenCode sessions (this rewrite,
+  in full) and the exporter script.
 
 ## Status
 
