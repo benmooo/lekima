@@ -387,7 +387,8 @@ async fn login_with_qr(
     }
 
     let mut announced_scanned = false;
-    for _ in 0..90 {
+    // Five minutes: enough for a phone unlock, 2FA or a slow camera.
+    for _ in 0..150 {
         tokio::time::sleep(Duration::from_secs(2)).await;
         match bounded(service.qr_poll(&started.key)).await {
             Ok(QrStatus::Waiting) => {}
@@ -425,7 +426,7 @@ async fn login_with_qr(
 
     Err(Failure::new(
         ErrorCode::Backend,
-        "timed out waiting for QR confirmation",
+        "timed out waiting for QR confirmation (scan, then tap confirm in the app)",
     ))
 }
 

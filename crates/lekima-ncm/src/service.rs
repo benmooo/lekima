@@ -284,6 +284,7 @@ impl MusicService for NcmMusicService {
             .qr_poll(key)
             .await
             .map_err(provider_error)?;
+        tracing::debug!(code = response.code, "qr poll");
         match response.code {
             800 => Ok(QrStatus::Expired),
             801 => Ok(QrStatus::Waiting),
