@@ -83,6 +83,18 @@ Options:
    $ cargo check -p <crate>
    $ mv ~/.cargo/config.toml.bak ~/.cargo/config.toml
    ```
+4. Point this workspace at a mirror that has already synced, via a
+   **gitignored** `.cargo/config.toml` (already ignored by the repo):
+   ```toml
+   [source.crates-io]
+   replace-with = "rsproxy"
+
+   [source.rsproxy]
+   registry = "sparse+https://rsproxy.cn/index/"
+   ```
+   `rsproxy.cn` usually syncs new crates within minutes; USTC and TUNA lag
+   longer. Check any mirror with
+   `curl -s <index>/<first2>/<next2>/<crate> | tail -1`.
 
 Do not commit a `[patch.crates-io]` path entry to work around lag: it breaks
 `cargo install` for everyone else.
