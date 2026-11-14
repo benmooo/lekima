@@ -16,6 +16,7 @@ use lekima_domain::{AudioEngine, DomainError, Result};
 use rodio::{Decoder, DeviceSinkBuilder, Player, cpal, cpal::traits::HostTrait};
 
 use crate::{
+    prefetch::PrefetchSource,
     spool::{GrowingFile, Spool},
     wave::{Metered, Waveform},
 };
@@ -235,9 +236,6 @@ impl AudioEngine for RodioAudioEngine {
         let temp = NamedTempFile::new().map_err(|error| {
             DomainError::Playback(format!("failed to create the stream spool: {error}"))
         })?;
-        let mut writer = temp.reopen().map_err(|error| {
-            DomainError::Playback(format!("failed to open the stream spool: {error}"))
-        })?;
         let reader = temp.reopen().map_err(|error| {
             DomainError::Playback(format!("failed to open the stream spool: {error}"))
         })?;
@@ -247,29 +245,25 @@ impl AudioEngine for RodioAudioEngine {
             *slot = Some(Arc::clone(&spool));
         }
 
-        let writer_spool = Arc::clone(&spool);
+        let sequential_writer = temp.reopen().map_err(|error| {
+            DomainError::Playback(format!("failed to open the stream spool: {error}"))
+        })?;
+        let range_writer = temp.reopen().map_err(|error| {
+            DomainError::Playback(format!("failed to open the stream spool: {error}"))
+        })?;
+
+        let sequential_spool = Arc::clone(&spool);
         tokio::spawn(async move {
-            let mut response = response;
-            loop {
-                if writer_spool.is_cancelled() {
-                    break;
-                }
-                match response.chunk().await {
-                    Ok(Some(chunk)) => {
-                        if let Err(error) = writer_spool.push(&mut writer, &chunk) {
-                            writer_spool.fail(format!("failed to write the stream spool: {error}"));
-                            break;
-                        }
-                    }
-                    Ok(None) => {
-                        writer_spool.finish();
-                        break;
-                    }
-                    Err(error) => {
-                        writer_spool.fail(format!("failed to read the stream: {error}"));
-                        break;
-                    }
-                }
+            download_sequential(response, sequential_spool, sequential_writer).await;
+        });
+
+        let range_spool = Arc::clone(&spool);
+        let range_client = self.client.clone();
+        let range_url = url.to_owned();
+        tokio::spawn(async move {
+            let mut writer = range_writer;
+            while let Some(target) = range_spool.next_request().await {
+                fetch_range(&range_client, &range_url, target, &range_spool, &mut writer).await;
             }
         });
 
@@ -443,6 +437,124 @@ impl<S: rodio::Source> rodio::Source for Boundary<S> {
     }
 }
 
+/// Fetching a seek target can pull a few megabytes of read-ahead; retry
+/// requests beyond this window are issued as the decoder needs them.
+const RANGE_CHUNK: u64 = 4 * 1024 * 1024;
+
+async fn download_sequential(mut response: reqwest::Response, spool: Arc<Spool>, mut writer: File) {
+    if spool.total().is_none()
+        && let Some(length) = response.content_length()
+    {
+        spool.set_total(length);
+    }
+    let mut offset = 0u64;
+    loop {
+        if spool.is_cancelled() {
+            return;
+        }
+        match response.chunk().await {
+            Ok(Some(chunk)) => match spool.write_at(&mut writer, offset, &chunk) {
+                Ok(true) => offset += chunk.len() as u64,
+                Ok(false) => return,
+                Err(error) => {
+                    spool.fail(format!("failed to write the stream spool: {error}"));
+                    return;
+                }
+            },
+            Ok(None) => {
+                spool.set_total(offset);
+                spool.mark_complete();
+                return;
+            }
+            Err(error) => {
+                spool.fail(format!("failed to read the stream: {error}"));
+                return;
+            }
+        }
+    }
+}
+
+async fn fetch_range(
+    client: &reqwest::Client,
+    url: &str,
+    target: u64,
+    spool: &Spool,
+    writer: &mut File,
+) {
+    tracing::debug!(target, "fetching byte range");
+    let response = client
+        .get(url)
+        .header(reqwest::header::REFERER, REFERER)
+        .header(
+            reqwest::header::RANGE,
+            format!("bytes={target}-{}", target + RANGE_CHUNK - 1),
+        )
+        .send()
+        .await;
+    let mut response = match response {
+        Ok(response) => response,
+        Err(error) => {
+            spool.fail(format!("failed to fetch a byte range: {error}"));
+            return;
+        }
+    };
+
+    match response.status().as_u16() {
+        206 => {
+            if let Some(total) = content_range_total(&response) {
+                spool.set_total(total);
+            }
+        }
+        200 => {
+            // The server ignored `Range`; the sequential downloader will reach
+            // the target eventually, so let the reader wait for it.
+            tracing::warn!("stream server ignored Range; falling back to sequential");
+            return;
+        }
+        status => {
+            spool.fail(format!(
+                "the stream server returned {status} for a range request"
+            ));
+            return;
+        }
+    }
+
+    let mut offset = target;
+    loop {
+        if spool.is_cancelled() || offset - target >= RANGE_CHUNK {
+            return;
+        }
+        match response.chunk().await {
+            Ok(Some(chunk)) => match spool.write_at(writer, offset, &chunk) {
+                Ok(true) => offset += chunk.len() as u64,
+                Ok(false) => return,
+                Err(error) => {
+                    spool.fail(format!("failed to write a byte range: {error}"));
+                    return;
+                }
+            },
+            Ok(None) => {
+                // The range ended at EOF.
+                spool.set_total(offset);
+                return;
+            }
+            Err(error) => {
+                spool.fail(format!("failed to read a byte range: {error}"));
+                return;
+            }
+        }
+    }
+}
+
+fn content_range_total(response: &reqwest::Response) -> Option<u64> {
+    let value = response
+        .headers()
+        .get(reqwest::header::CONTENT_RANGE)?
+        .to_str()
+        .ok()?;
+    value.rsplit('/').next()?.trim().parse().ok()
+}
+
 fn open_device(name: Option<&str>) -> std::result::Result<rodio::MixerDeviceSink, String> {
     match name {
         None => DeviceSinkBuilder::open_default_sink()
@@ -525,7 +637,9 @@ fn audio_thread(
                         shared.finished.store(false, Ordering::Relaxed);
                         shared.position_ms.store(0, Ordering::Relaxed);
                         shared.wave.reset();
-                        player.append(Metered::new(decoder, Arc::clone(&shared.wave)));
+                        // Decode ahead so range fetches never block the device.
+                        let source = PrefetchSource::new(decoder);
+                        player.append(Metered::new(source, Arc::clone(&shared.wave)));
                         player.play();
                         tracing::debug!("stream loaded from spool");
                         let _ = ack.send(Ok(()));
@@ -596,12 +710,86 @@ fn audio_thread(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
+    use std::{
+        io::{Read as _, Seek as _, SeekFrom, Write as _},
+        net::TcpListener,
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        },
     };
 
-    use super::{Boundary, Shared};
+    use tempfile::NamedTempFile;
+
+    use super::{Boundary, Shared, fetch_range};
+    use crate::spool::{GrowingFile, Spool};
+
+    #[tokio::test]
+    async fn range_fetch_fills_a_hole_ahead_of_the_sequential_download() {
+        let body: Vec<u8> = (0..64 * 1024).map(|index| (index % 251) as u8).collect();
+        let total = body.len();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server_body = body.clone();
+
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0u8; 1024];
+            loop {
+                let read = stream.read(&mut buffer).unwrap_or(0);
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buffer[..read]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let text = String::from_utf8_lossy(&request).to_ascii_lowercase();
+            let start: usize = text
+                .split("range: bytes=")
+                .nth(1)
+                .and_then(|rest| rest.split('-').next())
+                .and_then(|value| value.trim().parse().ok())
+                .expect("a Range header");
+            let slice = &server_body[start..];
+            let header = format!(
+                "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes {start}-{}/{total}\r\nConnection: close\r\n\r\n",
+                slice.len(),
+                total - 1,
+            );
+            stream.write_all(header.as_bytes()).unwrap();
+            stream.write_all(slice).unwrap();
+            stream.flush().unwrap();
+        });
+
+        let spool = Spool::new(Some(total as u64));
+        let temp = NamedTempFile::new().unwrap();
+        let mut writer = temp.reopen().unwrap();
+        let client = reqwest::Client::new();
+        let target = 32 * 1024u64;
+        fetch_range(
+            &client,
+            &format!("http://{address}/audio"),
+            target,
+            &spool,
+            &mut writer,
+        )
+        .await;
+        server.join().unwrap();
+
+        assert!(spool.is_covered(target));
+        assert_eq!(spool.total(), Some(total as u64));
+        let mut file = GrowingFile::new(temp.reopen().unwrap(), Arc::clone(&spool));
+        file.seek(SeekFrom::Start(target)).unwrap();
+        let mut fetched = vec![0u8; 1024];
+        file.read_exact(&mut fetched).unwrap();
+        assert_eq!(
+            &fetched,
+            &body[target as usize..target as usize + fetched.len()]
+        );
+    }
 
     #[test]
     fn boundary_source_signals_once_on_the_first_sample() {

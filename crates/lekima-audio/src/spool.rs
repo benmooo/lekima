@@ -1,12 +1,17 @@
-//! Growing-file spool for streaming playback.
+//! Sparse growing-file spool for streaming playback.
 //!
-//! The downloader appends chunks; the decoder reads from a second file handle.
-//! When the reader catches up it waits on a condition variable (with a timeout
-//! so cancellation is observed) instead of hitting a premature EOF.
+//! The downloader writes at arbitrary offsets (sequential and HTTP `Range`
+//! fetches), and the decoder reads from a second handle. Reads and seeks outside
+//! downloaded ranges block until a range worker fills them, while the
+//! `buffering` flag is set.
+//!
+//! Reads block on the *decoder prefetch thread*, never on the audio callback,
+//! so a slow range fetch pauses output instead of killing the stream.
 
 use std::{
     fs::File,
     io::{self, Read, Seek, SeekFrom, Write},
+    ops::Range,
     sync::{
         Arc, Condvar, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -14,11 +19,15 @@ use std::{
     time::{Duration, Instant},
 };
 
-const READ_WAIT: Duration = Duration::from_millis(100);
+use tokio::sync::Notify;
+
+const WAIT: Duration = Duration::from_millis(100);
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
+const SEEK_TIMEOUT: Duration = Duration::from_secs(30);
 
 struct State {
-    written: u64,
+    /// Sorted, merged downloaded byte ranges.
+    ranges: Vec<Range<u64>>,
     total: Option<u64>,
     complete: bool,
     error: Option<String>,
@@ -29,6 +38,8 @@ pub struct Spool {
     state: Mutex<State>,
     ready: Condvar,
     buffering: AtomicBool,
+    pending: Mutex<Vec<u64>>,
+    wake: Notify,
 }
 
 impl Spool {
@@ -36,7 +47,7 @@ impl Spool {
     pub fn new(total: Option<u64>) -> Arc<Self> {
         Arc::new(Self {
             state: Mutex::new(State {
-                written: 0,
+                ranges: Vec::new(),
                 total,
                 complete: false,
                 error: None,
@@ -44,64 +55,129 @@ impl Spool {
             }),
             ready: Condvar::new(),
             buffering: AtomicBool::new(false),
+            pending: Mutex::new(Vec::new()),
+            wake: Notify::new(),
         })
     }
 
-    /// Appends one chunk. Returns `false` when the spool was cancelled.
-    pub fn push(&self, writer: &mut File, chunk: &[u8]) -> io::Result<bool> {
-        let mut state = self
-            .state
+    fn lock(&self) -> std::sync::MutexGuard<'_, State> {
+        self.state
             .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+            .unwrap_or_else(|poison| poison.into_inner())
+    }
+
+    /// Writes one chunk at an absolute offset and merges its range.
+    pub fn write_at(&self, file: &mut File, offset: u64, chunk: &[u8]) -> io::Result<bool> {
+        let mut state = self.lock();
         if state.cancelled {
             return Ok(false);
         }
-        writer.write_all(chunk)?;
-        state.written += chunk.len() as u64;
+        file.seek(SeekFrom::Start(offset))?;
+        file.write_all(chunk)?;
+        merge(&mut state.ranges, offset, offset + chunk.len() as u64);
+        drop(state);
         self.ready.notify_all();
         Ok(true)
     }
 
-    pub fn finish(&self) {
-        let mut state = self
-            .state
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+    /// Queues a request for the bytes starting at `offset`.
+    pub fn request(&self, offset: u64) {
+        if self.is_covered(offset) {
+            return;
+        }
+        if let Ok(mut pending) = self.pending.lock()
+            && !pending.contains(&offset)
+        {
+            pending.push(offset);
+        }
+        self.wake.notify_one();
+    }
+
+    /// Next byte offset the range worker should fetch, skipping covered ranges.
+    ///
+    /// Returns `None` once the spool is cancelled. Newest requests win, so an
+    /// interrupted seek refetches its own target rather than every position it
+    /// passed through.
+    pub async fn next_request(&self) -> Option<u64> {
+        loop {
+            if self.is_cancelled() {
+                return None;
+            }
+            let candidates = {
+                let Ok(mut pending) = self.pending.lock() else {
+                    continue;
+                };
+                std::mem::take(&mut *pending)
+            };
+            if let Some(offset) = candidates
+                .into_iter()
+                .rev()
+                .find(|offset| !self.is_covered(*offset))
+            {
+                return Some(offset);
+            }
+            self.wake.notified().await;
+        }
+    }
+
+    pub fn mark_complete(&self) {
+        let mut state = self.lock();
         state.complete = true;
+        drop(state);
         self.ready.notify_all();
     }
 
     pub fn fail(&self, error: impl Into<String>) {
-        let mut state = self
-            .state
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let mut state = self.lock();
         state.error = Some(error.into());
         state.complete = true;
+        drop(state);
         self.ready.notify_all();
     }
 
     pub fn cancel(&self) {
-        let mut state = self
-            .state
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let mut state = self.lock();
         state.cancelled = true;
+        drop(state);
         self.ready.notify_all();
+        self.wake.notify_one();
     }
 
     #[must_use]
     pub fn is_cancelled(&self) -> bool {
-        self.state.lock().map_or(true, |state| state.cancelled)
+        self.lock().cancelled
     }
 
-    /// Blocks until `threshold` bytes exist, the download completes, or it fails.
+    #[must_use]
+    pub fn total(&self) -> Option<u64> {
+        self.lock().total
+    }
+
+    /// Records the total length once it is known from a response header.
+    pub fn set_total(&self, total: u64) {
+        let mut state = self.lock();
+        if state.total.is_none() {
+            state.total = Some(total);
+        }
+        drop(state);
+        self.ready.notify_all();
+    }
+
+    #[must_use]
+    pub fn is_buffering(&self) -> bool {
+        self.buffering.load(Ordering::Relaxed)
+    }
+
+    /// True when `offset` can be read without waiting.
+    #[must_use]
+    pub fn is_covered(&self, offset: u64) -> bool {
+        covered_end(&self.lock().ranges, offset).is_some()
+    }
+
+    /// Blocks until `[0, threshold)` is covered, the download completes, or it fails.
     pub fn wait_ready(&self, threshold: u64, timeout: Duration) -> Result<(), String> {
         let started = Instant::now();
-        let mut state = self
-            .state
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let mut state = self.lock();
         loop {
             if let Some(error) = &state.error {
                 return Err(error.clone());
@@ -110,7 +186,14 @@ impl Spool {
                 return Err("stream was cancelled".to_owned());
             }
             let target = state.total.map_or(threshold, |total| total.min(threshold));
-            if state.complete || state.written >= target {
+            if state
+                .ranges
+                .first()
+                .is_some_and(|range| range.start == 0 && range.end >= target)
+            {
+                return Ok(());
+            }
+            if state.complete && state.total.is_none() {
                 return Ok(());
             }
             if started.elapsed() >= timeout {
@@ -118,48 +201,80 @@ impl Spool {
             }
             let (next, _) = self
                 .ready
-                .wait_timeout(state, READ_WAIT)
+                .wait_timeout(state, WAIT)
                 .unwrap_or_else(|poison| poison.into_inner());
             state = next;
         }
     }
 
-    #[must_use]
-    pub fn total(&self) -> Option<u64> {
-        self.state.lock().map_or(None, |state| state.total)
-    }
-
-    #[must_use]
-    pub fn is_buffering(&self) -> bool {
-        self.buffering.load(Ordering::Relaxed)
-    }
-
-    fn progress(&self) -> (u64, bool, Option<String>, bool) {
-        let state = self
-            .state
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        (
-            state.written,
-            state.complete,
-            state.error.clone(),
-            state.cancelled,
-        )
-    }
-
-    fn wait_more(&self) {
-        let state = self
-            .state
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        let _ = self
-            .ready
-            .wait_timeout(state, READ_WAIT)
-            .unwrap_or_else(|poison| poison.into_inner());
+    fn wait_for(&self, offset: u64, timeout: Duration) -> Result<(), String> {
+        let started = Instant::now();
+        self.buffering.store(true, Ordering::Relaxed);
+        let result = loop {
+            self.request(offset);
+            let state = self.lock();
+            if let Some(error) = &state.error {
+                break Err(error.clone());
+            }
+            if state.cancelled {
+                break Err("stream was cancelled".to_owned());
+            }
+            if covered_end(&state.ranges, offset).is_some() {
+                break Ok(());
+            }
+            if state.complete && state.total.is_some_and(|total| offset >= total) {
+                break Ok(());
+            }
+            if started.elapsed() >= timeout {
+                break Err("timed out while seeking the stream".to_owned());
+            }
+            let _ = self
+                .ready
+                .wait_timeout(state, WAIT)
+                .unwrap_or_else(|poison| poison.into_inner());
+        };
+        self.buffering.store(false, Ordering::Relaxed);
+        result
     }
 }
 
-/// `Read + Seek` view over the growing file.
+fn covered_end(ranges: &[Range<u64>], offset: u64) -> Option<u64> {
+    ranges
+        .iter()
+        .find(|range| range.start <= offset && offset < range.end)
+        .map(|range| range.end)
+}
+
+fn merge(ranges: &mut Vec<Range<u64>>, start: u64, end: u64) {
+    let mut merged = Vec::with_capacity(ranges.len() + 1);
+    let mut insertion = Some((start, end));
+    for range in ranges.iter() {
+        match insertion.take() {
+            Some((mut new_start, mut new_end))
+                if range.start <= new_end && new_start <= range.end =>
+            {
+                new_start = new_start.min(range.start);
+                new_end = new_end.max(range.end);
+                insertion = Some((new_start, new_end));
+            }
+            Some(pending) if pending.0 < range.start => {
+                merged.push(pending.0..pending.1);
+                merged.push(range.clone());
+            }
+            Some(pending) => {
+                merged.push(range.clone());
+                insertion = Some(pending);
+            }
+            None => merged.push(range.clone()),
+        }
+    }
+    if let Some((start, end)) = insertion {
+        merged.push(start..end);
+    }
+    *ranges = merged;
+}
+
+/// `Read + Seek` view over the sparse spool.
 pub struct GrowingFile {
     file: File,
     position: u64,
@@ -181,27 +296,31 @@ impl Read for GrowingFile {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         let started = Instant::now();
         loop {
-            let (written, complete, error, cancelled) = self.spool.progress();
-            if let Some(error) = error {
-                return Err(io::Error::other(error));
-            }
-            if cancelled {
-                return Err(io::Error::new(
-                    io::ErrorKind::Interrupted,
-                    "stream was cancelled",
-                ));
-            }
-            if self.position < written {
-                let available = (written - self.position).min(buffer.len() as u64) as usize;
-                self.file.seek(SeekFrom::Start(self.position))?;
-                let read = self.file.read(&mut buffer[..available])?;
-                self.position += read as u64;
-                self.spool.buffering.store(false, Ordering::Relaxed);
-                return Ok(read);
-            }
-            if complete {
-                self.spool.buffering.store(false, Ordering::Relaxed);
+            if let Some(total) = self.spool.total()
+                && self.position >= total
+            {
                 return Ok(0);
+            }
+            {
+                let state = self.spool.lock();
+                if let Some(error) = &state.error {
+                    return Err(io::Error::other(error.clone()));
+                }
+                if state.cancelled {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Interrupted,
+                        "stream was cancelled",
+                    ));
+                }
+                if let Some(end) = covered_end(&state.ranges, self.position) {
+                    let available = (end - self.position).min(buffer.len() as u64) as usize;
+                    drop(state);
+                    self.file.seek(SeekFrom::Start(self.position))?;
+                    let read = self.file.read(&mut buffer[..available])?;
+                    self.position += read as u64;
+                    self.spool.buffering.store(false, Ordering::Relaxed);
+                    return Ok(read);
+                }
             }
             if started.elapsed() >= READ_TIMEOUT {
                 return Err(io::Error::new(
@@ -210,17 +329,19 @@ impl Read for GrowingFile {
                 ));
             }
             self.spool.buffering.store(true, Ordering::Relaxed);
-            self.spool.wait_more();
+            self.spool.request(self.position);
+            let state = self.spool.lock();
+            let _ = self
+                .spool
+                .ready
+                .wait_timeout(state, WAIT)
+                .unwrap_or_else(|poison| poison.into_inner());
         }
     }
 }
 
 impl Seek for GrowingFile {
     fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
-        let (written, _complete, error, _) = self.spool.progress();
-        if let Some(error) = error {
-            return Err(io::Error::other(error));
-        }
         let total = self.spool.total();
         let target = match position {
             SeekFrom::Start(offset) => i64::try_from(offset).unwrap_or(i64::MAX),
@@ -242,11 +363,18 @@ impl Seek for GrowingFile {
             ));
         }
         let target = target as u64;
-        if target > written {
+        if let Some(total) = total
+            && target > total
+        {
             return Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "seek beyond the buffered region",
+                io::ErrorKind::InvalidInput,
+                "seek past the end of the stream",
             ));
+        }
+        if target < total.unwrap_or(u64::MAX) && !self.spool.is_covered(target) {
+            self.spool
+                .wait_for(target, SEEK_TIMEOUT)
+                .map_err(io::Error::other)?;
         }
         self.file.seek(SeekFrom::Start(target))?;
         self.position = target;
@@ -268,55 +396,55 @@ mod tests {
     use super::{GrowingFile, Spool};
 
     #[test]
-    fn reads_block_until_data_arrives_and_end_after_finish() {
+    fn sequential_writes_are_readable_and_out_of_order_writes_merge() {
         let temp = NamedTempFile::new().unwrap();
         let mut writer = temp.reopen().unwrap();
-        let reader = temp.reopen().unwrap();
-        let spool = Spool::new(Some(6));
-        let mut file = GrowingFile::new(reader, Arc::clone(&spool));
+        let spool = Spool::new(Some(9));
+        spool.write_at(&mut writer, 0, b"abc").unwrap();
+        spool.write_at(&mut writer, 6, b"ghi").unwrap();
+        spool.write_at(&mut writer, 3, b"def").unwrap();
+        spool.mark_complete();
 
+        let mut file = GrowingFile::new(temp.reopen().unwrap(), Arc::clone(&spool));
+        let mut buffer = Vec::new();
+        file.read_to_end(&mut buffer).unwrap();
+        assert_eq!(buffer, b"abcdefghi");
+        assert_eq!(file.seek(SeekFrom::Start(2)).unwrap(), 2);
+        let mut part = [0u8; 3];
+        file.read_exact(&mut part).unwrap();
+        assert_eq!(&part, b"cde");
+    }
+
+    #[test]
+    fn seek_beyond_buffered_bytes_waits_for_the_range() {
+        let temp = NamedTempFile::new().unwrap();
+        let spool = Spool::new(Some(10));
+        let mut file = GrowingFile::new(temp.reopen().unwrap(), Arc::clone(&spool));
+
+        let reader_spool = Arc::clone(&spool);
         let handle = thread::spawn(move || {
-            let mut buffer = Vec::new();
-            file.read_to_end(&mut buffer).unwrap();
+            file.seek(SeekFrom::Start(6)).unwrap();
+            let mut buffer = [0u8; 2];
+            file.read_exact(&mut buffer).unwrap();
             buffer
         });
 
-        thread::sleep(Duration::from_millis(50));
-        assert!(spool.push(&mut writer, b"abc").unwrap());
-        thread::sleep(Duration::from_millis(50));
-        assert!(spool.push(&mut writer, b"def").unwrap());
-        spool.finish();
-
-        assert_eq!(handle.join().unwrap(), b"abcdef");
-    }
-
-    #[test]
-    fn seek_within_buffered_region_works_beyond_is_rejected() {
-        let temp = NamedTempFile::new().unwrap();
+        thread::sleep(Duration::from_millis(80));
         let mut writer = temp.reopen().unwrap();
-        let reader = temp.reopen().unwrap();
-        let spool = Spool::new(Some(6));
-        spool.push(&mut writer, b"abcdef").unwrap();
-        spool.finish();
-
-        let mut file = GrowingFile::new(reader, spool);
-        assert_eq!(file.seek(SeekFrom::Start(2)).unwrap(), 2);
-        let mut buffer = [0u8; 3];
-        file.read_exact(&mut buffer).unwrap();
-        assert_eq!(&buffer, b"cde");
-        assert!(file.seek(SeekFrom::Start(99)).is_err());
+        spool.write_at(&mut writer, 6, b"gh").unwrap();
+        spool.mark_complete();
+        assert_eq!(&handle.join().unwrap(), b"gh");
+        assert!(reader_spool.total().is_some());
     }
 
     #[test]
-    fn errors_and_cancellation_wake_the_reader() {
+    fn cancellation_wakes_readers() {
         let temp = NamedTempFile::new().unwrap();
-        let reader = temp.reopen().unwrap();
-        let spool = Spool::new(None);
-        let mut file = GrowingFile::new(reader, Arc::clone(&spool));
-
+        let spool = Spool::new(Some(10));
+        let mut file = GrowingFile::new(temp.reopen().unwrap(), Arc::clone(&spool));
         let handle = thread::spawn(move || {
-            let mut byte = [0u8; 1];
-            file.read(&mut byte).unwrap_err().kind()
+            let mut buffer = [0u8; 1];
+            file.read(&mut buffer).unwrap_err().kind()
         });
         thread::sleep(Duration::from_millis(50));
         spool.cancel();

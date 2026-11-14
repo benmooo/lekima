@@ -12,6 +12,9 @@ All notable changes to lekima are documented here. The format follows
   disappears.
 - Gapless playback for consecutive small tracks: preload + queue append +
   boundary event; large tracks keep the normal load path.
+- Range seeks for streamed tracks: the spool tracks downloaded byte ranges, a
+  background range worker fetches the seek target, and the decoder runs on its
+  own thread so the audio callback never blocks.
 
 ## 0.2.1 — unreleased
 

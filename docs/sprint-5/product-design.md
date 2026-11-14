@@ -76,6 +76,9 @@ This sprint makes it a first-class OS citizen and finishes the playback engine.
 - A spooled stream tracks **downloaded byte ranges**, not just a high-water mark.
 - `GrowingFile::seek` asks the downloader for the missing range and waits while
   the decoder is repositioning (`buffering=true`).
+- Decoding runs on a background thread (`PrefetchSource`) with a 2 s buffer;
+  blocking range fetches and seeks never run on the audio callback, so output
+  pauses with silence instead of underrunning and ending the stream.
 - The downloader switches from sequential mode to `Range: bytes=start-end`
   requests, writing at absolute offsets into the same anonymous file.
 - Time→byte mapping is owned by symphonia's seek logic; the spool only serves

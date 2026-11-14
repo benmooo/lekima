@@ -97,7 +97,7 @@ unavailable (no bundle), log a warning and keep Now Playing read-only.
 
 ### 4.1 Sparse spool
 
-Extend `Spool` state:
+`Spool` tracks downloaded byte ranges, not a high-water mark:
 
 ```rust
 struct SpoolState {
@@ -106,40 +106,52 @@ struct SpoolState {
     complete: bool,
     error: Option<String>,
     cancelled: bool,
-    pending_fetch: Option<Range<u64>>,
 }
 ```
 
-- Sequential writer appends and merges `[written_before, written_after)`.
-- `GrowingFile::read` waits until `position` is inside a downloaded range.
-- `GrowingFile::seek(target)`:
-  1. if target inside a range → position it;
-  2. if `complete` → EOF/allow;
-  3. else set `pending_fetch = target..target+CHUNK`, wake the downloader, and
-     wait (with timeout) until covered; `buffering=true`.
-- Downloader loop:
-  - poll `pending_fetch`; if set, cancel the sequential response and issue
-    `GET Range: bytes=start-end`;
-  - write at absolute file offsets (`File::seek(Start)`), merge the range;
-  - on completion of the range, resume sequential from the highest contiguous
-    range? For simplicity, stay in range mode: each read gap triggers another
-    fetch. Metadata end-seeks become one extra request.
-- Server ignoring Range (HTTP 200): mark `range_unsupported`, fall back to
-  reading until the target is available (sequential wait), toast once.
+- The sequential downloader writes chunks at absolute offsets and merges each
+  range; the range worker serves misses the same way.
+- `GrowingFile::read` serves bytes from the range containing `position`, or
+  requests that offset and waits (30 s timeout).
+- `GrowingFile::seek(target)` asks the range worker for `bytes=target-` when
+  the target is not downloaded, waits with `buffering=true`, then repositions.
+- `request()` pushes offsets into a deduplicated queue and wakes the range
+  worker through a `tokio::sync::Notify`; newest requests win.
+- The range worker fetches at most 4 MiB per request (`206 Partial Content`);
+  if the server ignores `Range` (HTTP 200), it logs once and lets the reader
+  wait for the sequential download to arrive.
 
-### 4.2 Position semantics
+### 4.2 Decode-ahead
+
+rodio decodes inside the device callback, so a blocking read or seek there
+underruns and **terminates the stream** — the prototype without a decode thread
+proved this. `PrefetchSource` therefore moves the decoder to a background
+thread:
+
+- A producer thread pulls up to 2 s of samples into a bounded queue; when the
+  queue is full it waits, when a range fetch blocks it waits there.
+- The consumer (`Source::next`) never blocks: it pops samples, emits silence
+  while the buffer is empty, and ends the track only at EOF/error.
+- `try_seek` hands the target to the producer and returns immediately; the
+  consumer emits silence (`seeking`) until the producer has repositioned, so no
+  stale audio leaks past a seek.
+- Producer exit (EOF, panic, cancellation) sets `eof`, so the track always
+  terminates instead of emitting silence forever.
+
+### 4.3 Position semantics
 
 - The audio position remains decoder-relative and correct; the spool only
-  supplies bytes. No synthetic offset is needed because the decoder's seek
-  repositions to the target time.
-- `buffered_ms` is derived from the contiguous range containing the current
-  position and the byte rate estimate (total/duration) when both exist.
+  supplies bytes. The decoder's seek repositions to the target time.
+- Inserted silence counts as played time, so the HUD position may run ahead of
+  the audible position by the buffering interval after a stalled seek. With a
+  2 s buffer this is bounded and only visible on a slow network.
 
-### 4.3 Failure
+### 4.4 Failure
 
-- Range 4xx/5xx → `Playback("server refused range seek")`; keep playing from the
-  old position.
+- Range 4xx/5xx → `Playback("server refused range seek")`; the producer surfaces
+  the error and the track ends so the daemon can skip.
 - 30 s stall → playback error + skip (existing policy).
+- The consumer underruns with silence, never with a device-level error.
 
 ## 5. Gapless
 
@@ -221,10 +233,12 @@ struct Preloaded {
 | 043 | Sparse spool with fetch-on-seek | Works with the decoder's byte-level seeks |
 | 044 | Gapless via rodio queue append | Sample-accurate without a custom mixer |
 | 045 | Claim gapless only for matching rates | Honest guarantees, no artefacts |
+| 046 | Decode on a background thread (`PrefetchSource`) | Network waits must never run on the audio callback |
+| 047 | Range worker separate from the sequential downloader | A seek does not interrupt playback buffering |
 
 ## 9. Open questions
 
-1. Range chunk size (256 KiB?) and max concurrent fetches (1).
+1. Range chunk size (4 MiB today) and max concurrent fetches (1).
 2. Preload budget: bytes vs spool threshold; preload only ≤ 64 MiB? Proposal:
    preload uses the same rules as playback (memory for small, spool for large).
 3. MPRIS `Raise`: focus the terminal? No portable answer; no-op.
