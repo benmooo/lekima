@@ -6,7 +6,10 @@
 //! network is slow and lets a CLI or an agent change what you are looking at.
 
 pub mod app;
+pub mod theme;
 pub mod ui;
+
+pub use theme::Theme;
 
 use std::path::{Path, PathBuf};
 
@@ -29,9 +32,9 @@ pub enum TuiError {
 /// # Errors
 ///
 /// Returns [`TuiError`] when the terminal cannot be drawn.
-pub async fn run(socket: PathBuf) -> Result<(), TuiError> {
+pub async fn run(socket: PathBuf, theme: Theme) -> Result<(), TuiError> {
     let mut terminal = ratatui::init();
-    let result = event_loop(&mut terminal, socket).await;
+    let result = event_loop(&mut terminal, socket, theme).await;
     ratatui::restore();
     result
 }
@@ -39,6 +42,7 @@ pub async fn run(socket: PathBuf) -> Result<(), TuiError> {
 async fn event_loop(
     terminal: &mut ratatui::DefaultTerminal,
     socket: PathBuf,
+    theme: Theme,
 ) -> Result<(), TuiError> {
     let mut app = App::new();
     let mut keys = spawn_key_reader();
@@ -54,7 +58,7 @@ async fn event_loop(
     ticker.tick().await;
 
     loop {
-        terminal.draw(|frame| ui::draw(frame, &mut app))?;
+        terminal.draw(|frame| ui::draw(frame, &mut app, &theme))?;
 
         tokio::select! {
             key = keys.recv() => {
@@ -70,6 +74,7 @@ async fn event_loop(
                 apply_action(follow_up, &socket, &sender, &mut app);
             }
             _ = ticker.tick() => {
+                app.tick();
                 if !app.status_inflight && !app.daemon_down {
                     app.status_inflight = true;
                     dispatch(&socket, Command::Status, &sender);

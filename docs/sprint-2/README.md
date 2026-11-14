@@ -6,6 +6,7 @@ Design first, code second. Nothing in this folder has been implemented yet.
 | --- | --- |
 | [`product-design.md`](./product-design.md) | Users, jobs, feature specs, UX, keymap, agent contract, metrics, risks |
 | [`system-design.md`](./system-design.md) | Provider routes, domain/core changes, protocol v2, TUI/MCP architecture, testing, rollout, ADRs |
+| [`tui-visual-design.md`](./tui-visual-design.md) | Console/HUD visual language, palette, glyphs, themes, anti-patterns |
 
 ## Scope
 

@@ -24,6 +24,10 @@ $ lekima status --json
   ADRs.
 - [`docs/sprint-2/`](docs/sprint-2/) — **design only**: product and system design
   for daily/FM/likes/toplists/lyrics pane, push events, `lekima watch` and MCP.
+- [`docs/sprint-2/tui-visual-design.md`](docs/sprint-2/tui-visual-design.md) —
+  the console/HUD visual language (`cyber`, `amber`, `mono` themes).
+- [`docs/releasing.md`](docs/releasing.md) — release flow, including
+  `--registry crates-io` on this USTC-mirrored machine.
 
 ## Status
 

@@ -109,20 +109,20 @@ desktop notifications, Last.fm scrobbling, multiple profiles, plugin hooks,
 
 ### 5.1 Screen model
 
+> Visual language: [`sprint-2/tui-visual-design.md`](./sprint-2/tui-visual-design.md)
+> (console/HUD, neon-on-dark, no boxed panels). The wireframe below describes
+> information architecture; the styling lives in that document.
+
+
 ```
-┌ lekima ──────────────────────────────────────────────── ◉ 320kbps  12:04 ┐
-│ ▍Now Playing                                                            │
-│   Bohemian Rhapsody · Queen · A Night at the Opera                      │
-│   ━━━━━━━━━━━━━━━━━━──────────── 1:42 / 5:55      vol 70%  repeat off   │
-├─ Library ────────────┬─ Tracks ─────────────────────────────────────────┤
-│ ▾ My playlists (12)  │   #  TITLE                 ARTIST        TIME     │
-│   • Late night       │   1  mota                  Zhang        3:12  ▶  │
-│   • Focus            │   2  ...                                               │
-│ ▸ Daily              │                                                       │
-│ ▸ FM                 │                                                       │
-├──────────────────────┴────────────────────────────────────────────────────┤
-│ NORMAL  j/k move  ⏎ play  space pause  / search  ? help        queue 12  │
-└──────────────────────────────────────────────────────────────────────────┘
+ LEKIMA  ┃ ▶ Bohemian Rhapsody · Queen  01:42/05:55  ████░░░░░░░░  R:OFF  VOL ████░░  Q:12
+──────────────────────────────────────────────────────────────────────────────────────────
+// LIBRARY 12          │ // QUEUE · 12 ▌
+▌01 Late night         │   #     TITLE                            ARTIST              TIME
+ 02 Focus              │ ▌ 001 ▶ Bohemian Rhapsody                Queen               5:55
+ 03 Daily              │   002   Mota                             Russian Circles     6:32
+                       │   003   Teardrop                         Massive Attack     5:30
+[NORMAL] j/k nav · ⏎ play · space pause · / search · : cmd · Q queue · ? keys
 ```
 
 - **Header / now-playing**: title, artist, album, progress, volume, repeat,

@@ -222,17 +222,14 @@ survives a daemon restart (reconnects on the next call).
 ### 6.1 Home view
 
 ```
-┌ library ───────┬ Home ──────────────────────────────────────────────────┐
-│ ▾ Discover     │ Daily · Wednesday           5 tracks · 18 more          │
-│   Daily (28)   │ ─────────────────────────────────────────────────────  │
-│   Personal FM  │ ▶ Cigarettes and lighters · LoMo            1:49  ♥    │
-│   Toplists     │   Mota · Russian Circles                    6:32  ♥    │
-│ ▾ Mine         │   ...                                                  │
-│   ♥ Liked (312)│                                                        │
-│   Focus (42)   │ Toplists                                               │
-│   Late night   │   1 热歌榜   2 新歌榜   3 飙升榜   4 原创榜           │
-└────────────────┴────────────────────────────────────────────────────────┘
- NORMAL  j/k move · ⏎ play · d daily · F fm · t toplists · f like · L lyrics
+ LEKIMA  ┃ ▶ Cigarettes and lighters · LoMo  00:42/01:49  ████░░░░░░  R:ALL  VOL ████░  Q:28
+──────────────────────────────────────────────────────────────────────────────────────────
+// LIBRARY 12          │ // DAILY · 28 TRACKS ▌
+ 01 Late night         │ 001 ▶ Cigarettes and lighters   LoMo          1:49  ♥
+ 02 Focus              │ 002   Mota                      Russian...    6:32  ♥
+ 03 Daily              │ 003   Teardrop                  Massive...    5:30
+ 04 Toplists           │
+[NORMAL] j/k nav · ⏎ play · d daily · F fm · t toplists · f like · L lyrics
 ```
 
 ### 6.2 Keymap additions

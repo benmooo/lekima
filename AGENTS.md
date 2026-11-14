@@ -26,6 +26,20 @@ Guidance for coding agents working in this repository.
 - **Agent contract is public API:** command names, JSON fields, error codes and
   exit codes are versioned. Adding is fine; renaming is a major bump.
 
+## Releasing
+
+This machine mirrors crates.io through USTC. Every registry write must name the
+real registry:
+
+```bash
+cargo publish --dry-run --registry crates-io
+cargo publish --registry crates-io
+cargo yank --version <v> --registry crates-io
+```
+
+Full checklist: `docs/releasing.md`. Never commit a `[patch.crates-io]` path as a
+workaround for mirror lag.
+
 ## Commands
 
 ```bash

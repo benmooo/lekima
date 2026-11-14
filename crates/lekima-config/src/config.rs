@@ -56,6 +56,8 @@ impl Default for PlaybackConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct UiConfig {
+    /// `cyber` (default), `amber` or `mono`.
+    pub theme: String,
     /// `true` keeps the terminal contents when the TUI exits.
     pub alternate_screen: bool,
     pub show_help_on_start: bool,
@@ -64,6 +66,7 @@ pub struct UiConfig {
 impl Default for UiConfig {
     fn default() -> Self {
         Self {
+            theme: "cyber".to_owned(),
             alternate_screen: true,
             show_help_on_start: false,
         }
@@ -115,6 +118,7 @@ mod tests {
         let config: Config = toml::from_str("[playback]\nvolume = 0.25\n").unwrap();
         assert!((config.playback.volume - 0.25).abs() < f32::EPSILON);
         assert_eq!(config.daemon.log_level, "info");
+        assert_eq!(config.ui.theme, "cyber");
         assert!(config.provider.cache);
     }
 

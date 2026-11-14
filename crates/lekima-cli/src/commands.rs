@@ -25,7 +25,7 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
     match cli.command {
         TopCommand::Tui => {
             ensure_daemon(&socket, &paths, &config).await?;
-            lekima_tui::run(socket)
+            lekima_tui::run(socket, lekima_tui::Theme::resolve(&config.ui.theme))
                 .await
                 .map_err(|error| Failure::internal(error.to_string()))?;
             Ok(())

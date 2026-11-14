@@ -329,6 +329,7 @@ quality = "exhigh"   # standard | higher | exhigh | lossless
 autoplay = true
 
 [ui]
+theme = "cyber"          # cyber | amber | mono (NO_COLOR forces mono)
 alternate_screen = true
 show_help_on_start = false
 
@@ -456,6 +457,11 @@ account.
 | Malformed provider JSON | Mapping returns `Unavailable`, never panics |
 
 ## 17b. Sprint 2
+
+The TUI's visual language is defined in
+[`sprint-2/tui-visual-design.md`](./sprint-2/tui-visual-design.md): a HUD line,
+a rule, dense lists and a command bar, with no boxed chrome.
+
 
 Design for the next increment lives in
 [`sprint-2/system-design.md`](./sprint-2/system-design.md): protocol v2 push

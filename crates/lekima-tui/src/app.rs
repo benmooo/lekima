@@ -55,6 +55,8 @@ pub struct App {
     pub user: Option<String>,
     pub status_inflight: bool,
     pub daemon_down: bool,
+    /// Monotonic tick counter; drives cursor blink and subtle animation.
+    pub frame: u64,
 }
 
 impl Default for App {
@@ -75,6 +77,7 @@ impl Default for App {
             user: None,
             status_inflight: false,
             daemon_down: false,
+            frame: 0,
         }
     }
 }
@@ -83,6 +86,11 @@ impl App {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Advances animation state; called on every UI tick.
+    pub fn tick(&mut self) {
+        self.frame = self.frame.wrapping_add(1);
     }
 
     #[must_use]
