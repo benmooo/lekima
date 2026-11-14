@@ -5,7 +5,7 @@
 //! daemon reply back into the state.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use lekima_domain::{Lyrics, PlaybackState, PlaybackStatus, Playlist, Toplist, Track};
+use lekima_domain::{Lyrics, PlaybackState, PlaybackStatus, Playlist, Toplist, Track, TrackId};
 use lekima_ipc::{Command, ErrorCode, IpcError, PlayTarget, Reply};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,6 +57,48 @@ impl Message {
     }
 }
 
+/// Lifecycle of the lyrics pane for one track.
+#[derive(Debug, Clone, Default)]
+pub enum LyricsState {
+    #[default]
+    Idle,
+    Loading {
+        track: TrackId,
+    },
+    Ready {
+        track: TrackId,
+        lyrics: Lyrics,
+    },
+    Empty {
+        track: TrackId,
+    },
+    Error {
+        track: TrackId,
+        message: String,
+    },
+}
+
+impl LyricsState {
+    #[must_use]
+    pub fn track(&self) -> Option<TrackId> {
+        match self {
+            Self::Idle => None,
+            Self::Loading { track }
+            | Self::Ready { track, .. }
+            | Self::Empty { track }
+            | Self::Error { track, .. } => Some(*track),
+        }
+    }
+
+    #[must_use]
+    pub fn ready(&self) -> Option<&Lyrics> {
+        match self {
+            Self::Ready { lyrics, .. } => Some(lyrics),
+            _ => None,
+        }
+    }
+}
+
 /// Sidebar entries that are not playlists, in display order.
 pub const SIDEBAR_STATICS: [&str; 5] = ["DAILY", "FM", "TOPLISTS", "CLOUD", "LIKED"];
 
@@ -65,7 +107,7 @@ pub struct App {
     pub tracks: Vec<Track>,
     pub toplists: Vec<Toplist>,
     pub view: View,
-    pub lyrics: Option<Lyrics>,
+    pub lyrics_state: LyricsState,
     pub lyrics_open: bool,
     pub lyrics_offset_ms: i64,
     pub playlists: Vec<Playlist>,
@@ -92,7 +134,7 @@ impl Default for App {
             tracks: Vec::new(),
             toplists: Vec::new(),
             view: View::Tracks,
-            lyrics: None,
+            lyrics_state: LyricsState::Idle,
             lyrics_open: false,
             lyrics_offset_ms: 0,
             playlists: Vec::new(),
@@ -537,17 +579,18 @@ impl App {
     }
 
     fn toggle_lyrics(&mut self) -> Action {
-        self.lyrics_open = !self.lyrics_open;
-        if !self.lyrics_open {
+        if self.lyrics_open {
+            self.lyrics_open = false;
             return Action::None;
         }
-        if self.status.track.is_none() {
-            self.lyrics_open = false;
+        let Some(track) = self.status.track.as_ref() else {
             self.notify("nothing playing", true);
             return Action::None;
-        }
-        self.lyrics = None;
-        Action::Call(Command::Lyrics { id: None })
+        };
+        let id = track.id;
+        self.lyrics_open = true;
+        self.lyrics_state = LyricsState::Loading { track: id };
+        Action::Call(Command::Lyrics { id: Some(id) })
     }
 
     fn enqueue_selected(&mut self, next: bool) -> Action {
@@ -582,7 +625,24 @@ impl App {
                 self.daemon_down = false;
                 match reply {
                     Reply::Status { state } => {
+                        let previous = self.status.track.as_ref().map(|track| track.id);
                         self.status = state;
+                        let current = self.status.track.as_ref().map(|track| track.id);
+                        if previous != current {
+                            if self.lyrics_open {
+                                match current {
+                                    Some(id) => {
+                                        self.lyrics_state = LyricsState::Loading { track: id };
+                                        return Action::Call(Command::Lyrics { id: Some(id) });
+                                    }
+                                    None => {
+                                        self.lyrics_state = LyricsState::Idle;
+                                    }
+                                }
+                            } else {
+                                self.lyrics_state = LyricsState::Idle;
+                            }
+                        }
                     }
                     Reply::Tracks { tracks } => {
                         self.tracks = tracks;
@@ -609,13 +669,19 @@ impl App {
                     Reply::User { user } => {
                         self.user = user.map(|user| user.nickname);
                     }
-                    Reply::Lyrics { lyrics } => {
-                        if lyrics.is_empty() {
-                            self.notify("no lyrics for this track", true);
-                            self.lyrics = None;
-                        } else {
-                            self.lyrics = Some(lyrics);
-                            self.lyrics_open = true;
+                    Reply::Lyrics { id, lyrics } => {
+                        // Ignore replies for a track that is no longer playing.
+                        if self
+                            .status
+                            .track
+                            .as_ref()
+                            .is_some_and(|track| track.id == id)
+                        {
+                            if lyrics.is_empty() {
+                                self.lyrics_state = LyricsState::Empty { track: id };
+                            } else {
+                                self.lyrics_state = LyricsState::Ready { track: id, lyrics };
+                            }
                         }
                     }
                     Reply::Toplists { toplists } => {
@@ -643,6 +709,12 @@ impl App {
                 Action::None
             }
             Err(error) => {
+                if let LyricsState::Loading { track } = self.lyrics_state {
+                    self.lyrics_state = LyricsState::Error {
+                        track,
+                        message: crate::app::error_message(&error),
+                    };
+                }
                 if error.is_not_running() {
                     self.daemon_down = true;
                     self.notify("daemon not running — press R to start it", true);
@@ -683,7 +755,9 @@ const fn code_label(code: ErrorCode) -> &'static str {
 mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-    use super::{Action, App, Focus, Mode};
+    use lekima_domain::Track;
+
+    use super::{Action, App, Focus, LyricsState, Mode};
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
@@ -773,6 +847,77 @@ mod tests {
             app.handle_key(key(KeyCode::Char('c'))),
             Action::Call(lekima_ipc::Command::Cloud { .. })
         ));
+    }
+
+    fn sample_track(id: u64) -> Track {
+        Track {
+            id: id.into(),
+            name: format!("track-{id}"),
+            artists: Vec::new(),
+            album: None,
+            duration_ms: 0,
+        }
+    }
+
+    #[test]
+    fn track_changes_refresh_open_lyrics() {
+        let mut app = App::new();
+        app.status.track = Some(sample_track(1));
+        app.lyrics_open = true;
+        app.lyrics_state = LyricsState::Ready {
+            track: 1.into(),
+            lyrics: lekima_domain::parse_lrc("[00:01.00]old"),
+        };
+
+        let mut state = app.status.clone();
+        state.track = Some(sample_track(2));
+        let action = app.apply(Ok(lekima_ipc::Reply::Status { state }));
+
+        assert!(matches!(
+            action,
+            Action::Call(lekima_ipc::Command::Lyrics { id: Some(id) }) if id == 2.into()
+        ));
+        assert!(matches!(
+            app.lyrics_state,
+            LyricsState::Loading { track } if track == 2.into()
+        ));
+    }
+
+    #[test]
+    fn stale_lyrics_replies_are_ignored() {
+        let mut app = App::new();
+        app.status.track = Some(sample_track(2));
+        app.lyrics_open = true;
+        app.lyrics_state = LyricsState::Loading { track: 2.into() };
+
+        app.apply(Ok(lekima_ipc::Reply::Lyrics {
+            id: 1.into(),
+            lyrics: lekima_domain::parse_lrc("[00:01.00]stale"),
+        }));
+
+        assert!(matches!(
+            app.lyrics_state,
+            LyricsState::Loading { track } if track == 2.into()
+        ));
+    }
+
+    #[test]
+    fn lyrics_replies_become_ready_or_empty() {
+        let mut app = App::new();
+        app.status.track = Some(sample_track(3));
+        app.lyrics_open = true;
+
+        app.apply(Ok(lekima_ipc::Reply::Lyrics {
+            id: 3.into(),
+            lyrics: lekima_domain::parse_lrc("[00:01.00]line"),
+        }));
+        assert!(app.lyrics_state.ready().is_some());
+
+        app.apply(Ok(lekima_ipc::Reply::Lyrics {
+            id: 3.into(),
+            lyrics: lekima_domain::Lyrics::default(),
+        }));
+        assert!(matches!(app.lyrics_state, LyricsState::Empty { .. }));
     }
 
     #[test]

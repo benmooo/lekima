@@ -186,6 +186,7 @@ pub enum Reply {
         playlists: Vec<Playlist>,
     },
     Lyrics {
+        id: TrackId,
         lyrics: Lyrics,
     },
     Toplists {

@@ -16,7 +16,7 @@ use ratatui::{
     },
 };
 
-use crate::app::{App, Focus, Mode, SIDEBAR_STATICS, View};
+use crate::app::{App, Focus, LyricsState, Mode, SIDEBAR_STATICS, View};
 use crate::theme::Theme;
 
 const MIN_WIDTH: u16 = 24;
@@ -173,7 +173,7 @@ fn draw_rule(frame: &mut Frame, theme: &Theme, area: Rect) {
 }
 
 fn draw_body(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
-    let lyrics_visible = app.lyrics_open && app.lyrics.is_some();
+    let lyrics_visible = app.lyrics_open && app.lyrics_state.track().is_some();
 
     if area.width >= SIDEBAR_BREAKPOINT {
         let [sidebar, divider, main] = Layout::horizontal([
@@ -460,50 +460,194 @@ fn draw_toplists(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
 }
 
 fn draw_lyrics(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
-    let Some(lyrics) = &app.lyrics else {
-        return;
-    };
-    let block = Block::bordered()
-        .border_type(BorderType::Double)
-        .border_style(Style::new().fg(theme.accent_alt))
-        .title(Span::styled(
-            "▓ LYRICS ▓",
-            Style::new()
-                .fg(theme.accent_alt)
-                .add_modifier(Modifier::BOLD),
-        ));
-    let inner = block.inner(area);
-    let height = usize::from(inner.height);
-    if height == 0 {
+    if app.lyrics_state.track().is_none() || area.height < 4 {
         return;
     }
 
+    frame.render_widget(Clear, area);
+    let [header, top_rule, body, bottom_rule, footer] = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Min(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .areas(area);
+
+    let lines_label = app.lyrics_state.ready().map_or_else(String::new, |lyrics| {
+        format!(" · {} lines", lyrics.lines.len())
+    });
+    let mut header_spans = vec![
+        Span::styled(
+            "// LYRICS",
+            Style::new().fg(theme.panel).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(lines_label, Style::new().fg(theme.muted)),
+    ];
+    if matches!(app.lyrics_state, LyricsState::Ready { .. }) {
+        header_spans.push(Span::styled("  LRC", Style::new().fg(theme.dim)));
+    }
+    frame.render_widget(Paragraph::new(Line::from(header_spans)), header);
+    draw_thin_rule(frame, theme, top_rule);
+
+    let body_area = Rect {
+        x: body.x + 1,
+        width: body.width.saturating_sub(2),
+        ..body
+    };
+    match &app.lyrics_state {
+        LyricsState::Ready { lyrics, .. } => {
+            draw_timed_lyrics(frame, app, theme, body_area, lyrics);
+        }
+        LyricsState::Loading { .. } => {
+            let dots = match (app.frame / 5) % 4 {
+                0 => "",
+                1 => ".",
+                2 => "..",
+                _ => "...",
+            };
+            draw_lyrics_placeholder(
+                frame,
+                theme,
+                body_area,
+                &format!("loading lyrics{dots}"),
+                None,
+            );
+        }
+        LyricsState::Empty { .. } => draw_lyrics_placeholder(
+            frame,
+            theme,
+            body_area,
+            "no lyrics for this track",
+            Some("synced lyrics unavailable"),
+        ),
+        LyricsState::Error { message, .. } => {
+            draw_lyrics_placeholder(frame, theme, body_area, &format!("! {message}"), None);
+        }
+        LyricsState::Idle => {}
+    }
+
+    draw_thin_rule(frame, theme, bottom_rule);
+    let offset = app.lyrics_offset_ms;
+    let duration = app
+        .status
+        .track
+        .as_ref()
+        .map_or(0, |track| track.duration_ms);
+    let footer_line = Line::from(vec![
+        Span::styled(
+            format!("{offset:+} ms"),
+            Style::new().fg(if offset == 0 { theme.dim } else { theme.warn }),
+        ),
+        Span::styled("  ·  ", Style::new().fg(theme.dim)),
+        Span::styled(
+            format!("{} / {}", clock(app.status.position_ms), clock(duration)),
+            Style::new().fg(theme.muted),
+        ),
+        Span::styled("  ·  [ ] · L", Style::new().fg(theme.dim)),
+    ]);
+    frame.render_widget(Paragraph::new(footer_line), footer);
+}
+
+fn draw_timed_lyrics(
+    frame: &mut Frame,
+    app: &App,
+    theme: &Theme,
+    area: Rect,
+    lyrics: &lekima_domain::Lyrics,
+) {
+    let height = usize::from(area.height);
+    if height == 0 {
+        return;
+    }
+    let width = usize::from(area.width).saturating_sub(3);
     let position =
         (i64::try_from(app.status.position_ms).unwrap_or(0) + app.lyrics_offset_ms).max(0) as u64;
     let active = lyrics.active_index(position);
-    let start = active.map_or(0, |index| index.saturating_sub(height / 3));
+    let total = lyrics.lines.len();
 
-    let lines: Vec<Line> = lyrics
+    let (start, padding) = if total <= height {
+        (0, (height - total) / 2)
+    } else {
+        (
+            active.map_or(0, |index| index.saturating_sub(height / 2)),
+            0,
+        )
+    };
+
+    let mut lines: Vec<Line> = Vec::with_capacity(height);
+    for _ in 0..padding {
+        lines.push(Line::from(""));
+    }
+    for (offset, line) in lyrics
         .lines
         .iter()
         .skip(start)
-        .take(height)
+        .take(height - padding)
         .enumerate()
-        .map(|(offset, line)| {
-            let current = active == Some(start + offset);
-            Line::from(Span::styled(
-                line.text.clone(),
-                if current {
-                    Style::new().fg(theme.accent).add_modifier(Modifier::BOLD)
-                } else {
-                    Style::new().fg(theme.muted)
-                },
-            ))
-        })
-        .collect();
+    {
+        let index = start + offset;
+        let is_active = active == Some(index);
+        let style = if is_active {
+            Style::new().fg(theme.accent).add_modifier(Modifier::BOLD)
+        } else if active.is_some_and(|current| index < current) {
+            Style::new().fg(theme.dim)
+        } else {
+            Style::new().fg(theme.muted)
+        };
+        lines.push(Line::from(vec![
+            Span::styled(
+                if is_active { "▌ " } else { "  " },
+                Style::new().fg(theme.accent),
+            ),
+            Span::styled(truncate_chars(&line.text, width), style),
+        ]));
+    }
 
-    frame.render_widget(Clear, area);
-    frame.render_widget(Paragraph::new(Text::from(lines)).block(block), area);
+    frame.render_widget(Paragraph::new(Text::from(lines)), area);
+}
+
+fn draw_lyrics_placeholder(
+    frame: &mut Frame,
+    theme: &Theme,
+    area: Rect,
+    message: &str,
+    hint: Option<&str>,
+) {
+    let mut lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("  {message}"),
+            Style::new().fg(theme.muted),
+        )),
+    ];
+    if let Some(hint) = hint {
+        lines.push(Line::from(Span::styled(
+            format!("  {hint}"),
+            Style::new().fg(theme.dim),
+        )));
+    }
+    frame.render_widget(Paragraph::new(Text::from(lines)), area);
+}
+
+fn draw_thin_rule(frame: &mut Frame, theme: &Theme, area: Rect) {
+    let rule = "─".repeat(usize::from(area.width));
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(rule, Style::new().fg(theme.dim)))),
+        area,
+    );
+}
+
+fn truncate_chars(value: &str, width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+    if value.chars().count() <= width {
+        return value.to_owned();
+    }
+    let mut truncated: String = value.chars().take(width.saturating_sub(1)).collect();
+    truncated.push('…');
+    truncated
 }
 
 fn draw_queue(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
@@ -627,8 +771,10 @@ fn draw_toast(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
 
     let width = 54.min(area.width.saturating_sub(2));
     let height = 4;
+    // Keep the toast out of the lyrics pane when it is open.
+    let reserved = if app.lyrics_open { 44 } else { 1 };
     let toast = Rect {
-        x: area.width.saturating_sub(width + 1),
+        x: area.width.saturating_sub(width).saturating_sub(reserved),
         y: area.height.saturating_sub(height + 1),
         width,
         height,
@@ -906,6 +1052,39 @@ mod tests {
         let screen = render(&mut app, 100, 24);
         assert!(screen.contains("█"));
         assert!(screen.contains("▄"));
+    }
+
+    #[test]
+    fn lyrics_pane_renders_context_and_active_line() {
+        use crate::app::LyricsState;
+
+        let mut app = App::new();
+        app.status.track = Some(track("Bohemian Rhapsody"));
+        app.status.position_ms = 48_000;
+        app.lyrics_open = true;
+        app.lyrics_state = LyricsState::Ready {
+            track: 1.into(),
+            lyrics: lekima_domain::parse_lrc(
+                "[00:40.00]Is this the real life?\n[00:44.00]Is this just fantasy?\n[00:48.00]Caught in a landslide\n[00:52.00]No escape from reality",
+            ),
+        };
+        let screen = render(&mut app, 126, 28);
+        assert!(screen.contains("LYRICS"));
+        assert!(screen.contains("Caught in a landslide"));
+        assert!(screen.contains("ms"));
+        assert!(screen.contains("▌"));
+    }
+
+    #[test]
+    fn lyrics_pane_shows_an_empty_state() {
+        use crate::app::LyricsState;
+
+        let mut app = App::new();
+        app.status.track = Some(track("Mota"));
+        app.lyrics_open = true;
+        app.lyrics_state = LyricsState::Empty { track: 1.into() };
+        let screen = render(&mut app, 126, 28);
+        assert!(screen.contains("no lyrics for this track"));
     }
 
     #[test]

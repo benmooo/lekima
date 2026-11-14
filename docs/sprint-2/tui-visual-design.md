@@ -121,6 +121,20 @@ Breakpoints:
 - Selection: `▌` symbol in accent + `selection_bg`/`selection_fg`, bold.
 - Empty state: one muted line, never a centred illustration.
 
+### Lyrics pane
+
+- Not a box: a header line (`// LYRICS · n lines`, `LRC` tag), a thin rule, the
+  lyric body, a rule, and a compact footer (`offset`, position, `[ ]`, `L`).
+- The active line carries a `▌` gutter marker in the accent and bold text; sung
+  lines are `dim`, upcoming lines `muted`.
+- Auto-follows playback, keeping the active line near the vertical centre.
+  Before the first timestamp it shows the opening line as upcoming.
+- States are first-class: loading (animated dots), empty (“no lyrics for this
+  track”), error (`! message`). The pane never disappears silently.
+- Refetches automatically whenever the track changes, and ignores replies for a
+  track that is no longer playing.
+- Toasts shift left of the pane so they never cover its footer.
+
 ### Queue
 
 - Same list grammar as tracks, with `▶` on the current entry.

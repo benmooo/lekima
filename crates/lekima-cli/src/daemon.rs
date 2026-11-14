@@ -215,7 +215,10 @@ impl Daemon {
             Command::Lyrics { id } => {
                 let track_id = self.current_track_id(id).await?;
                 let lyrics = self.player.music().lyrics(track_id).await?;
-                Ok(Reply::Lyrics { lyrics })
+                Ok(Reply::Lyrics {
+                    id: track_id,
+                    lyrics,
+                })
             }
             Command::Daily { play } => {
                 if play {

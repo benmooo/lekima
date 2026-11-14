@@ -5,7 +5,7 @@
 
 use lekima_domain::{Artist, PlaybackStatus, Playlist, RepeatMode, Track};
 use lekima_tui::Theme;
-use lekima_tui::app::App;
+use lekima_tui::app::{App, LyricsState};
 use lekima_tui::ui::draw;
 use ratatui::{Terminal, backend::TestBackend};
 
@@ -37,9 +37,12 @@ fn main() {
         0.1, 0.3, 0.5, 0.7, 0.4, 0.8, 0.2, 0.6, 0.9, 0.5, 0.3, 0.7, 0.4, 0.2, 0.6, 0.8, 0.3, 0.5,
         0.9, 0.4, 0.7, 0.2, 0.6, 0.3, 0.5, 0.8, 0.4, 0.7, 0.3, 0.6,
     ];
-    app.lyrics = Some(lekima_domain::parse_lrc(
-        "[00:40.00]Is this the real life?\n[00:44.00]Is this just fantasy?\n[00:48.00]Caught in a landslide\n[00:52.00]No escape from reality",
-    ));
+    app.lyrics_state = LyricsState::Ready {
+        track: 1.into(),
+        lyrics: lekima_domain::parse_lrc(
+            "[00:40.00]Is this the real life?\n[00:44.00]Is this just fantasy?\n[00:48.00]Caught in a landslide\n[00:52.00]No escape from reality",
+        ),
+    };
     app.lyrics_open = true;
     app.source = "search: mota".to_owned();
     app.tracks = vec![

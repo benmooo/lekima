@@ -255,11 +255,8 @@ impl MusicService for NcmMusicService {
             .await
             .map_err(provider_error)?;
         let response = ensure_success(response)?;
-        let lyrics = parse_lrc(response.body.text());
-        if lyrics.is_empty() {
-            return Err(DomainError::NotFound(format!("track {id} has no lyrics")));
-        }
-        Ok(lyrics)
+        // An empty document is a valid answer: the TUI renders its empty state.
+        Ok(parse_lrc(response.body.text()))
     }
 
     async fn daily(&self) -> domain::Result<Vec<domain::Track>> {

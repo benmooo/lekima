@@ -112,7 +112,7 @@ pub fn print_reply(reply: &Reply, json: bool) {
             Some(user) => crate::say!("{} ({})", user.nickname, user.id),
             None => crate::say!("not signed in"),
         },
-        Reply::Lyrics { lyrics } => crate::say!("{}", lyrics.plain()),
+        Reply::Lyrics { lyrics, .. } => crate::say!("{}", lyrics.plain()),
         Reply::Toplists { toplists } => {
             for chart in toplists {
                 crate::say!(
