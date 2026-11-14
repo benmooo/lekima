@@ -43,6 +43,8 @@ Homebrew tap. See [install](docs/install.md) and [first run](docs/first-run.md).
   integration harness, queue editing, lyric translation.
 - [`docs/sprint-4/`](docs/sprint-4/) — **Playback depth**: streaming spool,
   buffering, large files, sleep timer, quality switching.
+- [`docs/sprint-5/`](docs/sprint-5/) — **Platform integration**: MPRIS/Now
+  Playing, device picker, range seeks, gapless.
 - [`docs/releasing.md`](docs/releasing.md) — release flow, including
   `--registry crates-io` on this USTC-mirrored machine.
 - [`docs/sessions/`](docs/sessions/) — archived OpenCode sessions (this rewrite,

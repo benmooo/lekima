@@ -210,6 +210,15 @@ pub enum TopCommand {
     /// Show the signed-in account.
     Whoami,
 
+    /// List audio output devices.
+    Devices,
+
+    /// Select an output device (`default` restores the system default).
+    AudioDevice {
+        #[arg(value_name = "NAME")]
+        device: String,
+    },
+
     /// List the available colour themes.
     Themes,
 

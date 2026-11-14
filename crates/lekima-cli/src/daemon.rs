@@ -53,8 +53,11 @@ pub async fn run(paths: &Paths, config: &Config, socket: &Path, _detached: bool)
         cache_ttl: Duration::from_secs(config.provider.cache_ttl_secs),
     })?);
     let audio = Arc::new(
-        lekima_audio::RodioAudioEngine::open(config.playback.volume)
-            .map_err(|error| anyhow::anyhow!(error.to_string()))?,
+        lekima_audio::RodioAudioEngine::open(
+            config.playback.volume,
+            config.audio.device.as_deref(),
+        )
+        .map_err(|error| anyhow::anyhow!(error.to_string()))?,
     );
     let player = Arc::new(Player::new(
         music,

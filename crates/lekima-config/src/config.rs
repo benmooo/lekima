@@ -11,9 +11,17 @@ use crate::paths::PathError;
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub provider: ProviderConfig,
+    pub audio: AudioConfig,
     pub playback: PlaybackConfig,
     pub ui: UiConfig,
     pub daemon: DaemonConfig,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AudioConfig {
+    /// Output device name; `None` uses the system default.
+    pub device: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,6 +105,59 @@ impl Default for DaemonConfig {
             log_level: "info".to_owned(),
         }
     }
+}
+
+/// Persists the output device, preserving every other setting.
+///
+/// # Errors
+///
+/// Returns [`PathError`] when the file cannot be read, parsed or written.
+pub fn save_audio_device(path: &Path, device: Option<&str>) -> Result<(), PathError> {
+    let mut root: toml::Value = match std::fs::read_to_string(path) {
+        Ok(raw) => toml::from_str(&raw).map_err(|source| PathError::Parse {
+            path: path.to_path_buf(),
+            source,
+        })?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            toml::Value::Table(toml::map::Map::new())
+        }
+        Err(source) => {
+            return Err(PathError::Read {
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    };
+    let table = root
+        .as_table_mut()
+        .ok_or_else(|| PathError::Structure("config root is not a table".to_owned()))?;
+    let audio = table
+        .entry("audio")
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+        .as_table_mut()
+        .ok_or_else(|| PathError::Structure("`audio` is not a table".to_owned()))?;
+    match device {
+        Some(device) => {
+            audio.insert("device".to_owned(), toml::Value::String(device.to_owned()));
+        }
+        None => {
+            audio.remove("device");
+        }
+    }
+    let encoded = toml::to_string_pretty(&root).map_err(|source| PathError::Serialize {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|source| PathError::Write {
+            path: parent.to_path_buf(),
+            source,
+        })?;
+    }
+    std::fs::write(path, encoded).map_err(|source| PathError::Write {
+        path: path.to_path_buf(),
+        source,
+    })
 }
 
 /// Persists the playback quality, preserving every other setting.

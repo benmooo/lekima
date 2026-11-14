@@ -3,6 +3,14 @@
 All notable changes to lekima are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## 0.3.0 — unreleased
+
+### Added
+
+- Output device selection: `lekima devices`, `lekima audio-device`, persisted
+  `[audio] device`; the daemon opens that device and reports a clear error if it
+  disappears.
+
 ## 0.2.1 — unreleased
 
 ### Fixed

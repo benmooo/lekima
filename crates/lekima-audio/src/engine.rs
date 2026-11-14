@@ -13,7 +13,7 @@ use std::{
 
 use async_trait::async_trait;
 use lekima_domain::{AudioEngine, DomainError, Result};
-use rodio::{Decoder, DeviceSinkBuilder, Player};
+use rodio::{Decoder, DeviceSinkBuilder, Player, cpal, cpal::traits::HostTrait};
 
 use crate::{
     spool::{GrowingFile, Spool},
@@ -21,6 +21,36 @@ use crate::{
 };
 use tempfile::NamedTempFile;
 use tokio::sync::oneshot;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeviceInfo {
+    pub name: String,
+    pub is_default: bool,
+}
+
+/// Lists output devices. Returns an empty list on headless systems.
+///
+/// # Errors
+///
+/// Returns [`DomainError::Playback`] when the host cannot enumerate devices.
+pub fn devices() -> Result<Vec<DeviceInfo>> {
+    let host = cpal::default_host();
+    let default = host
+        .default_output_device()
+        .map(|device| device.to_string());
+    let devices = host.output_devices().map_err(|error| {
+        DomainError::Playback(format!("failed to enumerate audio devices: {error}"))
+    })?;
+    Ok(devices
+        .map(|device| {
+            let name = device.to_string();
+            DeviceInfo {
+                is_default: default.as_deref() == Some(name.as_str()),
+                name,
+            }
+        })
+        .collect())
+}
 
 /// Tracks at or below this size are downloaded fully into memory (fast seeks).
 pub const MAX_MEMORY_BYTES: u64 = 64 * 1024 * 1024;
@@ -98,15 +128,16 @@ impl RodioAudioEngine {
     /// # Errors
     ///
     /// Returns [`DomainError::Playback`] when no output device is available.
-    pub fn open(volume: f32) -> Result<Self> {
+    pub fn open(volume: f32, device: Option<&str>) -> Result<Self> {
         let shared = Arc::new(Shared::new(volume));
         let (commands, receiver) = channel();
         let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
         let thread_shared = Arc::clone(&shared);
+        let device = device.map(str::to_owned);
 
         std::thread::Builder::new()
             .name("lekima-audio".to_owned())
-            .spawn(move || audio_thread(receiver, thread_shared, &ready_tx))
+            .spawn(move || audio_thread(receiver, thread_shared, &ready_tx, device))
             .map_err(|error| {
                 DomainError::Playback(format!("failed to start the audio thread: {error}"))
             })?;
@@ -322,15 +353,34 @@ impl Drop for RodioAudioEngine {
     }
 }
 
+fn open_device(name: Option<&str>) -> std::result::Result<rodio::MixerDeviceSink, String> {
+    match name {
+        None => DeviceSinkBuilder::open_default_sink()
+            .map_err(|error| format!("no audio output device: {error}")),
+        Some(name) => {
+            let host = cpal::default_host();
+            let device = host
+                .output_devices()
+                .map_err(|error| format!("failed to enumerate audio devices: {error}"))?
+                .find(|device| device.to_string() == name)
+                .ok_or_else(|| format!("output device `{name}` was not found"))?;
+            DeviceSinkBuilder::from_device(device)
+                .and_then(DeviceSinkBuilder::open_stream)
+                .map_err(|error| format!("failed to open `{name}`: {error}"))
+        }
+    }
+}
+
 fn audio_thread(
     receiver: Receiver<Command>,
     shared: Arc<Shared>,
     ready: &std::sync::mpsc::SyncSender<std::result::Result<(), String>>,
+    device_name: Option<String>,
 ) {
-    let device = match DeviceSinkBuilder::open_default_sink() {
+    let device = match open_device(device_name.as_deref()) {
         Ok(device) => device,
         Err(error) => {
-            let _ = ready.send(Err(format!("no audio output device: {error}")));
+            let _ = ready.send(Err(error));
             return;
         }
     };

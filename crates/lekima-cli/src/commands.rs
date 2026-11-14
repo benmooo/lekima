@@ -368,6 +368,68 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
             Ok(())
         }
 
+        TopCommand::Devices => {
+            let devices = lekima_audio::devices()?;
+            if json {
+                let list: Vec<_> = devices
+                    .iter()
+                    .map(|device| {
+                        serde_json::json!({
+                            "name": device.name,
+                            "default": device.is_default,
+                            "active": config.audio.device.as_deref() == Some(device.name.as_str()),
+                        })
+                    })
+                    .collect();
+                output::emit_json(
+                    true,
+                    Some(serde_json::json!({
+                        "devices": list,
+                        "configured": config.audio.device,
+                    })),
+                    None,
+                );
+            } else if devices.is_empty() {
+                crate::say!("no output devices found");
+            } else {
+                for device in devices {
+                    let default = if device.is_default { "*" } else { " " };
+                    let active = if config.audio.device.as_deref() == Some(device.name.as_str()) {
+                        ">"
+                    } else {
+                        " "
+                    };
+                    crate::say!("{default}{active} {}", device.name);
+                }
+            }
+            Ok(())
+        }
+
+        TopCommand::AudioDevice { device } => {
+            let selection = if device == "default" {
+                None
+            } else {
+                let devices = lekima_audio::devices()?;
+                if !devices.iter().any(|candidate| candidate.name == device) {
+                    return Err(Failure::new(
+                        ErrorCode::NotFound,
+                        format!("no output device named `{device}`"),
+                    ));
+                }
+                Some(device)
+            };
+            lekima_config::save_audio_device(&paths.config_file(), selection.as_deref())?;
+            restart_daemon(&socket).await;
+            if json {
+                output::emit_json(true, Some(serde_json::json!({ "device": selection })), None);
+            } else if let Some(device) = selection {
+                crate::say!("audio device set to `{device}`; the next daemon start uses it");
+            } else {
+                crate::say!("audio device reset to the system default");
+            }
+            Ok(())
+        }
+
         TopCommand::Themes => {
             let themes: Vec<&str> = lekima_tui::THEMES.to_vec();
             if json {
@@ -759,7 +821,7 @@ async fn doctor(socket: &Path, paths: &Paths, config: &Config, json: bool) -> Re
     let session_present = FileCredentials::new(paths.session_file()).load()?.is_some();
     let daemon_running = is_running(socket).await;
 
-    let audio = match lekima_audio::RodioAudioEngine::open(0.0) {
+    let audio = match lekima_audio::RodioAudioEngine::open(0.0, config.audio.device.as_deref()) {
         Ok(engine) => {
             drop(engine);
             serde_json::json!({ "ok": true })

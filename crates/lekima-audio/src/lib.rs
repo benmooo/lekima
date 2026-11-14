@@ -14,6 +14,6 @@ mod engine;
 mod spool;
 mod wave;
 
-pub use engine::{MAX_MEMORY_BYTES, RodioAudioEngine};
+pub use engine::{DeviceInfo, MAX_MEMORY_BYTES, RodioAudioEngine, devices};
 pub use spool::{GrowingFile, Spool};
 pub use wave::{SPECTRUM_BANDS, Waveform};
