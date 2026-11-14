@@ -1411,19 +1411,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
 
 [[package]]
-name = "lekima-audio"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "lekima-domain",
- "reqwest",
- "rodio",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "lekima-cli"
+name = "lekima"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -1443,6 +1431,18 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "lekima-audio"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "lekima-domain",
+ "reqwest",
+ "rodio",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

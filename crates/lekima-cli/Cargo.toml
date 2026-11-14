@@ -1,5 +1,5 @@
 [package]
-name = "lekima-cli"
+name = "lekima"
 description = "The lekima command line interface and player daemon."
 version.workspace = true
 edition.workspace = true

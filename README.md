@@ -70,7 +70,7 @@ as the plan of record.
 | `lekima-ncm` | `MusicService` adapter over [`ncmapi`](https://crates.io/crates/ncmapi). |
 | `lekima-audio` | `AudioEngine` adapter over rodio. |
 | `lekima-tui` | ratatui frontend. |
-| `lekima-cli` | `lekima` binary and daemon. |
+| `lekima` | `lekima` binary and daemon. |
 
 ## Development
 
@@ -84,7 +84,7 @@ cargo fmt --all
 Hermetic runs (no writes to your real config):
 
 ```bash
-LEKIMA_CONFIG_DIR=$(mktemp -d) cargo run -p lekima-cli -- status --json
+LEKIMA_CONFIG_DIR=$(mktemp -d) cargo run -p lekima -- status --json
 ```
 
 ## License

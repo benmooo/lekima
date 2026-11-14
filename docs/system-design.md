@@ -42,7 +42,7 @@ show`, `lyrics`, `capabilities`, `doctor` talk to the provider directly).
 
 ```mermaid
 flowchart TD
-  cli[lekima-cli<br/>binary: lekima] --> tui[lekima-tui]
+  cli[lekima<br/>binary: lekima] --> tui[lekima-tui]
   cli --> ipc[lekima-ipc]
   cli --> core[lekima-core]
   cli --> ncm[lekima-ncm]
@@ -71,7 +71,7 @@ allowed to know every concrete type.
 | `lekima-ncm` | `MusicService` over `ncmapi` | Expose raw provider JSON |
 | `lekima-audio` | `AudioEngine` over rodio | Download catalogue metadata |
 | `lekima-tui` | Rendering, keymap, client-side state machine | Block on the network or own playback |
-| `lekima-cli` | Command parsing, daemon lifecycle, JSON rendering | Duplicate queue logic |
+| `lekima` | Command parsing, daemon lifecycle, JSON rendering | Duplicate queue logic |
 
 Workspace layout:
 
@@ -90,7 +90,7 @@ lekima/
 │   ├── lekima-ncm/
 │   ├── lekima-audio/
 │   ├── lekima-tui/
-│   └── lekima-cli/           # [[bin]] name = "lekima"
+│   └── lekima/           # [[bin]] name = "lekima"
 └── tests/                    # workspace-level integration tests
 ```
 

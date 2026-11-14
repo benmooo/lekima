@@ -65,7 +65,7 @@ Linux ALSA dependency, proxy caveat for NetEase risk control.
 
 ### 4.3 Reliability
 
-- **Integration harness** (`crates/lekima-cli/tests/e2e.rs`):
+- **Integration harness** (`crates/lekima/tests/e2e.rs`):
   - temp `LEKIMA_CONFIG_DIR` and socket;
   - fake `MusicService` + fake `AudioEngine` compiled into a test daemon binary
     or selected via an env-gated backend;

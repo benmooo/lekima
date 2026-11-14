@@ -48,7 +48,7 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
 cargo deny check          # when touching dependencies
-LEKIMA_CONFIG_DIR=$(mktemp -d) cargo run -p lekima-cli -- status --json
+LEKIMA_CONFIG_DIR=$(mktemp -d) cargo run -p lekima -- status --json
 ```
 
 ## Code style

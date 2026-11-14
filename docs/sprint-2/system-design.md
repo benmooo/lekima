@@ -66,7 +66,7 @@ flowchart LR
 | `lekima-ncm` | Map daily/FM/toplist/like payloads; typed lyrics with timings |
 | `lekima-ipc` | Protocol v2: `Hello`, `Subscribe`, `Unsubscribe`, `Event` frames, `seq`, ring buffer |
 | `lekima-tui` | Home view, section router, lyrics pane + LRC parser use, subscriber loop, counts, yank |
-| `lekima-cli` | New subcommands, `watch`, `mcp` server, event rendering |
+| `lekima` | New subcommands, `watch`, `mcp` server, event rendering |
 | `ncmapi` (1.2) | Routes + models + services for the four new areas |
 
 ## 3. Provider layer (`ncmapi` 1.2)
