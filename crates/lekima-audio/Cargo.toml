@@ -1,0 +1,17 @@
+[package]
+name = "lekima-audio"
+description = "Audio output adapter for lekima, built on rodio."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+lekima-domain.workspace = true
+async-trait.workspace = true
+reqwest.workspace = true
+rodio.workspace = true
+tracing.workspace = true
+tokio.workspace = true

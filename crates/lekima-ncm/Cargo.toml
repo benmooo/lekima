@@ -1,0 +1,19 @@
+[package]
+name = "lekima-ncm"
+description = "NetEase Cloud Music adapter for lekima, built on the ncmapi crate."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+lekima-domain.workspace = true
+async-trait.workspace = true
+ncmapi.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }

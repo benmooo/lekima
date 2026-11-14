@@ -1,0 +1,16 @@
+[package]
+name = "lekima-ipc"
+description = "Newline-delimited JSON protocol between the lekima daemon and its clients."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+lekima-domain.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true

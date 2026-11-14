@@ -1,0 +1,16 @@
+[package]
+name = "lekima-core"
+description = "Application rules: queue orchestration, playback transitions, provider coordination."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+lekima-domain.workspace = true
+async-trait.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync", "rt", "macros"] }
+tracing.workspace = true
