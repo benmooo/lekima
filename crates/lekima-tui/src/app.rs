@@ -15,7 +15,30 @@ pub enum Mode {
     Command,
     Help,
     Queue,
+    Settings,
 }
+
+/// Persisted UI choices.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UiPreferences {
+    pub theme: String,
+    pub glyphs: String,
+    pub density: String,
+}
+
+impl Default for UiPreferences {
+    fn default() -> Self {
+        Self {
+            theme: "cyber".to_owned(),
+            glyphs: "unicode".to_owned(),
+            density: "compact".to_owned(),
+        }
+    }
+}
+
+const THEMES: [&str; 3] = ["cyber", "amber", "mono"];
+const GLYPHS: [&str; 2] = ["unicode", "ascii"];
+const DENSITIES: [&str; 2] = ["compact", "comfortable"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum View {
@@ -37,6 +60,8 @@ pub enum Action {
     Call(Command),
     /// Start a daemon because none was reachable.
     SpawnDaemon,
+    /// Theme, glyphs or density changed; rebuild the palette.
+    UiChanged,
 }
 
 #[derive(Debug, Clone)]
@@ -136,6 +161,9 @@ pub struct App {
     pub frame: u64,
     history_back: Vec<HistoryEntry>,
     history_forward: Vec<HistoryEntry>,
+    pub preferences: UiPreferences,
+    pub settings_selection: usize,
+    settings_dirty: bool,
 }
 
 impl Default for App {
@@ -164,6 +192,9 @@ impl Default for App {
             frame: 0,
             history_back: Vec::new(),
             history_forward: Vec::new(),
+            preferences: UiPreferences::default(),
+            settings_selection: 0,
+            settings_dirty: false,
         }
     }
 }
@@ -230,6 +261,65 @@ impl App {
         }
     }
 
+    #[must_use]
+    pub fn theme(&self) -> crate::theme::Theme {
+        crate::theme::Theme::resolve(
+            &self.preferences.theme,
+            &self.preferences.glyphs,
+            &self.preferences.density,
+        )
+    }
+
+    pub fn set_preferences(&mut self, preferences: UiPreferences) {
+        self.preferences = preferences;
+    }
+
+    /// Returns the preferences to persist when the TUI exits.
+    #[must_use]
+    pub fn changed_preferences(&self) -> Option<UiPreferences> {
+        self.settings_dirty.then(|| self.preferences.clone())
+    }
+
+    fn cycle_setting(&mut self, delta: isize) -> Action {
+        let (list, current, field): (&[&str], &mut String, usize) = match self.settings_selection {
+            0 => (&THEMES, &mut self.preferences.theme, 0),
+            1 => (&GLYPHS, &mut self.preferences.glyphs, 1),
+            _ => (&DENSITIES, &mut self.preferences.density, 2),
+        };
+        let index = list
+            .iter()
+            .position(|value| *value == current.as_str())
+            .unwrap_or(0) as isize;
+        let len = list.len() as isize;
+        let next = (index + delta).rem_euclid(len) as usize;
+        *current = list[next].to_owned();
+        let _ = field;
+        self.settings_dirty = true;
+        Action::UiChanged
+    }
+
+    fn handle_settings_key(&mut self, key: KeyEvent) -> Action {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('S') => {
+                self.mode = Mode::Normal;
+                Action::None
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.settings_selection = (self.settings_selection + 1).min(2);
+                Action::None
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.settings_selection = self.settings_selection.saturating_sub(1);
+                Action::None
+            }
+            KeyCode::Char('h') | KeyCode::Left => self.cycle_setting(-1),
+            KeyCode::Char('l') | KeyCode::Right | KeyCode::Enter | KeyCode::Char(' ') => {
+                self.cycle_setting(1)
+            }
+            _ => Action::None,
+        }
+    }
+
     /// Advances animation state; called on every UI tick.
     pub fn tick(&mut self) {
         self.frame = self.frame.wrapping_add(1);
@@ -283,6 +373,7 @@ impl App {
             }
             Mode::Queue => self.handle_queue_key(key),
             Mode::Search | Mode::Command => self.handle_prompt_key(key),
+            Mode::Settings => self.handle_settings_key(key),
             Mode::Normal => self.handle_normal_key(key),
         }
     }
@@ -365,6 +456,21 @@ impl App {
                 self.mode = Mode::Help;
                 Action::None
             }
+            "theme" | "glyphs" | "density" if !rest.trim().is_empty() => {
+                let value = rest.trim().to_owned();
+                match name {
+                    "theme" => self.preferences.theme = value,
+                    "glyphs" => self.preferences.glyphs = value,
+                    _ => self.preferences.density = value,
+                }
+                self.settings_dirty = true;
+                Action::UiChanged
+            }
+            "ui" | "settings" => {
+                self.mode = Mode::Settings;
+                self.settings_selection = 0;
+                Action::None
+            }
             "login" => {
                 self.notify("run `lekima login --qr` in a shell", false);
                 Action::None
@@ -425,6 +531,11 @@ impl App {
             KeyCode::Char('q') => Action::Quit,
             KeyCode::Char('?') => {
                 self.mode = Mode::Help;
+                Action::None
+            }
+            KeyCode::Char('S') => {
+                self.mode = Mode::Settings;
+                self.settings_selection = 0;
                 Action::None
             }
             KeyCode::Char('/') => {
@@ -794,7 +905,8 @@ impl App {
                         }
                         self.notify(if liked { "♥ liked" } else { "♡ unliked" }, false);
                     }
-                    Reply::Pong | Reply::Ack => {}
+                    Reply::Pong | Reply::Ack | Reply::Welcome { .. } | Reply::Subscribed { .. } => {
+                    }
                 }
                 Action::None
             }
@@ -1045,6 +1157,17 @@ mod tests {
         app.source = "charts".to_owned();
         app.handle_key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::CONTROL));
         assert_eq!(app.source, "charts");
+    }
+
+    #[test]
+    fn settings_overlay_changes_and_marks_preferences() {
+        let mut app = App::new();
+        app.handle_key(key(KeyCode::Char('S')));
+        assert_eq!(app.mode, Mode::Settings);
+        let action = app.handle_key(key(KeyCode::Char('l')));
+        assert!(matches!(action, Action::UiChanged));
+        assert_eq!(app.preferences.theme, "amber");
+        assert!(app.changed_preferences().is_some());
     }
 
     #[test]

@@ -9,7 +9,9 @@ use std::{
 use clap::CommandFactory;
 use lekima_config::{Config, FileCredentials, Paths};
 use lekima_domain::{CredentialsStore, MusicService, PlaybackState};
-use lekima_ipc::{Command, ErrorCode, FmAction, PlayTarget, Reply, call, is_running};
+use lekima_ipc::{
+    Command, ErrorCode, EventKind, FmAction, PlayTarget, Reply, call, is_running, watch,
+};
 use lekima_ncm::{NcmMusicService, NcmOptions};
 
 use crate::{
@@ -27,12 +29,24 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
     match cli.command {
         TopCommand::Tui => {
             ensure_daemon(&socket, &paths, &config).await?;
-            lekima_tui::run(
-                socket,
-                lekima_tui::Theme::resolve(&config.ui.theme, &config.ui.glyphs, &config.ui.density),
-            )
-            .await
-            .map_err(|error| Failure::internal(error.to_string()))?;
+            let preferences = lekima_tui::UiPreferences {
+                theme: config.ui.theme.clone(),
+                glyphs: config.ui.glyphs.clone(),
+                density: config.ui.density.clone(),
+            };
+            let changed = lekima_tui::run(socket, preferences)
+                .await
+                .map_err(|error| Failure::internal(error.to_string()))?;
+            if let Some(preferences) = changed
+                && let Err(error) = lekima_config::save_ui(
+                    &paths.config_file(),
+                    &preferences.theme,
+                    &preferences.glyphs,
+                    &preferences.density,
+                )
+            {
+                tracing::warn!(%error, "failed to persist UI settings");
+            }
             Ok(())
         }
 
@@ -305,6 +319,47 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
             Ok(())
         }
 
+        TopCommand::Mcp => crate::mcp::serve(socket, &paths, &config).await,
+
+        TopCommand::Watch { events, since } => {
+            if !is_running(&socket).await {
+                return Err(Failure::new(
+                    ErrorCode::Daemon,
+                    format!(
+                        "no daemon at {}; start it with `lekima daemon start`",
+                        socket.display()
+                    ),
+                ));
+            }
+            let kinds = parse_event_kinds(events.as_deref())?;
+            let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+            let watch_socket = socket.clone();
+            tokio::spawn(async move {
+                loop {
+                    if watch(&watch_socket, kinds.clone(), since, sender.clone())
+                        .await
+                        .is_err()
+                    {
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                    } else {
+                        break;
+                    }
+                }
+            });
+
+            loop {
+                tokio::select! {
+                    Some(frame) = receiver.recv() => {
+                        if let Ok(encoded) = serde_json::to_string(&frame) {
+                            crate::say!("{encoded}");
+                        }
+                    }
+                    _ = tokio::signal::ctrl_c() => break,
+                }
+            }
+            Ok(())
+        }
+
         TopCommand::Daemon { action } => {
             daemon_command(action, &socket, &paths, &config, json).await
         }
@@ -368,7 +423,7 @@ fn service(paths: &Paths, config: &Config) -> Result<NcmMusicService, Failure> {
     .map_err(Into::into)
 }
 
-async fn daemon_call(
+pub(crate) async fn daemon_call(
     socket: &Path,
     paths: &Paths,
     config: &Config,
@@ -724,6 +779,28 @@ fn command_tree(command: &clap::Command) -> serde_json::Value {
             .collect::<Vec<_>>(),
         "subcommands": subcommands,
     })
+}
+
+fn parse_event_kinds(raw: Option<&str>) -> Result<Vec<EventKind>, Failure> {
+    let Some(raw) = raw else {
+        return Ok(Vec::new());
+    };
+    raw.split(',')
+        .map(|kind| match kind.trim() {
+            "" => Ok(None),
+            "status" => Ok(Some(EventKind::Status)),
+            "queue" => Ok(Some(EventKind::Queue)),
+            "like" => Ok(Some(EventKind::Like)),
+            other => Err(Failure::usage(format!(
+                "unknown event kind `{other}` (status, queue, like)"
+            ))),
+        })
+        .filter_map(|result| match result {
+            Ok(Some(kind)) => Some(Ok(kind)),
+            Ok(None) => None,
+            Err(error) => Some(Err(error)),
+        })
+        .collect()
 }
 
 fn parse_volume(raw: &str) -> Result<f32, Failure> {

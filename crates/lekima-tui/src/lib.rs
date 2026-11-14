@@ -9,12 +9,13 @@ pub mod app;
 pub mod theme;
 pub mod ui;
 
+pub use app::UiPreferences;
 pub use theme::{Density, Glyphs, Theme};
 
 use std::path::{Path, PathBuf};
 
 use crossterm::event::{Event, KeyEvent, KeyEventKind};
-use lekima_ipc::{Command, IpcError, Reply, call};
+use lekima_ipc::{Command, Event as DaemonEvent, EventFrame, IpcError, Reply, call, watch};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use crate::app::{Action, App};
@@ -32,21 +33,30 @@ pub enum TuiError {
 /// # Errors
 ///
 /// Returns [`TuiError`] when the terminal cannot be drawn.
-pub async fn run(socket: PathBuf, theme: Theme) -> Result<(), TuiError> {
+pub async fn run(
+    socket: PathBuf,
+    preferences: UiPreferences,
+) -> Result<Option<UiPreferences>, TuiError> {
+    let mut app = App::new();
+    app.set_preferences(preferences);
+    let mut theme = app.theme();
+
     let mut terminal = ratatui::init();
-    let result = event_loop(&mut terminal, socket, theme).await;
+    let result = event_loop(&mut terminal, socket, &mut app, &mut theme).await;
     ratatui::restore();
-    result
+    result.map(|()| app.changed_preferences())
 }
 
 async fn event_loop(
     terminal: &mut ratatui::DefaultTerminal,
     socket: PathBuf,
-    theme: Theme,
+    app: &mut App,
+    theme: &mut Theme,
 ) -> Result<(), TuiError> {
-    let mut app = App::new();
     let mut keys = spawn_key_reader();
     let (sender, mut replies) = unbounded_channel::<ReplyResult>();
+    let (event_sender, mut events) = unbounded_channel::<EventFrame>();
+    spawn_event_watcher(socket.clone(), event_sender);
 
     dispatch(&socket, Command::Status, &sender);
     app.status_inflight = true;
@@ -59,20 +69,40 @@ async fn event_loop(
     ticker.tick().await;
 
     loop {
-        terminal.draw(|frame| ui::draw(frame, &mut app, &theme))?;
+        terminal.draw(|frame| ui::draw(frame, app, theme))?;
 
         tokio::select! {
             key = keys.recv() => {
                 let Some(key) = key else { break };
                 let action = app.handle_key(key);
-                if apply_action(action, &socket, &sender, &mut app) {
+                if matches!(action, Action::UiChanged) {
+                    *theme = app.theme();
+                } else if apply_action(action, &socket, &sender, app) {
                     break;
                 }
             }
             reply = replies.recv() => {
                 let Some(reply) = reply else { break };
                 let follow_up = app.apply(reply);
-                apply_action(follow_up, &socket, &sender, &mut app);
+                apply_action(follow_up, &socket, &sender, app);
+            }
+            frame = events.recv() => {
+                let Some(frame) = frame else { break };
+                let reply = match frame.event {
+                    DaemonEvent::Status { state } => Some(Reply::Status { state }),
+                    DaemonEvent::Queue { tracks, index } => {
+                        Some(Reply::Queue { tracks, index })
+                    }
+                    DaemonEvent::Like { id, liked } => Some(Reply::Like { id, liked }),
+                    DaemonEvent::Resync => {
+                        dispatch(&socket, Command::Status, &sender);
+                        None
+                    }
+                };
+                if let Some(reply) = reply {
+                    let follow_up = app.apply(Ok(reply));
+                    apply_action(follow_up, &socket, &sender, app);
+                }
             }
             _ = ticker.tick() => {
                 app.tick();
@@ -102,12 +132,28 @@ fn apply_action(
             dispatch(socket, command, sender);
             false
         }
+        Action::UiChanged => false,
         Action::SpawnDaemon => {
             spawn_daemon();
             app.notify("starting the daemon…", false);
             false
         }
     }
+}
+
+fn spawn_event_watcher(socket: PathBuf, sender: UnboundedSender<EventFrame>) {
+    tokio::spawn(async move {
+        loop {
+            if watch(&socket, Vec::new(), None, sender.clone())
+                .await
+                .is_err()
+            {
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            } else {
+                break;
+            }
+        }
+    });
 }
 
 fn dispatch(socket: &Path, command: Command, sender: &UnboundedSender<ReplyResult>) {

@@ -5,6 +5,7 @@
 mod cli;
 mod commands;
 mod daemon;
+mod mcp;
 mod output;
 
 use std::io::IsTerminal;

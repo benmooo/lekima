@@ -147,6 +147,14 @@ Breakpoints:
   track that is no longer playing.
 - Toasts shift left of the pane so they never cover its footer.
 
+### Settings palette
+
+- `S` opens a centred double-border overlay (`▓ UI ▓`) listing THEME, GLYPHS
+  and DENSITY as `< value >` rows.
+- `j/k` select, `h/l` or `Enter` cycle, `Esc` closes. Changes apply immediately
+  and are written to `config.toml` when the TUI exits.
+- `:theme`, `:glyphs`, `:density` do the same from the command line.
+
 ### History
 
 - The middle pane keeps a back/forward stack (`Ctrl-o` / `Ctrl-i`), vim style.

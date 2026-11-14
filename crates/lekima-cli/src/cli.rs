@@ -194,6 +194,19 @@ pub enum TopCommand {
     /// Show the signed-in account.
     Whoami,
 
+    /// Run an MCP (Model Context Protocol) server over stdio.
+    Mcp,
+
+    /// Stream daemon events as newline-delimited JSON.
+    Watch {
+        /// Comma-separated kinds: status,queue,like. Default: all.
+        #[arg(long, value_name = "KINDS")]
+        events: Option<String>,
+        /// Replay frames after this sequence number.
+        #[arg(long)]
+        since: Option<u64>,
+    },
+
     /// Manage the background player daemon.
     Daemon {
         #[command(subcommand)]

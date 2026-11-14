@@ -244,8 +244,9 @@ Decisions:
 
 ## 7. IPC protocol
 
-Line-delimited JSON over a Unix stream socket, one request per connection in
-v0.1 (connection-per-call; simple, robust, cheap at local latencies).
+Line-delimited JSON over a Unix stream socket. Requests are connection-per-call
+in v0.1; protocol v2 adds a `hello` handshake, `subscribe` and sequenced event
+frames on a dedicated connection.
 
 ```jsonc
 // client → daemon
@@ -263,9 +264,13 @@ Properties:
 - Unknown fields are ignored by serde for forward compatibility; unknown
   command types produce `bad_request`.
 - `Response.id` echoes the request id.
-- **v0.2**: `hello` handshake advertising `protocol_version`; the client rejects
-  mismatched majors with a clear message. Push events (`status_changed`,
-  `queue_changed`) reuse the same framing with an `event` key instead of `id`.
+- **v2 (implemented)**: `hello` returns `{protocol, seq, capabilities}`;
+  `subscribe {kinds, since}` acks and then streams `{seq, type, …}` frames.
+  The daemon keeps a 256-frame replay ring, coalesces nothing at the socket and
+  sends a `resync` frame when a subscriber lags. `lekima watch` prints NDJSON;
+  the TUI subscribes and keeps a 10 Hz status poll for the waveform.
+- **MCP**: `lekima mcp` speaks JSON-RPC over stdio and maps 13 tools onto the
+  same IPC commands; it owns no state and never reads the session file.
 
 Security:
 
@@ -492,7 +497,8 @@ Working end to end against the live provider:
 `ncmapi` 1.2 provides daily recommendations, personal FM, likes and toplists at
 the provider layer; wiring them into the daemon/TUI is sprint 2 work.
 
-Sprint-2 wiring is in: daily, FM (with prefetch), likes (optimistic cache),
-toplists, the music cloud, timed lyrics with a TUI pane, and a real RMS
-waveform in the HUD. Remaining: push events (`lekima watch`) and the MCP server;
-the TUI still polls status (10 Hz while playing, 2 Hz otherwise).
+Sprint-2 is complete: daily, FM (prefetch/trash), optimistic likes, toplists,
+music cloud, timed lyrics pane, real RMS waveform, sequenced push events with
+`lekima watch`, an MCP stdio server, an in-TUI settings palette, and back/forward
+history. The TUI polls status at 10 Hz while playing for the waveform and also
+consumes events for immediate track/queue/like updates.

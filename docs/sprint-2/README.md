@@ -16,9 +16,9 @@ Design first, code second. Nothing in this folder has been implemented yet.
 4. Toplists — **done**
 5. Lyrics pane (synced, offset) — **done**
 6. Music cloud (网盘) — **done**
-7. Push events + `lekima watch` — next
-8. MCP server (`lekima mcp`) — next
-9. Polish (themes, counts, yank, loading states) — partial
+7. Push events + `lekima watch` — **done**
+8. MCP server (`lekima mcp`) — **done**
+9. Polish (themes, glyphs, density, settings palette, history) — **done**
 
 Out of scope: comments, cloud disk, downloads, MPRIS, notifications,
 scrobbling, Windows named pipes.
@@ -39,6 +39,11 @@ scrobbling, Windows named pipes.
 - [x] Testing and rollout plan specified
 - [x] `ncmapi 1.1.0` published
 - [ ] Open questions in both documents resolved
+
+## Status
+
+All sprint-2 features are implemented and published in `lekima` 0.2-dev;
+`cargo test --workspace`, `clippy -D warnings` and `fmt --check` are green.
 
 ## Definition of done
 

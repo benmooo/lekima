@@ -96,6 +96,59 @@ impl Default for DaemonConfig {
     }
 }
 
+/// Persists the three UI preferences, preserving every other setting.
+///
+/// # Errors
+///
+/// Returns [`PathError`] when the file cannot be read, parsed or written.
+pub fn save_ui(path: &Path, theme: &str, glyphs: &str, density: &str) -> Result<(), PathError> {
+    let mut root: toml::Value = match std::fs::read_to_string(path) {
+        Ok(raw) => toml::from_str(&raw).map_err(|source| PathError::Parse {
+            path: path.to_path_buf(),
+            source,
+        })?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            toml::Value::Table(toml::map::Map::new())
+        }
+        Err(source) => {
+            return Err(PathError::Read {
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    };
+
+    let table = root
+        .as_table_mut()
+        .ok_or_else(|| PathError::Structure("config root is not a table".to_owned()))?;
+    let ui = table
+        .entry("ui")
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+        .as_table_mut()
+        .ok_or_else(|| PathError::Structure("`ui` is not a table".to_owned()))?;
+    ui.insert("theme".to_owned(), toml::Value::String(theme.to_owned()));
+    ui.insert("glyphs".to_owned(), toml::Value::String(glyphs.to_owned()));
+    ui.insert(
+        "density".to_owned(),
+        toml::Value::String(density.to_owned()),
+    );
+
+    let encoded = toml::to_string_pretty(&root).map_err(|source| PathError::Serialize {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|source| PathError::Write {
+            path: parent.to_path_buf(),
+            source,
+        })?;
+    }
+    std::fs::write(path, encoded).map_err(|source| PathError::Write {
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
 /// Loads `path`, falling back to defaults when the file does not exist.
 ///
 /// # Errors
@@ -117,7 +170,7 @@ pub fn load(path: &Path) -> Result<Config, PathError> {
 
 #[cfg(test)]
 mod tests {
-    use super::Config;
+    use super::{Config, save_ui};
 
     #[test]
     fn partial_config_keeps_defaults_for_missing_sections() {
@@ -128,6 +181,21 @@ mod tests {
         assert_eq!(config.ui.glyphs, "unicode");
         assert_eq!(config.ui.density, "compact");
         assert!(config.provider.cache);
+    }
+
+    #[test]
+    fn save_ui_preserves_other_sections() {
+        let dir = std::env::temp_dir().join(format!("lekima-config-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        std::fs::write(&path, "[playback]\nvolume = 0.25\n").unwrap();
+        save_ui(&path, "amber", "ascii", "comfortable").unwrap();
+        let config = super::load(&path).unwrap();
+        assert_eq!(config.ui.theme, "amber");
+        assert_eq!(config.ui.glyphs, "ascii");
+        assert_eq!(config.ui.density, "comfortable");
+        assert!((config.playback.volume - 0.25).abs() < f32::EPSILON);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

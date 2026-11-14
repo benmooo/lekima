@@ -62,6 +62,9 @@ pub fn draw(frame: &mut Frame, app: &mut App, theme: &Theme) {
     if app.mode == Mode::Help {
         draw_help(frame, theme, area);
     }
+    if app.mode == Mode::Settings {
+        draw_settings(frame, app, theme, area);
+    }
 }
 
 fn draw_hud(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
@@ -761,6 +764,7 @@ fn draw_footer(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         Mode::Command => ("CMD", ""),
         Mode::Help => ("HELP", "? or esc to close"),
         Mode::Queue => ("QUEUE", "j/k nav · ⏎ jump · esc close"),
+        Mode::Settings => ("UI", "j/k select · h/l change · esc close"),
     };
 
     let mut spans = vec![
@@ -883,6 +887,51 @@ fn wave_spans<'a>(app: &App, theme: &Theme) -> Vec<Span<'a>> {
         .collect()
 }
 
+fn draw_settings(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    let popup = centred(area, 56, 34);
+    frame.render_widget(Clear, popup);
+    let block = Block::bordered()
+        .border_type(BorderType::Double)
+        .border_style(Style::new().fg(theme.overlay))
+        .padding(Padding::horizontal(1))
+        .title(Span::styled(
+            "▓ UI ▓",
+            Style::new().fg(theme.overlay).add_modifier(Modifier::BOLD),
+        ));
+
+    let rows = [
+        ("THEME", app.preferences.theme.as_str()),
+        ("GLYPHS", app.preferences.glyphs.as_str()),
+        ("DENSITY", app.preferences.density.as_str()),
+    ];
+    let mut lines: Vec<Line> = Vec::new();
+    for (index, (label, value)) in rows.iter().enumerate() {
+        let selected = index == app.settings_selection;
+        let style = if selected {
+            Style::new()
+                .fg(theme.selection_fg)
+                .bg(theme.selection_bg)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::new().fg(theme.text)
+        };
+        lines.push(Line::from(vec![
+            Span::styled(if selected { theme.glyphs.active } else { " " }, style),
+            Span::styled(format!(" {label:<9}"), style),
+            Span::styled("< ", Style::new().fg(theme.dim)),
+            Span::styled((*value).to_owned(), style),
+            Span::styled(" >", Style::new().fg(theme.dim)),
+        ]));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "h/l change · j/k select · esc close · saved on exit",
+        Style::new().fg(theme.dim),
+    )));
+
+    frame.render_widget(Paragraph::new(Text::from(lines)).block(block), popup);
+}
+
 fn draw_help(frame: &mut Frame, theme: &Theme, area: Rect) {
     let popup = centred(area, 68, 78);
     frame.render_widget(Clear, popup);
@@ -940,6 +989,7 @@ fn draw_help(frame: &mut Frame, theme: &Theme, area: Rect) {
         binding("/", "search"),
         binding(":", "command line"),
         binding("Q", "queue"),
+        binding("S", "UI settings"),
         binding("?", "this help"),
         binding("q / ctrl-c", "quit"),
     ];
@@ -1180,7 +1230,7 @@ mod tests {
             owner: None,
         }];
         let screen = render(&mut app, 100, 30);
-        assert!(screen.contains("[D]"));
+        assert!(screen.contains("[d]"));
         assert!(screen.contains("PLAYLISTS"));
         assert!(screen.contains("Late night"));
         assert!(screen.contains("42"));

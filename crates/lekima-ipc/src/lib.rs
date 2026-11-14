@@ -9,11 +9,13 @@
 //!   their invocation.
 
 pub mod client;
+pub mod event;
 pub mod protocol;
 pub mod server;
 
-pub use client::{IpcError, call, call_on, is_running};
+pub use client::{IpcError, call, call_on, is_running, watch};
+pub use event::{Event, EventFrame, EventKind};
 pub use protocol::{
     ApiError, Command, ErrorCode, FmAction, MAX_FRAME_BYTES, PlayTarget, Reply, Request, Response,
 };
-pub use server::serve_connection;
+pub use server::{Handled, Subscription, serve_connection};

@@ -2,10 +2,14 @@
 //! queue. Every other process is a client.
 
 use std::{
+    collections::VecDeque,
     fs,
     os::unix::fs::{OpenOptionsExt, PermissionsExt},
     path::Path,
-    sync::Arc,
+    sync::{
+        Arc, Mutex as StdMutex,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -13,9 +17,15 @@ use anyhow::{Context, Result};
 use lekima_config::{Config, FileCredentials, Paths};
 use lekima_core::{PlayRequest, Player};
 use lekima_domain::{CredentialsStore, PlaybackState, QueueKind, SearchKind};
-use lekima_ipc::{ApiError, Command, PlayTarget, Reply, Request, Response, serve_connection};
+use lekima_ipc::{
+    ApiError, Command, Event, EventFrame, Handled, PlayTarget, Reply, Request, Response,
+    Subscription, serve_connection,
+};
 use lekima_ncm::{NcmMusicService, NcmOptions};
-use tokio::{net::UnixListener, sync::Notify};
+use tokio::{
+    net::UnixListener,
+    sync::{Notify, broadcast},
+};
 
 use crate::output::Failure;
 
@@ -53,17 +63,19 @@ pub async fn run(paths: &Paths, config: &Config, socket: &Path, _detached: bool)
         config.playback.volume,
     ));
 
+    let hub = Arc::new(EventHub::new());
     let daemon = Arc::new(Daemon {
         player: Arc::clone(&player),
         credentials: FileCredentials::new(paths.session_file()),
         shutdown: Notify::new(),
+        hub: Arc::clone(&hub),
     });
 
     {
         let likes = Arc::clone(&player);
         tokio::spawn(async move { likes.load_likes().await });
     }
-    spawn_ticker(Arc::clone(&player));
+    spawn_ticker(Arc::clone(&player), Arc::clone(&hub));
 
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .context("failed to install the SIGTERM handler")?;
@@ -107,20 +119,138 @@ struct Daemon {
     player: Arc<Player>,
     credentials: FileCredentials,
     shutdown: Notify,
+    hub: Arc<EventHub>,
+}
+
+/// Sequenced broadcast with a replay ring.
+struct EventHub {
+    sender: broadcast::Sender<EventFrame>,
+    ring: StdMutex<VecDeque<EventFrame>>,
+    seq: AtomicU64,
+}
+
+impl EventHub {
+    const RING: usize = 256;
+
+    fn new() -> Self {
+        let (sender, _) = broadcast::channel(256);
+        Self {
+            sender,
+            ring: StdMutex::new(VecDeque::with_capacity(Self::RING)),
+            seq: AtomicU64::new(0),
+        }
+    }
+
+    fn publish(&self, event: Event) {
+        let seq = self.seq.fetch_add(1, Ordering::SeqCst) + 1;
+        let frame = EventFrame { seq, event };
+        if let Ok(mut ring) = self.ring.lock() {
+            if ring.len() == Self::RING {
+                ring.pop_front();
+            }
+            ring.push_back(frame.clone());
+        }
+        let _ = self.sender.send(frame);
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn subscribe(
+        &self,
+        since: Option<u64>,
+    ) -> (u64, Vec<EventFrame>, bool, broadcast::Receiver<EventFrame>) {
+        let last = self.seq.load(Ordering::SeqCst);
+        let ring = self
+            .ring
+            .lock()
+            .map_or_else(|_| VecDeque::new(), |ring| ring.clone());
+        let resync = since.is_some_and(|since| {
+            ring.front()
+                .is_some_and(|first| since.saturating_add(1) < first.seq)
+        });
+        let initial = since.map_or_else(Vec::new, |since| {
+            ring.into_iter().filter(|frame| frame.seq > since).collect()
+        });
+        (last, initial, resync, self.sender.subscribe())
+    }
 }
 
 impl Daemon {
-    async fn handle(&self, request: Request) -> Response {
+    async fn handle(&self, request: Request) -> Handled {
         let id = request.id;
-        match self.execute(request.command).await {
-            Ok(reply) => Response::ok(id, reply),
-            Err(error) => Response::err(id, error),
+        if let Command::Subscribe { kinds, since } = &request.command {
+            let (seq, initial, resync, receiver) = self.hub.subscribe(*since);
+            return Handled::stream(
+                Response::ok(id, Reply::Subscribed { seq, resync }),
+                Subscription {
+                    receiver,
+                    initial,
+                    kinds: kinds.clone(),
+                },
+            );
+        }
+
+        let command = request.command;
+        let outcome = self.execute(command.clone()).await;
+        match outcome {
+            Ok(reply) => {
+                self.publish(&command, &reply).await;
+                Handled::reply(Response::ok(id, reply))
+            }
+            Err(error) => Handled::reply(Response::err(id, error)),
+        }
+    }
+
+    async fn publish(&self, command: &Command, reply: &Reply) {
+        match reply {
+            Reply::Status { state } if !matches!(command, Command::Status) => {
+                self.hub.publish(Event::Status {
+                    state: state.clone(),
+                });
+            }
+            Reply::Queue { tracks, index } => self.hub.publish(Event::Queue {
+                tracks: tracks.clone(),
+                index: *index,
+            }),
+            Reply::Like { id, liked } => self.hub.publish(Event::Like {
+                id: *id,
+                liked: *liked,
+            }),
+            Reply::Ack if matches!(command, Command::Enqueue { .. } | Command::ClearQueue) => {
+                let (tracks, index) = self.player.queue().await;
+                self.hub.publish(Event::Queue { tracks, index });
+            }
+            _ => {}
+        }
+
+        if matches!(
+            command,
+            Command::Play { .. }
+                | Command::Daily { play: true }
+                | Command::Fm { .. }
+                | Command::Cloud { play: true, .. }
+                | Command::Liked { play: true }
+                | Command::Jump { .. }
+                | Command::Next
+                | Command::Prev
+        ) {
+            let (tracks, index) = self.player.queue().await;
+            self.hub.publish(Event::Queue { tracks, index });
         }
     }
 
     async fn execute(&self, command: Command) -> std::result::Result<Reply, ApiError> {
         match command {
             Command::Ping => Ok(Reply::Pong),
+            Command::Hello { protocol } => Ok(Reply::Welcome {
+                protocol: protocol.min(2),
+                seq: self.hub.seq.load(Ordering::SeqCst),
+                capabilities: [
+                    "events", "daily", "fm", "like", "toplists", "cloud", "lyrics",
+                ]
+                .iter()
+                .map(|capability| (*capability).to_owned())
+                .collect(),
+            }),
             Command::Status => Ok(self.status().await),
             Command::Play { target } => {
                 self.play(target).await?;
@@ -295,6 +425,10 @@ impl Daemon {
                 self.credentials.clear()?;
                 Ok(Reply::Ack)
             }
+            Command::Subscribe { .. } => Err(ApiError::new(
+                lekima_ipc::ErrorCode::BadRequest,
+                "subscriptions are handled on the connection",
+            )),
             Command::Shutdown => {
                 self.shutdown.notify_waiters();
                 Ok(Reply::Ack)
@@ -352,13 +486,19 @@ impl Daemon {
     }
 }
 
-fn spawn_ticker(player: Arc<Player>) {
+fn spawn_ticker(player: Arc<Player>, hub: Arc<EventHub>) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_millis(500));
         loop {
             interval.tick().await;
-            if let Err(error) = player.tick().await {
-                tracing::warn!(%error, "auto-advance failed");
+            match player.tick().await {
+                Ok(Some(_)) => {
+                    hub.publish(Event::Status {
+                        state: player.snapshot().await,
+                    });
+                }
+                Ok(None) => {}
+                Err(error) => tracing::warn!(%error, "auto-advance failed"),
             }
             if let Err(error) = player.fm_maybe_prefetch().await {
                 tracing::debug!(%error, "fm prefetch skipped");

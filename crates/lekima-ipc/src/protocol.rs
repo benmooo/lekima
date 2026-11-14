@@ -92,6 +92,16 @@ pub enum Command {
     Liked {
         play: bool,
     },
+    /// Protocol handshake.
+    Hello {
+        protocol: u16,
+    },
+    /// Stream sequenced events on this connection after the ack.
+    Subscribe {
+        #[serde(default)]
+        kinds: Vec<crate::event::EventKind>,
+        since: Option<u64>,
+    },
     Search {
         query: String,
         kind: SearchKind,
@@ -195,6 +205,15 @@ pub enum Reply {
     Like {
         id: TrackId,
         liked: bool,
+    },
+    Welcome {
+        protocol: u16,
+        seq: u64,
+        capabilities: Vec<String>,
+    },
+    Subscribed {
+        seq: u64,
+        resync: bool,
     },
     User {
         user: Option<UserProfile>,

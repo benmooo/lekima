@@ -110,4 +110,16 @@ pub enum PathError {
         path: PathBuf,
         source: toml::de::Error,
     },
+    #[error("failed to write {path}: {source}")]
+    Write {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    #[error("failed to serialize {path}: {source}")]
+    Serialize {
+        path: PathBuf,
+        source: toml::ser::Error,
+    },
+    #[error("invalid configuration structure: {0}")]
+    Structure(String),
 }

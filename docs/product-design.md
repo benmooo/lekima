@@ -222,7 +222,11 @@ lekima queue clear
 lekima search <QUERY> [--kind track|album|artist|playlist] [--limit N] [--json]
 lekima playlist list [--json]
 lekima playlist show <ID> [--json]
-lekima lyrics [--id ID] [--json]           (v0.2)
+lekima lyrics [--id ID] [--json]
+lekima daily [--play] | fm start|next|trash|stop | toplist list|show
+lekima cloud [--limit N] [--play] | liked [--play] | like [--id] [--unlike]
+lekima watch [--events status,queue,like] [--since SEQ]
+lekima mcp                                  MCP server over stdio
 lekima status [--json]
 lekima login [--qr | --cookie-file PATH|-]
 lekima logout

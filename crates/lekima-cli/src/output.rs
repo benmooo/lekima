@@ -127,7 +127,7 @@ pub fn print_reply(reply: &Reply, json: bool) {
         Reply::Like { id, liked } => {
             crate::say!("{} {id}", if *liked { "♥ liked" } else { "♡ unliked" });
         }
-        Reply::Ack | Reply::Pong => {}
+        Reply::Ack | Reply::Pong | Reply::Welcome { .. } | Reply::Subscribed { .. } => {}
     }
 }
 
