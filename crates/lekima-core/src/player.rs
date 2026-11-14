@@ -437,6 +437,41 @@ impl Player {
         Ok(())
     }
 
+    /// The track after the current one, if the queue has one.
+    pub async fn next_track(&self) -> Option<Track> {
+        let inner = self.inner.lock().await;
+        let current = inner.queue.current_index()?;
+        inner.queue.get(current + 1).cloned()
+    }
+
+    pub async fn repeat_mode(&self) -> RepeatMode {
+        self.inner.lock().await.repeat
+    }
+
+    /// True once when a preloaded source has begun playing.
+    pub fn take_track_boundary(&self) -> bool {
+        self.audio.take_track_boundary()
+    }
+
+    /// Prepares and appends the next source to the audio queue.
+    pub async fn queue_next(&self, url: &str) -> Result<()> {
+        self.audio.queue_next_url(url).await
+    }
+
+    /// Advances the queue because a preloaded source already started. No load
+    /// is performed; the audio device is already playing the next track.
+    pub async fn advance_gapless(&self) -> Result<Option<Track>> {
+        let mut inner = self.inner.lock().await;
+        let repeat = inner.repeat;
+        let next = inner.queue.advance(repeat).cloned();
+        if next.is_some() {
+            inner.status = PlaybackStatus::Playing;
+            inner.loading = false;
+            inner.position_ms = 0;
+        }
+        Ok(next)
+    }
+
     /// Changes the bitrate class for the next track.
     pub async fn set_quality(&self, quality: Quality) {
         *self.quality.lock().await = quality;

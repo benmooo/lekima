@@ -8,7 +8,7 @@ use std::{
     path::Path,
     sync::{
         Arc, Mutex as StdMutex,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -68,19 +68,27 @@ pub async fn run(paths: &Paths, config: &Config, socket: &Path, _detached: bool)
 
     let hub = Arc::new(EventHub::new());
     let sleep_until = Arc::new(StdMutex::new(None));
+    let preloaded = Arc::new(AtomicBool::new(false));
     let daemon = Arc::new(Daemon {
         player: Arc::clone(&player),
         credentials: FileCredentials::new(paths.session_file()),
         shutdown: Notify::new(),
         hub: Arc::clone(&hub),
         sleep_until: Arc::clone(&sleep_until),
+        preloaded: Arc::clone(&preloaded),
     });
 
     {
         let likes = Arc::clone(&player);
         tokio::spawn(async move { likes.load_likes().await });
     }
-    spawn_ticker(Arc::clone(&player), Arc::clone(&hub), sleep_until);
+    spawn_ticker(
+        Arc::clone(&player),
+        Arc::clone(&hub),
+        sleep_until,
+        Arc::clone(&preloaded),
+    );
+    spawn_preloader(Arc::clone(&daemon));
 
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .context("failed to install the SIGTERM handler")?;
@@ -126,6 +134,7 @@ struct Daemon {
     shutdown: Notify,
     hub: Arc<EventHub>,
     sleep_until: Arc<StdMutex<Option<Instant>>>,
+    preloaded: Arc<AtomicBool>,
 }
 
 /// Sequenced broadcast with a replay ring.
@@ -196,6 +205,19 @@ impl Daemon {
         }
 
         let command = request.command;
+        if !matches!(
+            command,
+            Command::Status
+                | Command::Queue
+                | Command::Search { .. }
+                | Command::Playlists
+                | Command::Toplists
+                | Command::Whoami
+                | Command::Ping
+                | Command::Hello { .. }
+        ) {
+            self.preloaded.store(false, Ordering::SeqCst);
+        }
         let outcome = self.execute(command.clone()).await;
         match outcome {
             Ok(reply) => {
@@ -535,11 +557,21 @@ fn spawn_ticker(
     player: Arc<Player>,
     hub: Arc<EventHub>,
     sleep_until: Arc<StdMutex<Option<Instant>>>,
+    preloaded: Arc<AtomicBool>,
 ) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_millis(500));
         loop {
             interval.tick().await;
+            if player.take_track_boundary() {
+                if player.advance_gapless().await.is_ok() {
+                    preloaded.store(false, Ordering::SeqCst);
+                    hub.publish(Event::Status {
+                        state: player.snapshot().await,
+                    });
+                }
+                continue;
+            }
             match player.tick().await {
                 Ok(Some(_)) => {
                     hub.publish(Event::Status {
@@ -565,6 +597,39 @@ fn spawn_ticker(
                     state: player.snapshot().await,
                 });
             }
+        }
+    });
+}
+
+fn spawn_preloader(daemon: Arc<Daemon>) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_millis(1000));
+        loop {
+            interval.tick().await;
+            if daemon.preloaded.load(Ordering::SeqCst)
+                || daemon.player.repeat_mode().await == lekima_domain::RepeatMode::One
+            {
+                continue;
+            }
+            let state = daemon.player.snapshot().await;
+            if state.status != lekima_domain::PlaybackStatus::Playing {
+                continue;
+            }
+            let Some(next) = daemon.player.next_track().await else {
+                continue;
+            };
+            let quality = daemon.player.quality().await;
+            let url = daemon.player.music().stream_url(next.id, quality).await;
+            if let Ok(url) = url {
+                match daemon.player.queue_next(&url).await {
+                    Ok(()) => tracing::debug!(track = %next.id, "preloaded next track"),
+                    Err(error) => {
+                        tracing::debug!(%error, "next track cannot be preloaded");
+                    }
+                }
+            }
+            // Regardless of outcome, do not retry until the track changes.
+            daemon.preloaded.store(true, Ordering::SeqCst);
         }
     });
 }

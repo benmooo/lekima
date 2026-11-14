@@ -172,6 +172,20 @@ pub trait AudioEngine: Send + Sync {
     fn is_buffering(&self) -> bool {
         false
     }
+
+    /// Prepares a source for the next track and appends it to the same output
+    /// queue, so the transition can be gapless.
+    async fn queue_next_url(&self, url: &str) -> Result<()> {
+        let _ = url;
+        Err(crate::DomainError::Unsupported(
+            "this audio backend cannot preload tracks".to_owned(),
+        ))
+    }
+
+    /// True exactly once when a preloaded track has started playing.
+    fn take_track_boundary(&self) -> bool {
+        false
+    }
 }
 
 /// Extension point for `status` output in frontends that do not own the daemon.

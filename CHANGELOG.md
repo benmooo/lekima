@@ -10,6 +10,8 @@ All notable changes to lekima are documented here. The format follows
 - Output device selection: `lekima devices`, `lekima audio-device`, persisted
   `[audio] device`; the daemon opens that device and reports a clear error if it
   disappears.
+- Gapless playback for consecutive small tracks: preload + queue append +
+  boundary event; large tracks keep the normal load path.
 
 ## 0.2.1 — unreleased
 

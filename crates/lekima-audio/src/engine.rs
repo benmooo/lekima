@@ -77,6 +77,10 @@ enum Command {
         spool: Arc<Spool>,
         ack: oneshot::Sender<std::result::Result<(), String>>,
     },
+    QueueNext {
+        bytes: Vec<u8>,
+        ack: oneshot::Sender<std::result::Result<(), String>>,
+    },
     Pause,
     Resume,
     Stop,
@@ -91,6 +95,7 @@ struct Shared {
     finished: AtomicBool,
     volume_bits: AtomicU32,
     wave: Arc<Waveform>,
+    boundary: AtomicBool,
 }
 
 impl Shared {
@@ -101,6 +106,7 @@ impl Shared {
             finished: AtomicBool::new(false),
             volume_bits: AtomicU32::new(volume.clamp(0.0, 1.0).to_bits()),
             wave: Arc::new(Waveform::new()),
+            boundary: AtomicBool::new(false),
         }
     }
 
@@ -334,6 +340,45 @@ impl AudioEngine for RodioAudioEngine {
             .and_then(|slot| slot.as_ref().map(|spool| spool.is_buffering()))
             .unwrap_or(false)
     }
+
+    async fn queue_next_url(&self, url: &str) -> Result<()> {
+        let response = self
+            .client
+            .get(url)
+            .header(reqwest::header::REFERER, REFERER)
+            .send()
+            .await
+            .map_err(|error| {
+                DomainError::Playback(format!("failed to fetch the next stream: {error}"))
+            })?;
+        if !response.status().is_success() {
+            return Err(DomainError::Playback(format!(
+                "the next stream returned {}",
+                response.status()
+            )));
+        }
+        if response
+            .content_length()
+            .is_some_and(|length| length > MAX_MEMORY_BYTES)
+        {
+            return Err(DomainError::Unsupported(
+                "next track is too large to preload".to_owned(),
+            ));
+        }
+        let bytes = response.bytes().await.map_err(|error| {
+            DomainError::Playback(format!("failed to read the next stream: {error}"))
+        })?;
+        let (ack, ack_rx) = oneshot::channel();
+        self.send(Command::QueueNext {
+            bytes: bytes.to_vec(),
+            ack,
+        })?;
+        await_load(ack_rx).await
+    }
+
+    fn take_track_boundary(&self) -> bool {
+        self.shared.boundary.swap(false, Ordering::SeqCst)
+    }
 }
 
 async fn await_load(ack_rx: oneshot::Receiver<std::result::Result<(), String>>) -> Result<()> {
@@ -350,6 +395,51 @@ impl Drop for RodioAudioEngine {
     fn drop(&mut self) {
         self.cancel_spool();
         let _ = self.commands.send(Command::Shutdown);
+    }
+}
+
+/// Marks the atomic boundary when its first sample is pulled.
+struct Boundary<S> {
+    inner: S,
+    boundary: Arc<AtomicBool>,
+    shared: Arc<Shared>,
+}
+
+impl<S: rodio::Source> Iterator for Boundary<S> {
+    type Item = f32;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let sample = self.inner.next()?;
+        if !self.boundary.swap(true, Ordering::SeqCst) {
+            self.shared.boundary.store(true, Ordering::SeqCst);
+            self.shared.position_ms.store(0, Ordering::Relaxed);
+        }
+        Some(sample)
+    }
+}
+
+impl<S: rodio::Source> rodio::Source for Boundary<S> {
+    fn current_span_len(&self) -> Option<usize> {
+        self.inner.current_span_len()
+    }
+
+    fn channels(&self) -> rodio::ChannelCount {
+        self.inner.channels()
+    }
+
+    fn sample_rate(&self) -> rodio::SampleRate {
+        self.inner.sample_rate()
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        self.inner.total_duration()
+    }
+
+    fn try_seek(
+        &mut self,
+        position: Duration,
+    ) -> std::result::Result<(), rodio::source::SeekError> {
+        self.inner.try_seek(position)
     }
 }
 
@@ -447,6 +537,29 @@ fn audio_thread(
                     }
                 }
             }
+            Ok(Command::QueueNext { bytes, ack }) => {
+                let boundary = Arc::new(AtomicBool::new(false));
+                let byte_len = bytes.len() as u64;
+                let decoder = Decoder::builder()
+                    .with_data(Cursor::new(bytes))
+                    .with_byte_len(byte_len)
+                    .with_seekable(true)
+                    .build();
+                match decoder {
+                    Ok(decoder) => {
+                        let source = Boundary {
+                            inner: Metered::new(decoder, Arc::clone(&shared.wave)),
+                            boundary: Arc::clone(&boundary),
+                            shared: Arc::clone(&shared),
+                        };
+                        player.append(source);
+                        let _ = ack.send(Ok(()));
+                    }
+                    Err(error) => {
+                        let _ = ack.send(Err(format!("next audio format not supported: {error}")));
+                    }
+                }
+            }
             Ok(Command::Pause) => player.pause(),
             Ok(Command::Resume) => player.play(),
             Ok(Command::Stop) => {
@@ -479,4 +592,29 @@ fn audio_thread(
         }
     }
     tracing::debug!("audio thread stopped");
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+
+    use super::{Boundary, Shared};
+
+    #[test]
+    fn boundary_source_signals_once_on_the_first_sample() {
+        let shared = Arc::new(Shared::new(0.0));
+        let marker = Arc::new(AtomicBool::new(false));
+        let source = Boundary {
+            inner: rodio::source::SineWave::new(440.0),
+            boundary: Arc::clone(&marker),
+            shared: Arc::clone(&shared),
+        };
+        let mut source = source;
+        assert!(source.next().is_some());
+        assert!(shared.boundary.load(Ordering::SeqCst));
+        assert!(marker.load(Ordering::SeqCst));
+    }
 }
