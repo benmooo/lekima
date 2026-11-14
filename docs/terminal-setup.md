@@ -123,5 +123,24 @@ return {
 }
 ```
 
-The palette matches `theme = "cyber"`: accent `#00FF9C`, secondary `#00E5FF`,
-hot `#FF2E88`, warn `#FFB000`.
+## Themes
+
+`lekima themes` lists them; `S` cycles them live; `:theme <name>` jumps
+directly. All themes keep the terminal background untouched.
+
+| Theme | Accent | Secondary | Hot |
+| --- | --- | --- | --- |
+| `cyber` (default) | `#00FF9C` | `#00E5FF` | `#FF2E88` |
+| `amber` | `#FFB000` | `#FFD666` | `#FF5A1F` |
+| `mono` | white | gray | white |
+| `dracula` | `#50FA7B` | `#8BE9FD` | `#FF79C6` |
+| `gruvbox` | `#B8BB26` | `#83A598` | `#FB4934` |
+| `nord` | `#A3BE8C` | `#88C0D0` | `#BF616A` |
+| `synthwave` | `#00F0FF` | `#FF2E88` | `#FF2E88` |
+| `matrix` | `#00FF41` | `#00CC33` | `#FF5555` |
+| `solarized` | `#B58900` | `#2AA198` | `#DC322F` |
+| `tokyonight` | `#9ECE6A` | `#7AA2F7` | `#F7768E` |
+| `catppuccin` | `#A6E3A1` | `#89B4FA` | `#F38BA8` |
+
+Terminal profiles above use the `cyber` palette; for other themes keep the
+terminal background/cursor neutral and let the TUI carry the accents.

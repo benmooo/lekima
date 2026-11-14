@@ -83,7 +83,10 @@ fn main() {
 
     let width = 126u16;
     let height = 22u16;
-    let theme = Theme::cyber();
+    let theme_name = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "cyber".to_owned());
+    let theme = Theme::resolve(&theme_name, "unicode", "compact");
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).expect("test terminal");
     terminal

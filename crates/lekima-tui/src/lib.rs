@@ -10,7 +10,7 @@ pub mod theme;
 pub mod ui;
 
 pub use app::UiPreferences;
-pub use theme::{Density, Glyphs, Theme};
+pub use theme::{Density, Glyphs, THEMES, Theme};
 
 use std::path::{Path, PathBuf};
 

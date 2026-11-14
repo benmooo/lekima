@@ -150,7 +150,8 @@ Breakpoints:
 ### Settings palette
 
 - `S` opens a centred double-border overlay (`▓ UI ▓`) listing THEME, GLYPHS
-  and DENSITY as `< value >` rows.
+  and DENSITY as `< value >` rows. Eleven themes: cyber, amber, mono, dracula,
+  gruvbox, nord, synthwave, matrix, solarized, tokyonight, catppuccin.
 - `j/k` select, `h/l` or `Enter` cycle, `Esc` closes. Changes apply immediately
   and are written to `config.toml` when the TUI exits.
 - `:theme`, `:glyphs`, `:density` do the same from the command line.

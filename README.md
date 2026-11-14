@@ -37,8 +37,8 @@ $ lekima status --json
 
 Working: search, playlists, timed lyrics, QR/cookie login, daily mix, personal
 FM, likes, charts, the music cloud, playback through a background daemon, a
-vim-driven TUI (HUD, real waveform, lyrics pane, history, UI settings), push
-events (`lekima watch`) and an MCP stdio server (`lekima mcp`). `ncmapi` 1.5 is
+vim-driven TUI (HUD, real waveform, lyrics pane, history, UI settings, eleven
+themes), push events (`lekima watch`) and an MCP stdio server (`lekima mcp`). `ncmapi` 1.5 is
 published on crates.io.
 
 ```console

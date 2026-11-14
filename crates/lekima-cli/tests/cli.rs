@@ -64,6 +64,22 @@ fn status_without_a_daemon_exits_seven_with_a_daemon_error() {
 }
 
 #[test]
+fn themes_are_listed_for_agents() {
+    let dir = hermetic("themes");
+    let output = binary()
+        .env("LEKIMA_CONFIG_DIR", &dir)
+        .args(["themes", "--json"])
+        .output()
+        .expect("run lekima");
+    assert!(output.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json");
+    let themes = json["data"]["themes"].as_array().expect("themes");
+    assert_eq!(themes.len(), 11);
+    assert!(themes.iter().any(|theme| theme == "dracula"));
+    assert!(themes.iter().any(|theme| theme == "catppuccin"));
+}
+
+#[test]
 fn mcp_speaks_initialize_and_tools_list() {
     let dir = hermetic("mcp");
     let mut child = binary()

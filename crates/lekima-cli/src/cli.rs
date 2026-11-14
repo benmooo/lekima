@@ -194,6 +194,9 @@ pub enum TopCommand {
     /// Show the signed-in account.
     Whoami,
 
+    /// List the available colour themes.
+    Themes,
+
     /// Run an MCP (Model Context Protocol) server over stdio.
     Mcp,
 

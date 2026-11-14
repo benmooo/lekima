@@ -319,6 +319,26 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
             Ok(())
         }
 
+        TopCommand::Themes => {
+            let themes: Vec<&str> = lekima_tui::THEMES.to_vec();
+            if json {
+                output::emit_json(
+                    true,
+                    Some(serde_json::json!({
+                        "themes": themes,
+                        "current": config.ui.theme,
+                    })),
+                    None,
+                );
+            } else {
+                for theme in themes {
+                    let marker = if theme == config.ui.theme { "*" } else { " " };
+                    crate::say!("{marker} {theme}");
+                }
+            }
+            Ok(())
+        }
+
         TopCommand::Mcp => crate::mcp::serve(socket, &paths, &config).await,
 
         TopCommand::Watch { events, since } => {

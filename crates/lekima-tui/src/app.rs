@@ -36,7 +36,6 @@ impl Default for UiPreferences {
     }
 }
 
-const THEMES: [&str; 3] = ["cyber", "amber", "mono"];
 const GLYPHS: [&str; 2] = ["unicode", "ascii"];
 const DENSITIES: [&str; 2] = ["compact", "comfortable"];
 
@@ -282,7 +281,7 @@ impl App {
 
     fn cycle_setting(&mut self, delta: isize) -> Action {
         let (list, current, field): (&[&str], &mut String, usize) = match self.settings_selection {
-            0 => (&THEMES, &mut self.preferences.theme, 0),
+            0 => (&crate::theme::THEMES, &mut self.preferences.theme, 0),
             1 => (&GLYPHS, &mut self.preferences.glyphs, 1),
             _ => (&DENSITIES, &mut self.preferences.density, 2),
         };
