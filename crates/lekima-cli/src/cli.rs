@@ -94,6 +94,52 @@ pub enum TopCommand {
         unmute: bool,
     },
 
+    /// Daily recommendations.
+    Daily {
+        /// Start playing instead of listing.
+        #[arg(long)]
+        play: bool,
+    },
+
+    /// Personal FM controls.
+    Fm {
+        #[command(subcommand)]
+        action: FmCommand,
+    },
+
+    /// Official charts.
+    Toplist {
+        #[command(subcommand)]
+        action: ToplistCommand,
+    },
+
+    /// The account's music cloud.
+    Cloud {
+        #[arg(long, default_value_t = 100)]
+        limit: u32,
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+        /// Start playing instead of listing.
+        #[arg(long)]
+        play: bool,
+    },
+
+    /// Like the current or a specific track.
+    Like {
+        #[arg(long, value_name = "ID")]
+        id: Option<u64>,
+        /// Remove the like instead of adding it.
+        #[arg(long)]
+        unlike: bool,
+    },
+
+    /// The account's liked tracks.
+    Liked {
+        /// Start playing instead of listing.
+        #[arg(long)]
+        play: bool,
+    },
+
     /// Inspect or modify the play queue.
     Queue {
         #[command(subcommand)]
@@ -164,6 +210,33 @@ pub enum TopCommand {
     Completions {
         #[arg(value_enum)]
         shell: Shell,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum FmCommand {
+    /// Start the personal FM station.
+    Start,
+    /// Skip the current track.
+    Next {
+        /// Also remove it from the station.
+        #[arg(long)]
+        trash: bool,
+    },
+    /// Stop FM.
+    Stop,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ToplistCommand {
+    /// List the official charts.
+    List,
+    /// Show a chart's tracks, optionally playing it.
+    Show {
+        #[arg(value_name = "ID")]
+        id: u64,
+        #[arg(long)]
+        play: bool,
     },
 }
 

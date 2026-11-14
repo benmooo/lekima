@@ -4,8 +4,8 @@ use std::{path::PathBuf, time::Duration};
 
 use async_trait::async_trait;
 use lekima_domain::{
-    self as domain, DomainError, MusicService, PlaylistId, QrLogin, QrStatus, Quality, SearchKind,
-    TrackId, UserId, UserProfile,
+    self as domain, DomainError, Lyrics, MusicService, PlaylistId, QrLogin, QrStatus, Quality,
+    SearchKind, Toplist, TrackId, UserId, UserProfile, parse_lrc,
 };
 use ncmapi::{
     ApiResponse, NcmClient, Page, SearchKind as ProviderSearchKind, SearchQuery,
@@ -65,7 +65,11 @@ fn ensure_success<T>(response: ApiResponse<T>) -> domain::Result<ApiResponse<T>>
             "the music provider rejected the session; run `lekima login`".to_owned(),
         )),
         code => Err(DomainError::Unavailable(format!(
-            "the music provider returned code {code}"
+            "the music provider returned code {code}{}",
+            response
+                .message
+                .as_deref()
+                .map_or_else(String::new, |message| format!(": {message}"))
         ))),
     }
 }
@@ -243,7 +247,7 @@ impl MusicService for NcmMusicService {
         }))
     }
 
-    async fn lyrics(&self, id: TrackId) -> domain::Result<String> {
+    async fn lyrics(&self, id: TrackId) -> domain::Result<Lyrics> {
         let response = self
             .client
             .library()
@@ -251,11 +255,102 @@ impl MusicService for NcmMusicService {
             .await
             .map_err(provider_error)?;
         let response = ensure_success(response)?;
-        let text = map::plain_lyrics(response.body.text());
-        if text.trim().is_empty() {
+        let lyrics = parse_lrc(response.body.text());
+        if lyrics.is_empty() {
             return Err(DomainError::NotFound(format!("track {id} has no lyrics")));
         }
-        Ok(text)
+        Ok(lyrics)
+    }
+
+    async fn daily(&self) -> domain::Result<Vec<domain::Track>> {
+        let response = self
+            .client
+            .discovery()
+            .daily()
+            .await
+            .map_err(provider_error)?;
+        let response = ensure_success(response)?;
+        Ok(response
+            .body
+            .data
+            .daily_songs
+            .into_iter()
+            .map(map::track)
+            .collect())
+    }
+
+    async fn toplists(&self) -> domain::Result<Vec<Toplist>> {
+        let response = self
+            .client
+            .discovery()
+            .toplists()
+            .await
+            .map_err(provider_error)?;
+        let response = ensure_success(response)?;
+        Ok(response.body.list.into_iter().map(map::toplist).collect())
+    }
+
+    async fn fm_batch(&self) -> domain::Result<Vec<domain::Track>> {
+        let response = self
+            .client
+            .radio()
+            .fm_batch()
+            .await
+            .map_err(provider_error)?;
+        let response = ensure_success(response)?;
+        Ok(response.body.data.into_iter().map(map::track).collect())
+    }
+
+    async fn fm_trash(&self, id: TrackId) -> domain::Result<()> {
+        let response = self
+            .client
+            .radio()
+            .trash(ncmapi::TrackId(id.0))
+            .await
+            .map_err(provider_error)?;
+        ensure_success(response)?;
+        Ok(())
+    }
+
+    async fn set_like(&self, id: TrackId, liked: bool) -> domain::Result<()> {
+        let response = self
+            .client
+            .radio()
+            .set_like(ncmapi::TrackId(id.0), liked)
+            .await
+            .map_err(provider_error)?;
+        ensure_success(response)?;
+        Ok(())
+    }
+
+    async fn liked_ids(&self) -> domain::Result<Vec<TrackId>> {
+        let profile = self.current_user().await?.ok_or_else(|| {
+            DomainError::AuthenticationRequired("sign in to read liked tracks".to_owned())
+        })?;
+        let response = self
+            .client
+            .radio()
+            .liked_ids(ncmapi::UserId(profile.id.0))
+            .await
+            .map_err(provider_error)?;
+        let response = ensure_success(response)?;
+        Ok(response.body.ids.into_iter().map(domain::TrackId).collect())
+    }
+
+    async fn cloud(&self, limit: u32, offset: u32) -> domain::Result<Vec<domain::Track>> {
+        let response = self
+            .client
+            .library()
+            .cloud(limit.clamp(1, 500), offset)
+            .await
+            .map_err(provider_error)?;
+        let response = ensure_success(response)?;
+        Ok(response
+            .body
+            .data
+            .into_iter()
+            .filter_map(map::cloud_track)
+            .collect())
     }
 
     async fn qr_start(&self) -> domain::Result<QrLogin> {

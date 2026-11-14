@@ -5,7 +5,7 @@
 //! daemon reply back into the state.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use lekima_domain::{PlaybackState, PlaybackStatus, Playlist, Track};
+use lekima_domain::{Lyrics, PlaybackState, PlaybackStatus, Playlist, Toplist, Track};
 use lekima_ipc::{Command, ErrorCode, IpcError, PlayTarget, Reply};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,6 +15,12 @@ pub enum Mode {
     Command,
     Help,
     Queue,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum View {
+    Tracks,
+    Toplists,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,9 +57,17 @@ impl Message {
     }
 }
 
+/// Sidebar entries that are not playlists, in display order.
+pub const SIDEBAR_STATICS: [&str; 5] = ["DAILY", "FM", "TOPLISTS", "CLOUD", "LIKED"];
+
 pub struct App {
     pub status: PlaybackState,
     pub tracks: Vec<Track>,
+    pub toplists: Vec<Toplist>,
+    pub view: View,
+    pub lyrics: Option<Lyrics>,
+    pub lyrics_open: bool,
+    pub lyrics_offset_ms: i64,
     pub playlists: Vec<Playlist>,
     pub queue: Vec<Track>,
     pub mode: Mode,
@@ -76,6 +90,11 @@ impl Default for App {
         Self {
             status: PlaybackState::default(),
             tracks: Vec::new(),
+            toplists: Vec::new(),
+            view: View::Tracks,
+            lyrics: None,
+            lyrics_open: false,
+            lyrics_offset_ms: 0,
             playlists: Vec::new(),
             queue: Vec::new(),
             mode: Mode::Normal,
@@ -118,11 +137,20 @@ impl App {
         });
     }
 
+    #[must_use]
+    pub fn sidebar_len(&self) -> usize {
+        SIDEBAR_STATICS.len() + self.playlists.len()
+    }
+
     fn clamp_selection(&mut self) {
-        self.main_selection = self.main_selection.min(self.tracks.len().saturating_sub(1));
+        let main = match self.view {
+            View::Tracks => self.tracks.len(),
+            View::Toplists => self.toplists.len(),
+        };
+        self.main_selection = self.main_selection.min(main.saturating_sub(1));
         self.sidebar_selection = self
             .sidebar_selection
-            .min(self.playlists.len().saturating_sub(1));
+            .min(self.sidebar_len().saturating_sub(1));
         self.queue_selection = self.queue_selection.min(self.queue.len().saturating_sub(1));
     }
 
@@ -301,6 +329,32 @@ impl App {
                 self.mode = Mode::Queue;
                 Action::Call(Command::Queue)
             }
+            KeyCode::Char('F') => Action::Call(Command::Fm {
+                action: lekima_ipc::FmAction::Start,
+            }),
+            KeyCode::Char('t') => Action::Call(Command::Toplists),
+            KeyCode::Char('c') => {
+                self.source = "cloud".to_owned();
+                Action::Call(Command::Cloud {
+                    limit: 100,
+                    offset: 0,
+                    play: false,
+                })
+            }
+            KeyCode::Char('f') => self.like_selected(),
+            KeyCode::Char('L') => self.toggle_lyrics(),
+            KeyCode::Char('[') => {
+                if self.lyrics_open {
+                    self.lyrics_offset_ms -= 250;
+                }
+                Action::None
+            }
+            KeyCode::Char(']') => {
+                if self.lyrics_open {
+                    self.lyrics_offset_ms += 250;
+                }
+                Action::None
+            }
             KeyCode::Char(' ') => Action::Call(Command::Toggle),
             KeyCode::Char('n') => Action::Call(Command::Next),
             KeyCode::Char('p') => Action::Call(Command::Prev),
@@ -339,6 +393,10 @@ impl App {
                 self.move_selection(-10);
                 Action::None
             }
+            KeyCode::Char('d') => {
+                self.source = "daily".to_owned();
+                Action::Call(Command::Daily { play: false })
+            }
             KeyCode::Char('g') => {
                 self.set_selection(0);
                 Action::None
@@ -359,48 +417,137 @@ impl App {
         } as isize;
         let next = (current + delta).max(0) as usize;
         match self.focus {
-            Focus::Main => self.main_selection = next.min(self.tracks.len().saturating_sub(1)),
+            Focus::Main => {
+                let len = match self.view {
+                    View::Tracks => self.tracks.len(),
+                    View::Toplists => self.toplists.len(),
+                };
+                self.main_selection = next.min(len.saturating_sub(1));
+            }
             Focus::Sidebar => {
-                self.sidebar_selection = next.min(self.playlists.len().saturating_sub(1));
+                self.sidebar_selection = next.min(self.sidebar_len().saturating_sub(1));
             }
         }
     }
 
     fn set_selection(&mut self, index: usize) {
         match self.focus {
-            Focus::Main => self.main_selection = index.min(self.tracks.len().saturating_sub(1)),
+            Focus::Main => {
+                let len = match self.view {
+                    View::Tracks => self.tracks.len(),
+                    View::Toplists => self.toplists.len(),
+                };
+                self.main_selection = index.min(len.saturating_sub(1));
+            }
             Focus::Sidebar => {
-                self.sidebar_selection = index.min(self.playlists.len().saturating_sub(1));
+                self.sidebar_selection = index.min(self.sidebar_len().saturating_sub(1));
             }
         }
     }
 
     fn open_selection(&mut self) -> Action {
         match self.focus {
-            Focus::Sidebar => match self.playlists.get(self.sidebar_selection) {
-                Some(playlist) => {
-                    self.source = format!("playlist: {}", playlist.name);
-                    Action::Call(Command::PlaylistTracks { id: playlist.id })
+            Focus::Sidebar => {
+                if let Some(action) = self.open_static(self.sidebar_selection) {
+                    return action;
                 }
-                None => Action::None,
-            },
-            Focus::Main => {
-                let ids: Vec<_> = self
-                    .tracks
-                    .iter()
-                    .skip(self.main_selection)
-                    .map(|track| track.id)
-                    .collect();
-                if ids.is_empty() {
-                    self.notify("nothing selected", true);
-                    Action::None
-                } else {
-                    Action::Call(Command::Play {
-                        target: PlayTarget::Tracks { ids },
-                    })
+                let index = self.sidebar_selection.saturating_sub(SIDEBAR_STATICS.len());
+                match self.playlists.get(index) {
+                    Some(playlist) => {
+                        self.source = format!("playlist: {}", playlist.name);
+                        Action::Call(Command::PlaylistTracks { id: playlist.id })
+                    }
+                    None => Action::None,
                 }
             }
+            Focus::Main => match self.view {
+                View::Toplists => match self.toplists.get(self.main_selection) {
+                    Some(chart) => {
+                        self.source = format!("chart: {}", chart.name);
+                        Action::Call(Command::PlaylistTracks { id: chart.id })
+                    }
+                    None => Action::None,
+                },
+                View::Tracks => {
+                    let ids: Vec<_> = self
+                        .tracks
+                        .iter()
+                        .skip(self.main_selection)
+                        .map(|track| track.id)
+                        .collect();
+                    if ids.is_empty() {
+                        self.notify("nothing selected", true);
+                        Action::None
+                    } else {
+                        Action::Call(Command::Play {
+                            target: PlayTarget::Tracks { ids },
+                        })
+                    }
+                }
+            },
         }
+    }
+
+    fn open_static(&mut self, index: usize) -> Option<Action> {
+        Some(match index {
+            0 => {
+                self.source = "daily".to_owned();
+                Action::Call(Command::Daily { play: false })
+            }
+            1 => Action::Call(Command::Fm {
+                action: lekima_ipc::FmAction::Start,
+            }),
+            2 => Action::Call(Command::Toplists),
+            3 => {
+                self.source = "cloud".to_owned();
+                Action::Call(Command::Cloud {
+                    limit: 100,
+                    offset: 0,
+                    play: false,
+                })
+            }
+            4 => {
+                self.source = "liked".to_owned();
+                Action::Call(Command::Liked { play: false })
+            }
+            _ => return None,
+        })
+    }
+
+    fn like_selected(&mut self) -> Action {
+        let track = if self.focus == Focus::Main {
+            self.tracks.get(self.main_selection)
+        } else {
+            self.status.track.as_ref()
+        };
+        let Some(track) = track else {
+            self.notify("nothing to like", true);
+            return Action::None;
+        };
+        let is_current = self
+            .status
+            .track
+            .as_ref()
+            .is_some_and(|current| current.id == track.id);
+        let liked = if is_current { !self.status.liked } else { true };
+        Action::Call(Command::Like {
+            id: Some(track.id),
+            liked,
+        })
+    }
+
+    fn toggle_lyrics(&mut self) -> Action {
+        self.lyrics_open = !self.lyrics_open;
+        if !self.lyrics_open {
+            return Action::None;
+        }
+        if self.status.track.is_none() {
+            self.lyrics_open = false;
+            self.notify("nothing playing", true);
+            return Action::None;
+        }
+        self.lyrics = None;
+        Action::Call(Command::Lyrics { id: None })
     }
 
     fn enqueue_selected(&mut self, next: bool) -> Action {
@@ -439,10 +586,13 @@ impl App {
                     }
                     Reply::Tracks { tracks } => {
                         self.tracks = tracks;
+                        self.view = View::Tracks;
                         self.main_selection = 0;
+                        self.focus = Focus::Main;
                     }
                     Reply::Search { results } => {
                         self.tracks = results.tracks;
+                        self.view = View::Tracks;
                         self.main_selection = 0;
                         self.focus = Focus::Main;
                         if self.tracks.is_empty() {
@@ -459,12 +609,34 @@ impl App {
                     Reply::User { user } => {
                         self.user = user.map(|user| user.nickname);
                     }
-                    Reply::Lyrics { text } => {
-                        if text.trim().is_empty() {
-                            self.notify("no lyrics", true);
+                    Reply::Lyrics { lyrics } => {
+                        if lyrics.is_empty() {
+                            self.notify("no lyrics for this track", true);
+                            self.lyrics = None;
                         } else {
-                            self.notify("lyrics available in the CLI for now", false);
+                            self.lyrics = Some(lyrics);
+                            self.lyrics_open = true;
                         }
+                    }
+                    Reply::Toplists { toplists } => {
+                        self.toplists = toplists;
+                        self.view = View::Toplists;
+                        self.main_selection = 0;
+                        self.focus = Focus::Main;
+                        if self.toplists.is_empty() {
+                            self.notify("no charts", true);
+                        }
+                    }
+                    Reply::Like { id, liked } => {
+                        if self
+                            .status
+                            .track
+                            .as_ref()
+                            .is_some_and(|track| track.id == id)
+                        {
+                            self.status.liked = liked;
+                        }
+                        self.notify(if liked { "♥ liked" } else { "♡ unliked" }, false);
                     }
                     Reply::Pong | Reply::Ack => {}
                 }
@@ -580,6 +752,27 @@ mod tests {
         assert_eq!(app.mode, Mode::Queue);
         app.handle_key(key(KeyCode::Esc));
         assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn discovery_and_like_keys_emit_commands() {
+        let mut app = App::new();
+        assert!(matches!(
+            app.handle_key(key(KeyCode::Char('d'))),
+            Action::Call(lekima_ipc::Command::Daily { .. })
+        ));
+        assert!(matches!(
+            app.handle_key(key(KeyCode::Char('t'))),
+            Action::Call(lekima_ipc::Command::Toplists)
+        ));
+        assert!(matches!(
+            app.handle_key(key(KeyCode::Char('F'))),
+            Action::Call(lekima_ipc::Command::Fm { .. })
+        ));
+        assert!(matches!(
+            app.handle_key(key(KeyCode::Char('c'))),
+            Action::Call(lekima_ipc::Command::Cloud { .. })
+        ));
     }
 
     #[test]

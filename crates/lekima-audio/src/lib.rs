@@ -11,5 +11,7 @@
 //! mutating application state.
 
 mod engine;
+mod wave;
 
 pub use engine::{MAX_TRACK_BYTES, RodioAudioEngine};
+pub use wave::{WAVE_CAPACITY, Waveform};

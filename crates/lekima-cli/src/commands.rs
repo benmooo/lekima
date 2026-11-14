@@ -9,11 +9,13 @@ use std::{
 use clap::CommandFactory;
 use lekima_config::{Config, FileCredentials, Paths};
 use lekima_domain::{CredentialsStore, MusicService, PlaybackState};
-use lekima_ipc::{Command, ErrorCode, PlayTarget, Reply, call, is_running};
+use lekima_ipc::{Command, ErrorCode, FmAction, PlayTarget, Reply, call, is_running};
 use lekima_ncm::{NcmMusicService, NcmOptions};
 
 use crate::{
-    cli::{Cli, DaemonCommand, PlaylistCommand, QueueCommand, TopCommand},
+    cli::{
+        Cli, DaemonCommand, FmCommand, PlaylistCommand, QueueCommand, TopCommand, ToplistCommand,
+    },
     daemon,
     output::{self, Failure},
 };
@@ -108,6 +110,92 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
                 }
             };
             let reply = daemon_call(&socket, &paths, &config, command).await?;
+            output::print_reply(&reply, json);
+            Ok(())
+        }
+
+        TopCommand::Daily { play } => {
+            let reply = daemon_call(&socket, &paths, &config, Command::Daily { play }).await?;
+            output::print_reply(&reply, json);
+            Ok(())
+        }
+
+        TopCommand::Fm { action } => {
+            let action = match action {
+                FmCommand::Start => FmAction::Start,
+                FmCommand::Next { trash } => FmAction::Next { trash },
+                FmCommand::Stop => FmAction::Stop,
+            };
+            let reply = daemon_call(&socket, &paths, &config, Command::Fm { action }).await?;
+            output::print_reply(&reply, json);
+            Ok(())
+        }
+
+        TopCommand::Toplist { action } => match action {
+            ToplistCommand::List => {
+                let service = service(&paths, &config)?;
+                let toplists = bounded(service.toplists()).await?;
+                output::print_reply(&Reply::Toplists { toplists }, json);
+                Ok(())
+            }
+            ToplistCommand::Show { id, play } => {
+                if play {
+                    let reply = daemon_call(
+                        &socket,
+                        &paths,
+                        &config,
+                        Command::Play {
+                            target: PlayTarget::Playlist { id: id.into() },
+                        },
+                    )
+                    .await?;
+                    output::print_reply(&reply, json);
+                } else {
+                    let service = service(&paths, &config)?;
+                    let tracks = bounded(service.playlist_tracks(id.into())).await?;
+                    output::print_reply(&Reply::Tracks { tracks }, json);
+                }
+                Ok(())
+            }
+        },
+
+        TopCommand::Cloud {
+            limit,
+            offset,
+            play,
+        } => {
+            let reply = daemon_call(
+                &socket,
+                &paths,
+                &config,
+                Command::Cloud {
+                    limit,
+                    offset,
+                    play,
+                },
+            )
+            .await?;
+            output::print_reply(&reply, json);
+            Ok(())
+        }
+
+        TopCommand::Like { id, unlike } => {
+            let reply = daemon_call(
+                &socket,
+                &paths,
+                &config,
+                Command::Like {
+                    id: id.map(Into::into),
+                    liked: !unlike,
+                },
+            )
+            .await?;
+            output::print_reply(&reply, json);
+            Ok(())
+        }
+
+        TopCommand::Liked { play } => {
+            let reply = daemon_call(&socket, &paths, &config, Command::Liked { play }).await?;
             output::print_reply(&reply, json);
             Ok(())
         }

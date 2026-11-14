@@ -27,6 +27,35 @@ impl PlaybackStatus {
     }
 }
 
+/// Where the current queue came from.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum QueueKind {
+    #[default]
+    Manual,
+    Daily,
+    Fm,
+    Toplist,
+    Cloud,
+    Liked,
+    Playlist,
+}
+
+impl QueueKind {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Manual => "manual",
+            Self::Daily => "daily",
+            Self::Fm => "fm",
+            Self::Toplist => "toplist",
+            Self::Cloud => "cloud",
+            Self::Liked => "liked",
+            Self::Playlist => "playlist",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RepeatMode {
@@ -77,6 +106,14 @@ pub struct PlaybackState {
     pub queue_length: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queue_index: Option<usize>,
+    #[serde(default)]
+    pub queue_kind: QueueKind,
+    /// Whether the current track is in the account's liked set.
+    #[serde(default)]
+    pub liked: bool,
+    /// Recent amplitude envelope from the audio device (oldest first, 0..=1).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub wave: Vec<f32>,
 }
 
 const fn default_volume() -> f32 {
@@ -104,6 +141,9 @@ impl Default for PlaybackState {
             shuffle: false,
             queue_length: 0,
             queue_index: None,
+            queue_kind: QueueKind::Manual,
+            liked: false,
+            wave: Vec::new(),
         }
     }
 }

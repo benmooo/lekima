@@ -112,7 +112,21 @@ pub fn print_reply(reply: &Reply, json: bool) {
             Some(user) => crate::say!("{} ({})", user.nickname, user.id),
             None => crate::say!("not signed in"),
         },
-        Reply::Lyrics { text } => crate::say!("{text}"),
+        Reply::Lyrics { lyrics } => crate::say!("{}", lyrics.plain()),
+        Reply::Toplists { toplists } => {
+            for chart in toplists {
+                crate::say!(
+                    "{:>10}  {:<24} {:>5}  {}",
+                    chart.id,
+                    truncate(&chart.name, 24),
+                    chart.track_count,
+                    chart.update_frequency
+                );
+            }
+        }
+        Reply::Like { id, liked } => {
+            crate::say!("{} {id}", if *liked { "♥ liked" } else { "♡ unliked" });
+        }
         Reply::Ack | Reply::Pong => {}
     }
 }

@@ -14,6 +14,6 @@ pub mod server;
 
 pub use client::{IpcError, call, call_on, is_running};
 pub use protocol::{
-    ApiError, Command, ErrorCode, MAX_FRAME_BYTES, PlayTarget, Reply, Request, Response,
+    ApiError, Command, ErrorCode, FmAction, MAX_FRAME_BYTES, PlayTarget, Reply, Request, Response,
 };
 pub use server::serve_connection;

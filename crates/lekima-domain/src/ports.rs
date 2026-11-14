@@ -8,7 +8,8 @@ use async_trait::async_trait;
 
 use crate::{
     Result,
-    model::{QrLogin, QrStatus, Quality, SearchKind, SearchResults, Track, TrackId},
+    lyrics::Lyrics,
+    model::{QrLogin, QrStatus, Quality, SearchKind, SearchResults, Toplist, Track, TrackId},
     playback::PlaybackState,
 };
 
@@ -53,8 +54,65 @@ pub trait MusicService: Send + Sync {
     /// The account currently authenticated against the provider, if any.
     async fn current_user(&self) -> Result<Option<crate::model::UserProfile>>;
 
-    /// Plain-text lyrics, when the provider exposes them.
-    async fn lyrics(&self, id: TrackId) -> Result<String>;
+    /// Timed lyrics, when the provider exposes them.
+    async fn lyrics(&self, id: TrackId) -> Result<Lyrics> {
+        let _ = id;
+        Err(crate::DomainError::Unsupported(
+            "lyrics are not supported by this provider".to_owned(),
+        ))
+    }
+
+    /// Daily recommendations for the signed-in account.
+    async fn daily(&self) -> Result<Vec<Track>> {
+        Err(crate::DomainError::Unsupported(
+            "daily recommendations are not supported by this provider".to_owned(),
+        ))
+    }
+
+    /// Official chart list.
+    async fn toplists(&self) -> Result<Vec<Toplist>> {
+        Err(crate::DomainError::Unsupported(
+            "toplists are not supported by this provider".to_owned(),
+        ))
+    }
+
+    /// Personal FM batch.
+    async fn fm_batch(&self) -> Result<Vec<Track>> {
+        Err(crate::DomainError::Unsupported(
+            "personal FM is not supported by this provider".to_owned(),
+        ))
+    }
+
+    /// Removes a track from personal FM.
+    async fn fm_trash(&self, id: TrackId) -> Result<()> {
+        let _ = id;
+        Err(crate::DomainError::Unsupported(
+            "personal FM is not supported by this provider".to_owned(),
+        ))
+    }
+
+    /// Idempotent like/unlike.
+    async fn set_like(&self, id: TrackId, liked: bool) -> Result<()> {
+        let _ = (id, liked);
+        Err(crate::DomainError::Unsupported(
+            "likes are not supported by this provider".to_owned(),
+        ))
+    }
+
+    /// Every liked track id for the signed-in account.
+    async fn liked_ids(&self) -> Result<Vec<TrackId>> {
+        Err(crate::DomainError::Unsupported(
+            "likes are not supported by this provider".to_owned(),
+        ))
+    }
+
+    /// The account's music cloud (uploaded tracks).
+    async fn cloud(&self, limit: u32, offset: u32) -> Result<Vec<Track>> {
+        let _ = (limit, offset);
+        Err(crate::DomainError::Unsupported(
+            "the music cloud is not supported by this provider".to_owned(),
+        ))
+    }
 
     /// Starts a QR login flow.
     ///
@@ -102,6 +160,13 @@ pub trait AudioEngine: Send + Sync {
 
     /// True while a track is loaded (playing or paused).
     fn has_track(&self) -> bool;
+
+    /// Recent amplitude envelope, oldest first, each value in `0.0..=1.0`.
+    ///
+    /// Adapters that cannot sample the output return an empty vector.
+    fn wave(&self) -> Vec<f32> {
+        Vec::new()
+    }
 }
 
 /// Extension point for `status` output in frontends that do not own the daemon.

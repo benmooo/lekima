@@ -12,7 +12,7 @@ use std::{
 use anyhow::{Context, Result};
 use lekima_config::{Config, FileCredentials, Paths};
 use lekima_core::{PlayRequest, Player};
-use lekima_domain::{CredentialsStore, PlaybackState, SearchKind};
+use lekima_domain::{CredentialsStore, PlaybackState, QueueKind, SearchKind};
 use lekima_ipc::{ApiError, Command, PlayTarget, Reply, Request, Response, serve_connection};
 use lekima_ncm::{NcmMusicService, NcmOptions};
 use tokio::{net::UnixListener, sync::Notify};
@@ -59,6 +59,10 @@ pub async fn run(paths: &Paths, config: &Config, socket: &Path, _detached: bool)
         shutdown: Notify::new(),
     });
 
+    {
+        let likes = Arc::clone(&player);
+        tokio::spawn(async move { likes.load_likes().await });
+    }
     spawn_ticker(Arc::clone(&player));
 
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
@@ -209,20 +213,72 @@ impl Daemon {
                 Ok(Reply::Tracks { tracks })
             }
             Command::Lyrics { id } => {
-                let track_id = match id {
-                    Some(id) => id,
-                    None => self.player.snapshot().await.track.map_or_else(
-                        || {
-                            Err(ApiError::new(
-                                lekima_ipc::ErrorCode::NotFound,
-                                "nothing is playing",
-                            ))
-                        },
-                        |track| Ok(track.id),
-                    )?,
-                };
-                let text = self.player.music().lyrics(track_id).await?;
-                Ok(Reply::Lyrics { text })
+                let track_id = self.current_track_id(id).await?;
+                let lyrics = self.player.music().lyrics(track_id).await?;
+                Ok(Reply::Lyrics { lyrics })
+            }
+            Command::Daily { play } => {
+                if play {
+                    self.player.play_daily().await?;
+                    Ok(self.status().await)
+                } else {
+                    let tracks = self.player.music().daily().await?;
+                    Ok(Reply::Tracks { tracks })
+                }
+            }
+            Command::Fm { action } => {
+                use lekima_ipc::FmAction;
+                match action {
+                    FmAction::Start => {
+                        self.player.fm_start().await?;
+                    }
+                    FmAction::Next { trash } => {
+                        self.player.fm_next(trash).await?;
+                    }
+                    FmAction::Stop => {
+                        self.player.stop().await?;
+                    }
+                }
+                Ok(self.status().await)
+            }
+            Command::Toplists => {
+                let toplists = self.player.music().toplists().await?;
+                Ok(Reply::Toplists { toplists })
+            }
+            Command::Cloud {
+                limit,
+                offset,
+                play,
+            } => {
+                if play {
+                    self.player.play_cloud(limit, offset).await?;
+                    Ok(self.status().await)
+                } else {
+                    let tracks = self.player.music().cloud(limit, offset).await?;
+                    Ok(Reply::Tracks { tracks })
+                }
+            }
+            Command::Like { id, liked } => {
+                let track_id = self.current_track_id(id).await?;
+                let liked = self.player.set_like(track_id, liked).await?;
+                Ok(Reply::Like {
+                    id: track_id,
+                    liked,
+                })
+            }
+            Command::Liked { play } => {
+                let tracks = self.player.liked_tracks().await?;
+                if play {
+                    self.player
+                        .play(PlayRequest::Tracks {
+                            tracks,
+                            kind: QueueKind::Liked,
+                        })
+                        .await?;
+                    Ok(self.status().await)
+                } else {
+                    Ok(Reply::Tracks { tracks })
+                }
             }
             Command::Whoami => {
                 let user = self.player.music().current_user().await?;
@@ -244,6 +300,10 @@ impl Daemon {
     }
 
     async fn play(&self, target: PlayTarget) -> std::result::Result<(), ApiError> {
+        let kind = match &target {
+            PlayTarget::Playlist { .. } => QueueKind::Playlist,
+            _ => QueueKind::Manual,
+        };
         let tracks = match target {
             PlayTarget::Query { query } => {
                 let results = self
@@ -262,8 +322,25 @@ impl Daemon {
             PlayTarget::Tracks { ids } => self.player.resolve_tracks(&ids).await?,
             PlayTarget::Playlist { id } => self.player.music().playlist_tracks(id).await?,
         };
-        self.player.play(PlayRequest::Tracks(tracks)).await?;
+        self.player
+            .play(PlayRequest::Tracks { tracks, kind })
+            .await?;
         Ok(())
+    }
+
+    async fn current_track_id(
+        &self,
+        explicit: Option<lekima_domain::TrackId>,
+    ) -> std::result::Result<lekima_domain::TrackId, ApiError> {
+        if let Some(id) = explicit {
+            return Ok(id);
+        }
+        self.player
+            .snapshot()
+            .await
+            .track
+            .map(|track| track.id)
+            .ok_or_else(|| ApiError::new(lekima_ipc::ErrorCode::NotFound, "nothing is playing"))
     }
 
     async fn status(&self) -> Reply {
@@ -279,6 +356,9 @@ fn spawn_ticker(player: Arc<Player>) {
             interval.tick().await;
             if let Err(error) = player.tick().await {
                 tracing::warn!(%error, "auto-advance failed");
+            }
+            if let Err(error) = player.fm_maybe_prefetch().await {
+                tracing::debug!(%error, "fm prefetch skipped");
             }
         }
     });

@@ -1,17 +1,20 @@
 //! Playback orchestration.
 
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use lekima_domain::{
     AudioEngine, DomainError, MusicService, PlaybackState, PlaybackStatus, Quality, Queue,
-    RepeatMode, Result, Track, TrackId,
+    QueueKind, RepeatMode, Result, Track, TrackId,
 };
 use tokio::sync::Mutex;
 
 /// What should be loaded into the queue.
 #[derive(Debug, Clone)]
 pub enum PlayRequest {
-    Tracks(Vec<Track>),
+    Tracks {
+        tracks: Vec<Track>,
+        kind: QueueKind,
+    },
     /// Jump to an existing queue position.
     Index(usize),
 }
@@ -24,6 +27,7 @@ struct Inner {
     repeat: RepeatMode,
     shuffle: bool,
     position_ms: u64,
+    kind: QueueKind,
 }
 
 /// Owns queue and transport state for the daemon.
@@ -32,6 +36,8 @@ pub struct Player {
     audio: Arc<dyn AudioEngine>,
     quality: Quality,
     inner: Mutex<Inner>,
+    liked: Mutex<HashSet<TrackId>>,
+    trashed: Mutex<HashSet<TrackId>>,
 }
 
 impl Player {
@@ -56,7 +62,10 @@ impl Player {
                 repeat: RepeatMode::Off,
                 shuffle: false,
                 position_ms: 0,
+                kind: QueueKind::Manual,
             }),
+            liked: Mutex::new(HashSet::new()),
+            trashed: Mutex::new(HashSet::new()),
         }
     }
 
@@ -67,6 +76,8 @@ impl Player {
 
     /// Immutable view of the current state.
     pub async fn snapshot(&self) -> PlaybackState {
+        // Lock order: liked, then inner. No other path takes them in reverse.
+        let liked = self.liked.lock().await;
         let inner = self.inner.lock().await;
         let mut state = PlaybackState {
             status: inner.status,
@@ -86,6 +97,12 @@ impl Player {
             shuffle: inner.shuffle,
             queue_length: inner.queue.len(),
             queue_index: inner.queue.current_index(),
+            queue_kind: inner.kind,
+            liked: inner
+                .queue
+                .current()
+                .is_some_and(|track| liked.contains(&track.id)),
+            wave: self.audio.wave(),
         };
         if state.status != PlaybackStatus::Stopped
             && state.position_ms == 0
@@ -101,13 +118,14 @@ impl Player {
         {
             let mut inner = self.inner.lock().await;
             match request {
-                PlayRequest::Tracks(tracks) => {
+                PlayRequest::Tracks { tracks, kind } => {
                     if tracks.is_empty() {
                         return Err(DomainError::InvalidInput(
                             "nothing to play: queue would be empty".to_owned(),
                         ));
                     }
                     inner.queue.replace(tracks);
+                    inner.kind = kind;
                 }
                 PlayRequest::Index(index) => {
                     if inner.queue.jump(index).is_none() {
@@ -153,6 +171,7 @@ impl Player {
         inner.queue.clear();
         inner.status = PlaybackStatus::Stopped;
         inner.position_ms = 0;
+        inner.kind = QueueKind::Manual;
         drop(inner);
         self.audio.stop()
     }
@@ -320,6 +339,130 @@ impl Player {
         Ok(())
     }
 
+    /// Daily recommendations, played immediately.
+    pub async fn play_daily(&self) -> Result<PlaybackState> {
+        let tracks = self.music.daily().await?;
+        self.play(PlayRequest::Tracks {
+            tracks,
+            kind: QueueKind::Daily,
+        })
+        .await
+    }
+
+    /// The account's music cloud, played immediately.
+    pub async fn play_cloud(&self, limit: u32, offset: u32) -> Result<PlaybackState> {
+        let tracks = self.music.cloud(limit, offset).await?;
+        self.play(PlayRequest::Tracks {
+            tracks,
+            kind: QueueKind::Cloud,
+        })
+        .await
+    }
+
+    /// Starts personal FM.
+    pub async fn fm_start(&self) -> Result<PlaybackState> {
+        let tracks = self.music.fm_batch().await?;
+        self.play(PlayRequest::Tracks {
+            tracks,
+            kind: QueueKind::Fm,
+        })
+        .await
+    }
+
+    /// Advances FM, optionally trashing the current track first.
+    pub async fn fm_next(&self, trash: bool) -> Result<Option<Track>> {
+        if trash {
+            let current = self.snapshot().await.track;
+            if let Some(track) = current {
+                self.music.fm_trash(track.id).await?;
+                self.trashed.lock().await.insert(track.id);
+            }
+        }
+        self.next().await
+    }
+
+    /// Keeps the FM station fed: fetch a batch when two tracks remain.
+    pub async fn fm_maybe_prefetch(&self) -> Result<()> {
+        let need = {
+            let inner = self.inner.lock().await;
+            inner.kind == QueueKind::Fm
+                && inner.status != PlaybackStatus::Stopped
+                && inner.queue.len() < 200
+                && inner
+                    .queue
+                    .current_index()
+                    .is_none_or(|index| inner.queue.len().saturating_sub(index + 1) <= 2)
+        };
+        if !need {
+            return Ok(());
+        }
+
+        let batch = self.music.fm_batch().await?;
+        let existing: HashSet<TrackId> = {
+            let (tracks, _) = self.queue().await;
+            tracks.into_iter().map(|track| track.id).collect()
+        };
+        let trashed = self.trashed.lock().await.clone();
+        let fresh: Vec<Track> = batch
+            .into_iter()
+            .filter(|track| !existing.contains(&track.id) && !trashed.contains(&track.id))
+            .collect();
+        if fresh.is_empty() {
+            return Ok(());
+        }
+
+        let mut inner = self.inner.lock().await;
+        if inner.kind == QueueKind::Fm {
+            inner.queue.extend(fresh);
+        }
+        Ok(())
+    }
+
+    /// Seeds the liked cache. Failures are non-fatal (anonymous sessions).
+    pub async fn load_likes(&self) {
+        if let Ok(ids) = self.music.liked_ids().await {
+            let mut liked = self.liked.lock().await;
+            liked.clear();
+            liked.extend(ids);
+        }
+    }
+
+    /// Idempotent like update with an optimistic cache.
+    pub async fn set_like(&self, id: TrackId, liked: bool) -> Result<bool> {
+        {
+            let mut cache = self.liked.lock().await;
+            if liked {
+                cache.insert(id);
+            } else {
+                cache.remove(&id);
+            }
+        }
+
+        if let Err(error) = self.music.set_like(id, liked).await {
+            let mut cache = self.liked.lock().await;
+            if liked {
+                cache.remove(&id);
+            } else {
+                cache.insert(id);
+            }
+            return Err(error);
+        }
+        Ok(liked)
+    }
+
+    /// Liked tracks, resolved to metadata (played or listed by the caller).
+    pub async fn liked_tracks(&self) -> Result<Vec<Track>> {
+        let ids = self.music.liked_ids().await?;
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut tracks = Vec::with_capacity(ids.len());
+        for chunk in ids.chunks(500) {
+            tracks.extend(self.music.tracks(chunk).await?);
+        }
+        Ok(tracks)
+    }
+
     /// Resolves track ids to full metadata, rejecting unknown ids.
     pub async fn resolve_tracks(&self, ids: &[TrackId]) -> Result<Vec<Track>> {
         let tracks = self.music.tracks(ids).await?;
@@ -344,6 +487,7 @@ mod tests {
     };
 
     use super::{PlayRequest, Player};
+    use lekima_domain::QueueKind;
 
     fn track(id: u64) -> Track {
         Track {
@@ -390,8 +534,28 @@ mod tests {
             Ok(None)
         }
 
-        async fn lyrics(&self, _: TrackId) -> Result<String> {
-            Ok(String::new())
+        async fn lyrics(&self, _: TrackId) -> Result<lekima_domain::Lyrics> {
+            Ok(lekima_domain::Lyrics::default())
+        }
+
+        async fn daily(&self) -> Result<Vec<Track>> {
+            Ok(vec![track(1), track(2)])
+        }
+
+        async fn fm_batch(&self) -> Result<Vec<Track>> {
+            Ok(vec![track(7), track(8)])
+        }
+
+        async fn set_like(&self, _: TrackId, _: bool) -> Result<()> {
+            Ok(())
+        }
+
+        async fn liked_ids(&self) -> Result<Vec<TrackId>> {
+            Ok(vec![TrackId(1)])
+        }
+
+        async fn cloud(&self, _: u32, _: u32) -> Result<Vec<Track>> {
+            Ok(vec![track(11)])
         }
     }
 
@@ -462,7 +626,10 @@ mod tests {
     async fn play_loads_the_first_track_and_reports_playing() {
         let (player, audio) = player();
         let state = player
-            .play(PlayRequest::Tracks(vec![track(1), track(2)]))
+            .play(PlayRequest::Tracks {
+                tracks: vec![track(1), track(2)],
+                kind: QueueKind::Manual,
+            })
             .await
             .unwrap();
         assert_eq!(state.status, PlaybackStatus::Playing);
@@ -473,14 +640,25 @@ mod tests {
     #[tokio::test]
     async fn empty_queue_is_rejected() {
         let (player, _) = player();
-        assert!(player.play(PlayRequest::Tracks(Vec::new())).await.is_err());
+        assert!(
+            player
+                .play(PlayRequest::Tracks {
+                    tracks: Vec::new(),
+                    kind: QueueKind::Manual,
+                })
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
     async fn finished_track_advances_and_stops_at_the_end() {
         let (player, audio) = player();
         player
-            .play(PlayRequest::Tracks(vec![track(1), track(2)]))
+            .play(PlayRequest::Tracks {
+                tracks: vec![track(1), track(2)],
+                kind: QueueKind::Manual,
+            })
             .await
             .unwrap();
         audio.finished.store(true, Ordering::SeqCst);
@@ -501,6 +679,38 @@ mod tests {
         assert!((player.snapshot().await.volume - 0.9).abs() < f32::EPSILON);
         player.toggle_mute().await.unwrap();
         assert_eq!(*audio.volume.lock().unwrap(), 0.9);
+    }
+
+    #[tokio::test]
+    async fn daily_and_cloud_set_the_queue_kind() {
+        let (player, _) = player();
+        let state = player.play_daily().await.unwrap();
+        assert_eq!(state.queue_kind, QueueKind::Daily);
+        let state = player.play_cloud(10, 0).await.unwrap();
+        assert_eq!(state.queue_kind, QueueKind::Cloud);
+    }
+
+    #[tokio::test]
+    async fn liked_state_tracks_the_cache() {
+        let (player, _) = player();
+        player
+            .play(PlayRequest::Tracks {
+                tracks: vec![track(1)],
+                kind: QueueKind::Manual,
+            })
+            .await
+            .unwrap();
+        player.load_likes().await;
+        assert!(player.snapshot().await.liked);
+        player.set_like(TrackId(1), false).await.unwrap();
+        assert!(!player.snapshot().await.liked);
+    }
+
+    #[tokio::test]
+    async fn fm_start_uses_the_fm_queue_kind() {
+        let (player, _) = player();
+        let state = player.fm_start().await.unwrap();
+        assert_eq!(state.queue_kind, QueueKind::Fm);
     }
 
     #[tokio::test]

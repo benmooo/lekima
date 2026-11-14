@@ -10,14 +10,15 @@ Design first, code second. Nothing in this folder has been implemented yet.
 
 ## Scope
 
-1. Daily recommendations
-2. Personal FM (start/next/trash)
-3. Like / unlike + liked playlist
-4. Toplists
-5. Lyrics pane (synced, translated, offset)
-6. Push events + `lekima watch`
-7. MCP server (`lekima mcp`)
-8. Polish (themes, counts, yank, loading states)
+1. Daily recommendations — **done**
+2. Personal FM (start/next/trash) — **done** (prefetch)
+3. Like / unlike + liked playlist — **done** (blocked by NetEase risk control on some networks)
+4. Toplists — **done**
+5. Lyrics pane (synced, offset) — **done**
+6. Music cloud (网盘) — **done**
+7. Push events + `lekima watch` — next
+8. MCP server (`lekima mcp`) — next
+9. Polish (themes, counts, yank, loading states) — partial
 
 Out of scope: comments, cloud disk, downloads, MPRIS, notifications,
 scrobbling, Windows named pipes.

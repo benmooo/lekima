@@ -140,6 +140,17 @@ pub struct Playlist {
     pub owner: Option<String>,
 }
 
+/// An official chart entry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Toplist {
+    pub id: PlaylistId,
+    pub name: String,
+    #[serde(default)]
+    pub track_count: u64,
+    #[serde(default)]
+    pub update_frequency: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UserProfile {
     pub id: UserId,

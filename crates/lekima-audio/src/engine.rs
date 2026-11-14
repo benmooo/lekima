@@ -13,6 +13,8 @@ use std::{
 use async_trait::async_trait;
 use lekima_domain::{AudioEngine, DomainError, Result};
 use rodio::{Decoder, DeviceSinkBuilder, Player};
+
+use crate::wave::{Metered, WAVE_CAPACITY, Waveform};
 use tokio::sync::oneshot;
 
 /// Refuse absurd downloads. NetEase lossless tracks stay well below this.
@@ -42,6 +44,7 @@ struct Shared {
     loaded: AtomicBool,
     finished: AtomicBool,
     volume_bits: AtomicU32,
+    wave: Arc<Waveform>,
 }
 
 impl Shared {
@@ -51,6 +54,7 @@ impl Shared {
             loaded: AtomicBool::new(false),
             finished: AtomicBool::new(false),
             volume_bits: AtomicU32::new(volume.clamp(0.0, 1.0).to_bits()),
+            wave: Arc::new(Waveform::new(WAVE_CAPACITY)),
         }
     }
 
@@ -209,6 +213,10 @@ impl AudioEngine for RodioAudioEngine {
     fn has_track(&self) -> bool {
         self.shared.loaded.load(Ordering::Relaxed)
     }
+
+    fn wave(&self) -> Vec<f32> {
+        self.shared.wave.snapshot()
+    }
 }
 
 impl Drop for RodioAudioEngine {
@@ -249,7 +257,8 @@ fn audio_thread(
                         shared.loaded.store(true, Ordering::Relaxed);
                         shared.finished.store(false, Ordering::Relaxed);
                         shared.position_ms.store(0, Ordering::Relaxed);
-                        player.append(decoder);
+                        shared.wave.reset();
+                        player.append(Metered::new(decoder, Arc::clone(&shared.wave)));
                         player.play();
                         tracing::debug!(bytes = len, "audio loaded");
                         let _ = ack.send(Ok(()));
@@ -267,6 +276,7 @@ fn audio_thread(
                 shared.loaded.store(false, Ordering::Relaxed);
                 shared.finished.store(false, Ordering::Relaxed);
                 shared.position_ms.store(0, Ordering::Relaxed);
+                shared.wave.reset();
             }
             Ok(Command::Seek(position_ms)) => {
                 if let Err(error) = player.try_seek(Duration::from_millis(position_ms)) {

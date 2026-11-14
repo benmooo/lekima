@@ -492,6 +492,7 @@ Working end to end against the live provider:
 `ncmapi` 1.2 provides daily recommendations, personal FM, likes and toplists at
 the provider layer; wiring them into the daemon/TUI is sprint 2 work.
 
-Known gaps: the sprint-2 features are not wired into the daemon yet (daily/FM/
-likes/toplists), the TUI lacks a lyrics pane, and events are still polled at
-4 Hz rather than pushed.
+Sprint-2 wiring is in: daily, FM (with prefetch), likes (optimistic cache),
+toplists, the music cloud, timed lyrics with a TUI pane, and a real RMS
+waveform in the HUD. Remaining: push events (`lekima watch`) and the MCP server;
+the TUI still polls status (10 Hz while playing, 2 Hz otherwise).

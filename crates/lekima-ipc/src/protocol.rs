@@ -6,8 +6,8 @@
 //! agents all speak the same language.
 
 use lekima_domain::{
-    PlaybackState, Playlist, PlaylistId, RepeatMode, SearchKind, SearchResults, Track, TrackId,
-    UserProfile,
+    Lyrics, PlaybackState, Playlist, PlaylistId, RepeatMode, SearchKind, SearchResults, Toplist,
+    Track, TrackId, UserProfile,
 };
 use serde::{Deserialize, Serialize};
 
@@ -67,6 +67,31 @@ pub enum Command {
         next: bool,
     },
     ClearQueue,
+    /// Daily recommendations; list or play.
+    Daily {
+        play: bool,
+    },
+    /// Personal FM controls.
+    Fm {
+        action: FmAction,
+    },
+    /// Official charts.
+    Toplists,
+    /// The account's music cloud; list or play.
+    Cloud {
+        limit: u32,
+        offset: u32,
+        play: bool,
+    },
+    /// Like or unlike a track (defaults to the current track).
+    Like {
+        id: Option<TrackId>,
+        liked: bool,
+    },
+    /// The account's liked tracks; list or play.
+    Liked {
+        play: bool,
+    },
     Search {
         query: String,
         kind: SearchKind,
@@ -87,6 +112,14 @@ pub enum Command {
     },
     Logout,
     Shutdown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum FmAction {
+    Start,
+    Next { trash: bool },
+    Stop,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -153,7 +186,14 @@ pub enum Reply {
         playlists: Vec<Playlist>,
     },
     Lyrics {
-        text: String,
+        lyrics: Lyrics,
+    },
+    Toplists {
+        toplists: Vec<Toplist>,
+    },
+    Like {
+        id: TrackId,
+        liked: bool,
     },
     User {
         user: Option<UserProfile>,

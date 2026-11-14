@@ -137,12 +137,13 @@ Breakpoints:
 
 ### Signal visualiser
 
-- Ten block bars in the HUD (`SIG ▁▂▃▄▅▆▇█`), animated at 20 fps while playing.
-- Deterministic pseudo-spectrum (phase from the tick plus bar index): it is a
-  sign of life, not an FFT. Frozen at `▁` when paused or stopped, dim when
-  stopped.
-- Never wider than ~14 cells; on narrow terminals it is the first HUD segment to
-  clip.
+- 24 block bars in the HUD (`SIG ▁▂▃▄▅▆▇█`) fed by the audio thread's real RMS
+  envelope (50 ms buckets, 20 Hz), not an animation. The daemon samples the
+  envelope and ships it in `PlaybackState.wave`; the TUI polls at 10 Hz while
+  playing.
+- The most recent 24 buckets are drawn; every fourth bar uses the secondary
+  accent. Frozen and dim when paused or stopped.
+- On narrow terminals the signal area is the first HUD segment to clip.
 
 ### Toasts
 
@@ -210,5 +211,5 @@ Breakpoints:
 - [x] Render tests cover empty, playing, narrow, tiny, search, queue and toast states.
 - [x] Signal bars animate at 20 fps; paused/stopped are visually distinct.
 - [x] Messages are bottom-right toasts, not command-bar text.
-- [ ] Sprint 2: liked `♥`, FM trash confirmation, lyrics pane inherits this
-      grammar (labels `//`, no boxes, one accent).
+- [x] Liked `♥` marker, cloud/chart/daily sections, lyrics pane in the same
+      grammar (labels `//`, double-border overlay only for transient panels).

@@ -32,6 +32,15 @@ fn main() {
     app.status.queue_index = Some(0);
     app.frame = 7;
     app.notify("queued 3 tracks", false);
+    app.status.liked = true;
+    app.status.wave = vec![
+        0.1, 0.3, 0.5, 0.7, 0.4, 0.8, 0.2, 0.6, 0.9, 0.5, 0.3, 0.7, 0.4, 0.2, 0.6, 0.8, 0.3, 0.5,
+        0.9, 0.4, 0.7, 0.2, 0.6, 0.3, 0.5, 0.8, 0.4, 0.7, 0.3, 0.6,
+    ];
+    app.lyrics = Some(lekima_domain::parse_lrc(
+        "[00:40.00]Is this the real life?\n[00:44.00]Is this just fantasy?\n[00:48.00]Caught in a landslide\n[00:52.00]No escape from reality",
+    ));
+    app.lyrics_open = true;
     app.source = "search: mota".to_owned();
     app.tracks = vec![
         track(1, "Cigarettes and lighters", "LoMo", 109_000),
@@ -69,8 +78,8 @@ fn main() {
         },
     ];
 
-    let width = 112u16;
-    let height = 20u16;
+    let width = 126u16;
+    let height = 22u16;
     let theme = Theme::cyber();
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).expect("test terminal");

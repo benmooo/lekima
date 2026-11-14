@@ -73,19 +73,38 @@ pub(crate) fn playlist(playlist: provider::Playlist) -> domain::Playlist {
     }
 }
 
-/// Turns an LRC document into printable text by dropping timestamp tags.
-pub(crate) fn plain_lyrics(raw: &str) -> String {
-    raw.lines()
-        .filter_map(|line| {
-            let mut rest = line.trim();
-            while rest.starts_with('[') {
-                let end = rest.find(']')?;
-                rest = rest[end + 1..].trim_start();
-            }
-            (!rest.is_empty()).then(|| rest.to_owned())
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+/// One official chart.
+pub(crate) fn toplist(entry: provider::ToplistEntry) -> domain::Toplist {
+    domain::Toplist {
+        id: domain::PlaylistId(entry.id),
+        name: entry.name,
+        track_count: entry.track_count,
+        update_frequency: entry.update_frequency,
+    }
+}
+
+/// A cloud upload, preferring the provider's matched full metadata.
+pub(crate) fn cloud_track(entry: provider::CloudTrack) -> Option<domain::Track> {
+    if let Some(song) = entry.simple_song {
+        return Some(track(song));
+    }
+    if entry.song_id == 0 {
+        return None;
+    }
+    Some(domain::Track {
+        id: domain::TrackId(entry.song_id),
+        name: entry.song_name,
+        artists: vec![domain::Artist {
+            id: domain::ArtistId(0),
+            name: entry.artist,
+        }],
+        album: Some(domain::Album {
+            id: domain::AlbumId(0),
+            name: entry.album,
+            cover_url: None,
+        }),
+        duration_ms: 0,
+    })
 }
 
 #[cfg(test)]
@@ -171,9 +190,41 @@ mod tests {
     }
 
     #[test]
-    fn strips_lrc_timestamps_and_blank_lines() {
-        let raw = "[00:00.00]first\n[00:10.00]second\n\n[ar:artist]\n";
-        assert_eq!(plain_lyrics(raw), "first\nsecond");
-        assert_eq!(plain_lyrics(""), "");
+    fn maps_toplists() {
+        let raw = serde_json::json!({
+            "id": 1, "name": "热歌榜", "trackCount": 200, "updateFrequency": "每天更新"
+        });
+        let entry: provider::ToplistEntry = serde_json::from_value(raw).unwrap();
+        let chart = toplist(entry);
+        assert_eq!(chart.id, domain::PlaylistId(1));
+        assert_eq!(chart.name, "热歌榜");
+        assert_eq!(chart.track_count, 200);
+    }
+
+    #[test]
+    fn maps_cloud_uploads_with_and_without_metadata() {
+        let raw = serde_json::json!({
+            "songId": 9,
+            "songName": "upload",
+            "artist": "me",
+            "album": "demos",
+            "simpleSong": {"id": 9, "name": "upload", "ar": [], "al": {"id": 0, "name": ""}}
+        });
+        let entry: provider::CloudTrack = serde_json::from_value(raw).unwrap();
+        let mapped = cloud_track(entry).unwrap();
+        assert_eq!(mapped.id, domain::TrackId(9));
+        assert_eq!(mapped.artist_names(), "Unknown artist");
+
+        let raw = serde_json::json!({
+            "songId": 7, "songName": "local", "artist": "me", "album": "demos"
+        });
+        let entry: provider::CloudTrack = serde_json::from_value(raw).unwrap();
+        let mapped = cloud_track(entry).unwrap();
+        assert_eq!(mapped.name, "local");
+        assert_eq!(mapped.artist_names(), "me");
+
+        let raw = serde_json::json!({"songId": 0, "songName": "unmatched"});
+        let entry: provider::CloudTrack = serde_json::from_value(raw).unwrap();
+        assert!(cloud_track(entry).is_none());
     }
 }
