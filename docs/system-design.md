@@ -296,7 +296,7 @@ so the transport's request-hash cache cannot replay stale answers.
 
 | Endpoint | Route | Used by |
 | --- | --- | --- |
-| QR login start/poll | `/weapi/login/qrcode/unikey`, `/weapi/login/qrcode/client/login` | `lekima login --qr` — **done in 1.1.1** |
+| QR login start/poll | `/eapi/login/qrcode/unikey`, `/eapi/login/qrcode/client/login` (`type: 3`) | `lekima login --qr` — **done in 1.3.0** |
 | Playlist detail with tracks | `/api/v6/playlist/detail` + `/api/v3/song/detail` | `playlist show`, sidebar — **done in 1.1** |
 | Lyrics | `/api/song/lyric` | `lekima lyrics` — **done in 1.1** |
 | Daily recommendations | `/api/v3/discovery/recommend/songs` | Home / `lekima daily` — **provider in 1.2** |
@@ -455,6 +455,7 @@ account.
 | Song URL 404/VIP | Toast, skip after 2 s (`--strict` stops instead) |
 | Audio device disappears | Playback error, state → Stopped, hint to run `doctor` |
 | Cookie expired | `unauthorized`, browsing still works, login hint |
+| QR login returns 8821 | NetEase risk control: explain and point at `--cookie-file`; never retry in a loop |
 | Provider 5xx/timeout | `backend`, no state corruption; last track keeps playing |
 | Queue empty + `next` | `Ack`, state Stopped, exit 0 (not an error) |
 | Two daemons raced | Advisory lock; loser exits 0 with pid of winner |

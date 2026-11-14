@@ -292,8 +292,23 @@ impl MusicService for NcmMusicService {
             803 => Ok(QrStatus::Confirmed {
                 nickname: response.body.nickname,
             }),
+            8821 => Err(DomainError::AuthenticationRequired(format!(
+                "NetEase requires behavioral verification for this login (code 8821{})\n\
+                 use `lekima login --cookie-file -` with a session cookie from your browser, \
+                 or retry later without a VPN/proxy",
+                response
+                    .body
+                    .message
+                    .as_deref()
+                    .map_or_else(String::new, |message| format!(": {message}"))
+            ))),
             code => Err(DomainError::Unavailable(format!(
-                "the provider returned code {code} while polling the QR login"
+                "the provider returned code {code} while polling the QR login{}",
+                response
+                    .body
+                    .message
+                    .as_deref()
+                    .map_or_else(String::new, |message| format!(": {message}"))
             ))),
         }
     }
