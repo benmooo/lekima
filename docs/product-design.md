@@ -2,7 +2,7 @@
 
 > NetEase Cloud Music in your terminal. Vim-first, agent-native.
 
-Status: **Living document** — shipped through 0.3.0 · Owner: @benmooo · Rewrite
+Status: **Living document** — shipped through 0.4.0 · Owner: @benmooo · Rewrite
 of the archived Go project [`benmooo/lekima`](https://github.com/benmooo/lekima)
 
 ---
@@ -316,6 +316,7 @@ tools for agents that prefer tool calls over shell.
 | **M5 Release** (done, 0.1.0) | Packaging, docs, CI matrix, tag | Installable from crates.io + release binaries |
 | **M6 Playback depth** (done, 0.2.0) | Streaming spool, buffering, large files, sleep timer, quality switching | 0.2.0 shipped |
 | **M7 Platform** (done, 0.3.0) | Device picker, range seeks, gapless, MPRIS/Now Playing | 0.3.0 shipped |
+| **M8 TUI polish** (done, 0.4.0) | Responsive HUD/tables, queue UX, buffered shading, sanitization | 0.4.0 shipped |
 
 ## 9. Risks & mitigations
 

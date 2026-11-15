@@ -1,6 +1,6 @@
 # Sprint 6 — TUI correctness and accessibility
 
-Status: **Complete** · Release pending
+Status: **Released in 0.4.0**
 
 The plan of record is [`../tui-backlog.md`](../tui-backlog.md). This sprint took
 every backlog item, including TUI-21 and the terminal-text hardening:

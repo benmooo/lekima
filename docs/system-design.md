@@ -1,6 +1,6 @@
 # lekima — System Design
 
-Status: **Living document** — up to date through 0.3.0 · Companion to
+Status: **Living document** — up to date through 0.4.0 · Companion to
 [`product-design.md`](./product-design.md)
 
 ---

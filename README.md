@@ -43,7 +43,7 @@ $ lekima status --json
   Playing, device picker, range seeks, gapless.
 - [`docs/tui-backlog.md`](docs/tui-backlog.md) — TUI rendering, interaction and
   accessibility gaps against the visual design, ordered by priority.
-- [`docs/sprint-6/`](docs/sprint-6/) — **TUI correctness** (implemented):
+- [`docs/sprint-6/`](docs/sprint-6/) — **TUI correctness** (shipped in 0.4.0):
   responsiveness, accessibility, queue confirmation, sanitization.
 - [`docs/releasing.md`](docs/releasing.md) — release flow, including
   `--registry crates-io` on this USTC-mirrored machine.
@@ -52,19 +52,21 @@ $ lekima status --json
 
 ## Status
 
-`0.3.0` adds OS media integration (MPRIS on Linux, Now Playing and media keys
-on macOS), output device selection, range seeks for streamed tracks and gapless
-playback. Earlier releases added streaming, a sleep timer, live quality
-switching, and the agent surface. `0.1.1` was the first public release:
-crates.io, GitHub release binaries and a Homebrew tap. See
-[install](docs/install.md) and [first run](docs/first-run.md).
+`0.4.0` is a TUI and playback-reliability release: a width-aware HUD with
+buffered-range shading, a light palette and `LEKIMA_THEME`, count and pane keys,
+a searchable/editable prompt with history, queue transport controls and a
+live-updating queue with remaining time. Gapless preloads now carry track ids,
+and FM prefetch publishes queue events. Earlier releases added platform
+integration, streaming, the agent surface and the first public packages.
+`0.1.1` was the first public release: crates.io, GitHub release binaries and a
+Homebrew tap. See [install](docs/install.md) and [first run](docs/first-run.md).
 
 Working: search, playlists, timed lyrics, QR/cookie login, daily mix, personal
 FM, likes, charts, the music cloud, playback through a background daemon, a
-vim-driven TUI (HUD, real spectrum, lyrics pane, history, UI settings, twelve
-themes), device selection, gapless playback, MPRIS/Now Playing, push events
-(`lekima watch`) and an MCP stdio server (`lekima mcp`). `ncmapi` 1.6 is
-published on crates.io.
+vim-driven TUI (responsive HUD, real spectrum, buffered shading, lyrics pane,
+history, UI settings, twelve themes), device selection, gapless playback,
+MPRIS/Now Playing, push events (`lekima watch`) and an MCP stdio server
+(`lekima mcp`). `ncmapi` 1.6 is published on crates.io.
 
 ```console
 $ lekima login --qr          # scan with the NetEase app

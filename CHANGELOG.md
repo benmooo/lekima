@@ -3,6 +3,64 @@
 All notable changes to lekima are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## 0.4.0 — 2026-11-15
+
+### Added
+
+- TUI: width-budgeted HUD with `LOADING`/`BUFFERING` and `MUTE` labels, buffered
+  range shading on the progress rail, a one-line notice chip, stacked lyrics at
+  mid widths, adaptive track columns, list position cues, an inactive selection
+  style, a confirmed queue delete, count prefixes (`5j`, `12G`), `Ctrl-w 1..4`
+  pane keys and a prompt editor with word delete and per-mode history.
+- `PlaybackState.buffered`: daemon-provided buffered ranges, mapped from the
+  sparse spool by `AudioEngine::buffered_ranges`.
+- TUI: a scrollable, two-column help overlay generated from a single keymap
+  table; it fits 80×24 and shows every binding, including queue editing and
+  daemon start.
+- TUI: `light` palette for light terminals, `LEKIMA_THEME=light|dark|auto|<name>`
+  and ASCII glyphs for separators, overlays, queue markers and the footer.
+- `lekima-domain::sanitize`: shared terminal-text sanitizer for control
+  characters, ANSI/OSC sequences, bidi overrides and zero-width characters,
+  applied by the NCM mapping layer, the TUI and human CLI output.
+- `preview` example accepts `--width`, `--height`, `--theme`, `--glyphs`,
+  `--density`, `--mode` and `--long-title`.
+
+### Fixed
+
+- Queue mode now keeps the transport controls (`Space`, `n/p`, `h/l`, `m`,
+  `r`, `s`, `+/-`, `L`) instead of only navigation and editing.
+- Gapless preloads are idempotent and validated against the queue: a second
+  preload for the same position is ignored, and a boundary from a stale
+  preload stops the stale audio and continues with the queue's next entry
+  instead of replaying the track that just ended.
+- Gapless boundaries carry the **track id** of the preloaded source. A boundary
+  for the already-current track is ignored (the `n`/rollover race), a boundary
+  for the queue's next track advances, and any other boundary is stale.
+- FM ignores repeat modes when advancing: a finite FM batch stops instead of
+  wrapping repeat-all back to old tracks, and `fm next --trash` does not skip a
+  second entry if the track ended while the trash request was in flight.
+- FM prefetch now publishes a queue event when it appends a new batch, so open
+  queue views and `lekima watch` clients see the newly fetched songs instead of
+  a stale list.
+- Starting or stopping a load clears the audio boundary flag, so a boundary
+  fired just before a manual jump can no longer skip tracks (the cause of
+  lyrics and audio pointing at different songs).
+- Queue mode now follows the current entry until the user moves the selection,
+  shows the remaining time, and keeps the queue open after `Enter` so playback
+  controls stay available.
+- The settings `TRANSLATION` row now toggles translation instead of changing
+  density.
+- The HUD truncates the title instead of clipping the clock, volume, queue and
+  mode badges on narrow terminals.
+- Sidebar and list truncation now counts terminal cells, so CJK and emoji
+  titles keep their alignment; ASCII mode no longer leaks `▶`, `⏎`, `♥`, `…`,
+  `·` or heavy separators.
+- Playlist numbering stays aligned past 99 entries.
+- Help no longer overflows common terminals, and `ctrl-d/u` is a real
+  half-page motion.
+- MCP `tools/list` now advertises `queue_remove`, `queue_move`, `sleep` and
+  `set_quality`; the handlers already existed but were undiscoverable.
+
 ## 0.3.0 — 2026-11-14
 
 ### Added
