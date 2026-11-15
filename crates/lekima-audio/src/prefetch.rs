@@ -267,12 +267,66 @@ mod tests {
         )
     }
 
+    /// An endless tone that can seek, so the producer never reaches EOF before
+    /// the test asks it to reposition.
+    struct SeekingTone {
+        position: usize,
+    }
+
+    impl Iterator for SeekingTone {
+        type Item = f32;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            self.position += 1;
+            Some(self.position as f32 / 4410.0)
+        }
+    }
+
+    impl Source for SeekingTone {
+        fn current_span_len(&self) -> Option<usize> {
+            None
+        }
+
+        fn channels(&self) -> rodio::ChannelCount {
+            rodio::ChannelCount::new(1).expect("mono")
+        }
+
+        fn sample_rate(&self) -> rodio::SampleRate {
+            rodio::SampleRate::new(44_100).expect("sample rate")
+        }
+
+        fn total_duration(&self) -> Option<Duration> {
+            None
+        }
+
+        fn try_seek(&mut self, position: Duration) -> Result<(), SeekError> {
+            self.position = (position.as_secs_f64() * 44_100.0) as usize;
+            Ok(())
+        }
+    }
+
+    fn drain(source: &mut PrefetchSource, cap: usize) -> Vec<f32> {
+        let mut samples = Vec::new();
+        for _ in 0..cap {
+            match source.next() {
+                Some(sample) => samples.push(sample),
+                None => break,
+            }
+            if samples.len().is_multiple_of(4096) {
+                std::thread::yield_now();
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+        samples
+    }
+
     #[test]
     fn plays_every_sample_across_the_thread_boundary() {
         let mut source = PrefetchSource::new(tone());
-        let audible: Vec<f32> = source
-            .by_ref()
-            .take(20_000)
+        std::thread::sleep(Duration::from_millis(20));
+        let samples = drain(&mut source, 1_000_000);
+        let audible: Vec<f32> = samples
+            .into_iter()
             .filter(|sample| *sample != 0.0)
             .collect();
         // The producer may pad the start with silence while it fills the
@@ -284,11 +338,12 @@ mod tests {
 
     #[test]
     fn seeks_are_forwarded_to_the_producer() {
-        let mut source = PrefetchSource::new(tone());
+        let mut source = PrefetchSource::new(SeekingTone { position: 0 });
+        std::thread::sleep(Duration::from_millis(20));
         source.try_seek(Duration::from_millis(50)).unwrap();
+        std::thread::sleep(Duration::from_millis(20));
         // Silence is emitted while the producer repositions.
         let samples: Vec<f32> = source.by_ref().take(20_000).collect();
-        assert!(samples.len() < 20_000, "source did not finish after a seek");
         let first_sound = samples
             .iter()
             .copied()

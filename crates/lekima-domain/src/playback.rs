@@ -86,6 +86,14 @@ impl RepeatMode {
     }
 }
 
+/// A byte range of the current track that is already available locally,
+/// expressed in milliseconds from the start of the track.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BufferedRange {
+    pub start_ms: u64,
+    pub end_ms: u64,
+}
+
 /// Everything a client needs to render a "now playing" view.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlaybackState {
@@ -125,6 +133,9 @@ pub struct PlaybackState {
     /// Recent amplitude envelope from the audio device (oldest first, 0..=1).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub wave: Vec<f32>,
+    /// Locally buffered ranges of the current track, for progress shading.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub buffered: Vec<BufferedRange>,
 }
 
 const fn default_volume() -> f32 {
@@ -159,6 +170,7 @@ impl Default for PlaybackState {
             quality: Quality::Exhigh,
             sleep_remaining_ms: None,
             wave: Vec::new(),
+            buffered: Vec::new(),
         }
     }
 }

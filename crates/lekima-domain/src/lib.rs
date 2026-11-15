@@ -17,6 +17,7 @@ pub mod lyrics;
 pub mod model;
 pub mod playback;
 pub mod ports;
+pub mod sanitize;
 
 pub use error::{DomainError, Result};
 pub use lyrics::{LyricLine, Lyrics, parse_lrc, parse_lrc_with_translation};
@@ -24,5 +25,6 @@ pub use model::{
     Album, AlbumId, Artist, ArtistId, Playlist, PlaylistId, QrLogin, QrStatus, Quality, SearchKind,
     SearchResults, Toplist, Track, TrackId, UserId, UserProfile, format_duration_ms,
 };
-pub use playback::{PlaybackState, PlaybackStatus, Queue, QueueKind, RepeatMode};
+pub use playback::{BufferedRange, PlaybackState, PlaybackStatus, Queue, QueueKind, RepeatMode};
 pub use ports::{AudioEngine, CredentialsStore, MusicService};
+pub use sanitize::{sanitize_line, sanitize_multiline};

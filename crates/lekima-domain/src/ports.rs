@@ -10,7 +10,7 @@ use crate::{
     Result,
     lyrics::Lyrics,
     model::{QrLogin, QrStatus, Quality, SearchKind, SearchResults, Toplist, Track, TrackId},
-    playback::PlaybackState,
+    playback::{BufferedRange, PlaybackState},
 };
 
 /// Catalogue and account operations backed by a music provider.
@@ -173,18 +173,28 @@ pub trait AudioEngine: Send + Sync {
         false
     }
 
+    /// Ranges of the current track already available locally, in milliseconds.
+    ///
+    /// Empty means either the whole track is buffered or the backend cannot
+    /// report it; frontends should then draw a plain progress rail.
+    fn buffered_ranges(&self, duration_ms: u64) -> Vec<BufferedRange> {
+        let _ = duration_ms;
+        Vec::new()
+    }
+
     /// Prepares a source for the next track and appends it to the same output
     /// queue, so the transition can be gapless.
-    async fn queue_next_url(&self, url: &str) -> Result<()> {
-        let _ = url;
+    async fn queue_next_url(&self, id: crate::model::TrackId, url: &str) -> Result<()> {
+        let _ = (id, url);
         Err(crate::DomainError::Unsupported(
             "this audio backend cannot preload tracks".to_owned(),
         ))
     }
 
-    /// True exactly once when a preloaded track has started playing.
-    fn take_track_boundary(&self) -> bool {
-        false
+    /// Returns the id of the preloaded track whose first sample has started,
+    /// exactly once per boundary.
+    fn take_track_boundary(&self) -> Option<crate::model::TrackId> {
+        None
     }
 }
 

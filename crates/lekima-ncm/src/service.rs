@@ -242,7 +242,7 @@ impl MusicService for NcmMusicService {
         let response = ensure_success(response)?;
         Ok(response.body.profile.map(|profile| UserProfile {
             id: UserId(profile.user_id),
-            nickname: profile.nickname,
+            nickname: domain::sanitize_line(&profile.nickname),
             avatar_url: None,
         }))
     }
@@ -386,7 +386,10 @@ impl MusicService for NcmMusicService {
             801 => Ok(QrStatus::Waiting),
             802 => Ok(QrStatus::Scanned),
             803 => Ok(QrStatus::Confirmed {
-                nickname: response.body.nickname,
+                nickname: response
+                    .body
+                    .nickname
+                    .map(|nickname| domain::sanitize_line(&nickname)),
             }),
             8821 => Err(DomainError::AuthenticationRequired(format!(
                 "NetEase requires behavioral verification for this login (code 8821{})\n\

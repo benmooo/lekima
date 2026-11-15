@@ -153,6 +153,12 @@ impl Spool {
         self.lock().total
     }
 
+    /// Snapshot of the downloaded byte ranges, sorted and merged.
+    #[must_use]
+    pub fn ranges(&self) -> Vec<Range<u64>> {
+        self.lock().ranges.clone()
+    }
+
     /// Records the total length once it is known from a response header.
     pub fn set_total(&self, total: u64) {
         let mut state = self.lock();

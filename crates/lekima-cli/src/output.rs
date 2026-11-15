@@ -7,7 +7,9 @@
 //! {"ok":false,"error":{"code":"unauthorized","message":"…"}}
 //! ```
 
-use lekima_domain::{PlaybackState, Playlist, SearchResults, Track};
+use lekima_domain::{
+    PlaybackState, Playlist, SearchResults, Track, sanitize_line, sanitize_multiline,
+};
 use lekima_ipc::{ApiError, ErrorCode, IpcError, Reply};
 use serde::Serialize;
 use serde_json::Value;
@@ -109,7 +111,7 @@ pub fn print_reply(reply: &Reply, json: bool) {
         Reply::Playlists { playlists } => print_playlists(playlists),
         Reply::Queue { tracks, index } => print_queue(tracks, *index),
         Reply::User { user } => match user {
-            Some(user) => crate::say!("{} ({})", user.nickname, user.id),
+            Some(user) => crate::say!("{} ({})", sanitize_line(&user.nickname), user.id),
             None => crate::say!("not signed in"),
         },
         Reply::Lyrics { lyrics, .. } => crate::say!("{}", lyrics.plain()),
@@ -118,9 +120,9 @@ pub fn print_reply(reply: &Reply, json: bool) {
                 crate::say!(
                     "{:>10}  {:<24} {:>5}  {}",
                     chart.id,
-                    truncate(&chart.name, 24),
+                    truncate(&sanitize_line(&chart.name), 24),
                     chart.track_count,
-                    chart.update_frequency
+                    sanitize_line(&chart.update_frequency)
                 );
             }
         }
@@ -159,14 +161,20 @@ pub fn print_failure(failure: &Failure, json: bool) {
     if json {
         emit_json(false, None, Some(failure.api_error()));
     } else {
-        eprintln!("error: {}", failure.message);
+        eprintln!("error: {}", sanitize_multiline(&failure.message));
     }
 }
 
 fn print_status(state: &PlaybackState) {
     let track = state.track.as_ref().map_or_else(
         || "nothing playing".to_owned(),
-        |track| format!("{} — {}", track.name, track.artist_names()),
+        |track| {
+            format!(
+                "{} — {}",
+                sanitize_line(&track.name),
+                sanitize_line(&track.artist_names())
+            )
+        },
     );
     let sleep = state
         .sleep_remaining_ms
@@ -201,8 +209,8 @@ fn print_tracks(tracks: &[Track]) {
         crate::say!(
             "{:>4}  {:<40} {:<22} {:>6}  {}",
             index + 1,
-            truncate(&track.name, 40),
-            truncate(&track.artist_names(), 22),
+            truncate(&sanitize_line(&track.name), 40),
+            truncate(&sanitize_line(&track.artist_names()), 22),
             track.duration_label(),
             track.id
         );
@@ -221,7 +229,7 @@ fn print_playlists(playlists: &[Playlist]) {
         crate::say!(
             "{:>10}  {:<40} {}",
             playlist.id,
-            truncate(&playlist.name, 40),
+            truncate(&sanitize_line(&playlist.name), 40),
             playlist.track_count
         );
     }
@@ -236,8 +244,8 @@ fn print_queue(tracks: &[Track], index: Option<usize>) {
         crate::say!(
             "{marker} {:>3}  {} — {}",
             position + 1,
-            track.name,
-            track.artist_names()
+            sanitize_line(&track.name),
+            sanitize_line(&track.artist_names())
         );
     }
 }

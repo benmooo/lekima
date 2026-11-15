@@ -3,6 +3,7 @@
 use std::{
     fs::File,
     io::Cursor,
+    ops::Range,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
@@ -12,7 +13,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use lekima_domain::{AudioEngine, DomainError, Result};
+use lekima_domain::{AudioEngine, BufferedRange, DomainError, Result, TrackId};
 use rodio::{Decoder, DeviceSinkBuilder, Player, cpal, cpal::traits::HostTrait};
 
 use crate::{
@@ -79,6 +80,7 @@ enum Command {
         ack: oneshot::Sender<std::result::Result<(), String>>,
     },
     QueueNext {
+        track: TrackId,
         bytes: Vec<u8>,
         ack: oneshot::Sender<std::result::Result<(), String>>,
     },
@@ -96,7 +98,7 @@ struct Shared {
     finished: AtomicBool,
     volume_bits: AtomicU32,
     wave: Arc<Waveform>,
-    boundary: AtomicBool,
+    boundary: Mutex<Option<TrackId>>,
 }
 
 impl Shared {
@@ -107,7 +109,7 @@ impl Shared {
             finished: AtomicBool::new(false),
             volume_bits: AtomicU32::new(volume.clamp(0.0, 1.0).to_bits()),
             wave: Arc::new(Waveform::new()),
-            boundary: AtomicBool::new(false),
+            boundary: Mutex::new(None),
         }
     }
 
@@ -335,7 +337,20 @@ impl AudioEngine for RodioAudioEngine {
             .unwrap_or(false)
     }
 
-    async fn queue_next_url(&self, url: &str) -> Result<()> {
+    fn buffered_ranges(&self, duration_ms: u64) -> Vec<BufferedRange> {
+        let Ok(slot) = self.spool.lock() else {
+            return Vec::new();
+        };
+        let Some(spool) = slot.as_ref() else {
+            return Vec::new();
+        };
+        let Some(total) = spool.total().filter(|total| *total > 0) else {
+            return Vec::new();
+        };
+        map_buffered_ranges(&spool.ranges(), total, duration_ms)
+    }
+
+    async fn queue_next_url(&self, id: TrackId, url: &str) -> Result<()> {
         let response = self
             .client
             .get(url)
@@ -364,14 +379,19 @@ impl AudioEngine for RodioAudioEngine {
         })?;
         let (ack, ack_rx) = oneshot::channel();
         self.send(Command::QueueNext {
+            track: id,
             bytes: bytes.to_vec(),
             ack,
         })?;
         await_load(ack_rx).await
     }
 
-    fn take_track_boundary(&self) -> bool {
-        self.shared.boundary.swap(false, Ordering::SeqCst)
+    fn take_track_boundary(&self) -> Option<TrackId> {
+        self.shared
+            .boundary
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .take()
     }
 }
 
@@ -395,7 +415,7 @@ impl Drop for RodioAudioEngine {
 /// Marks the atomic boundary when its first sample is pulled.
 struct Boundary<S> {
     inner: S,
-    boundary: Arc<AtomicBool>,
+    track: TrackId,
     shared: Arc<Shared>,
 }
 
@@ -404,8 +424,13 @@ impl<S: rodio::Source> Iterator for Boundary<S> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let sample = self.inner.next()?;
-        if !self.boundary.swap(true, Ordering::SeqCst) {
-            self.shared.boundary.store(true, Ordering::SeqCst);
+        let mut boundary = self
+            .shared
+            .boundary
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if boundary.is_none() {
+            *boundary = Some(self.track);
             self.shared.position_ms.store(0, Ordering::Relaxed);
         }
         Some(sample)
@@ -594,6 +619,10 @@ fn audio_thread(
         match receiver.recv_timeout(POLL_INTERVAL) {
             Ok(Command::Load { bytes, ack }) => {
                 player.stop();
+                *shared
+                    .boundary
+                    .lock()
+                    .unwrap_or_else(|poison| poison.into_inner()) = None;
                 let len = bytes.len();
                 let byte_len = bytes.len() as u64;
                 let decoder = Decoder::builder()
@@ -625,6 +654,10 @@ fn audio_thread(
                 ack,
             }) => {
                 player.stop();
+                *shared
+                    .boundary
+                    .lock()
+                    .unwrap_or_else(|poison| poison.into_inner()) = None;
                 let mut builder = Decoder::builder()
                     .with_data(GrowingFile::new(reader, spool))
                     .with_seekable(true);
@@ -651,8 +684,7 @@ fn audio_thread(
                     }
                 }
             }
-            Ok(Command::QueueNext { bytes, ack }) => {
-                let boundary = Arc::new(AtomicBool::new(false));
+            Ok(Command::QueueNext { track, bytes, ack }) => {
                 let byte_len = bytes.len() as u64;
                 let decoder = Decoder::builder()
                     .with_data(Cursor::new(bytes))
@@ -663,7 +695,7 @@ fn audio_thread(
                     Ok(decoder) => {
                         let source = Boundary {
                             inner: Metered::new(decoder, Arc::clone(&shared.wave)),
-                            boundary: Arc::clone(&boundary),
+                            track,
                             shared: Arc::clone(&shared),
                         };
                         player.append(source);
@@ -678,6 +710,10 @@ fn audio_thread(
             Ok(Command::Resume) => player.play(),
             Ok(Command::Stop) => {
                 player.clear();
+                *shared
+                    .boundary
+                    .lock()
+                    .unwrap_or_else(|poison| poison.into_inner()) = None;
                 shared.loaded.store(false, Ordering::Relaxed);
                 shared.finished.store(false, Ordering::Relaxed);
                 shared.position_ms.store(0, Ordering::Relaxed);
@@ -708,21 +744,80 @@ fn audio_thread(
     tracing::debug!("audio thread stopped");
 }
 
+/// Maps downloaded byte ranges onto track time. Full coverage returns no
+/// ranges, because a fully buffered rail should look like an ordinary empty
+/// progress bar rather than a played one.
+fn map_buffered_ranges(
+    ranges: &[Range<u64>],
+    total_bytes: u64,
+    duration_ms: u64,
+) -> Vec<BufferedRange> {
+    if total_bytes == 0 || duration_ms == 0 || ranges.is_empty() {
+        return Vec::new();
+    }
+    if ranges
+        .first()
+        .is_some_and(|range| range.start == 0 && range.end >= total_bytes)
+    {
+        return Vec::new();
+    }
+
+    let mut mapped: Vec<BufferedRange> = Vec::with_capacity(ranges.len());
+    for range in ranges {
+        let start = u128::from(range.start.min(total_bytes)) * u128::from(duration_ms)
+            / u128::from(total_bytes);
+        let end = u128::from(range.end.min(total_bytes)) * u128::from(duration_ms)
+            / u128::from(total_bytes);
+        let start_ms = u64::try_from(start).unwrap_or(u64::MAX);
+        let end_ms = u64::try_from(end).unwrap_or(u64::MAX);
+        if end_ms <= start_ms {
+            continue;
+        }
+        match mapped.last_mut() {
+            Some(previous) if start_ms <= previous.end_ms => {
+                previous.end_ms = previous.end_ms.max(end_ms);
+            }
+            _ => mapped.push(BufferedRange { start_ms, end_ms }),
+        }
+    }
+    if mapped.len() == 1 && mapped[0].start_ms == 0 && mapped[0].end_ms >= duration_ms {
+        return Vec::new();
+    }
+    mapped
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
         io::{Read as _, Seek as _, SeekFrom, Write as _},
         net::TcpListener,
-        sync::{
-            Arc,
-            atomic::{AtomicBool, Ordering},
-        },
+        sync::Arc,
     };
 
     use tempfile::NamedTempFile;
 
-    use super::{Boundary, Shared, fetch_range};
+    use super::{Boundary, Shared, fetch_range, map_buffered_ranges};
     use crate::spool::{GrowingFile, Spool};
+
+    #[test]
+    fn maps_buffered_bytes_to_track_time() {
+        let ranges = vec![0..25, 50..75];
+        let mapped = map_buffered_ranges(&ranges, 100, 1_000);
+        assert_eq!(mapped.len(), 2);
+        assert_eq!((mapped[0].start_ms, mapped[0].end_ms), (0, 250));
+        assert_eq!((mapped[1].start_ms, mapped[1].end_ms), (500, 750));
+    }
+
+    #[test]
+    fn full_coverage_needs_no_shading() {
+        let complete = 0..100;
+        let split = vec![0..40, 40..100];
+        let tiny = 0..10;
+        assert!(map_buffered_ranges(std::slice::from_ref(&complete), 100, 1_000).is_empty());
+        assert!(map_buffered_ranges(&split, 100, 1_000).is_empty());
+        assert!(map_buffered_ranges(&[], 100, 1_000).is_empty());
+        assert!(map_buffered_ranges(std::slice::from_ref(&tiny), 0, 1_000).is_empty());
+    }
 
     #[tokio::test]
     async fn range_fetch_fills_a_hole_ahead_of_the_sequential_download() {
@@ -794,15 +889,16 @@ mod tests {
     #[test]
     fn boundary_source_signals_once_on_the_first_sample() {
         let shared = Arc::new(Shared::new(0.0));
-        let marker = Arc::new(AtomicBool::new(false));
-        let source = Boundary {
+        let mut source = Boundary {
             inner: rodio::source::SineWave::new(440.0),
-            boundary: Arc::clone(&marker),
+            track: lekima_domain::TrackId(7),
             shared: Arc::clone(&shared),
         };
-        let mut source = source;
         assert!(source.next().is_some());
-        assert!(shared.boundary.load(Ordering::SeqCst));
-        assert!(marker.load(Ordering::SeqCst));
+        let boundary = shared
+            .boundary
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        assert_eq!(*boundary, Some(lekima_domain::TrackId(7)));
     }
 }

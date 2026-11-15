@@ -13,20 +13,20 @@ pub(crate) fn track(track: provider::Track) -> domain::Track {
     } else {
         Some(domain::Album {
             id: domain::AlbumId(track.album.id),
-            name: track.album.name,
+            name: text(track.album.name),
             cover_url: (!track.album.pic_url.is_empty()).then_some(track.album.pic_url),
         })
     };
 
     domain::Track {
         id: domain::TrackId(track.id),
-        name: track.name,
+        name: text(track.name),
         artists: track
             .artists
             .into_iter()
             .map(|artist| domain::Artist {
                 id: domain::ArtistId(artist.id),
-                name: artist.name,
+                name: text(artist.name),
             })
             .collect(),
         album,
@@ -56,19 +56,24 @@ pub(crate) fn search_results(body: provider::SearchBody) -> domain::SearchResult
 }
 
 fn non_empty(value: String) -> Option<String> {
+    let value = text(value);
     (!value.is_empty()).then_some(value)
+}
+
+fn text(value: String) -> String {
+    domain::sanitize_line(&value)
 }
 
 pub(crate) fn playlist(playlist: provider::Playlist) -> domain::Playlist {
     domain::Playlist {
         id: domain::PlaylistId(playlist.id),
-        name: playlist.name,
-        description: playlist.description.unwrap_or_default(),
+        name: text(playlist.name),
+        description: text(playlist.description.unwrap_or_default()),
         track_count: playlist.track_count,
         cover_url: non_empty(playlist.cover_img_url),
         owner: playlist
             .creator
-            .map(|creator| creator.nickname)
+            .map(|creator| text(creator.nickname))
             .filter(|nickname| !nickname.is_empty()),
     }
 }
@@ -77,9 +82,9 @@ pub(crate) fn playlist(playlist: provider::Playlist) -> domain::Playlist {
 pub(crate) fn toplist(entry: provider::ToplistEntry) -> domain::Toplist {
     domain::Toplist {
         id: domain::PlaylistId(entry.id),
-        name: entry.name,
+        name: text(entry.name),
         track_count: entry.track_count,
-        update_frequency: entry.update_frequency,
+        update_frequency: text(entry.update_frequency),
     }
 }
 
@@ -93,14 +98,14 @@ pub(crate) fn cloud_track(entry: provider::CloudTrack) -> Option<domain::Track> 
     }
     Some(domain::Track {
         id: domain::TrackId(entry.song_id),
-        name: entry.song_name,
+        name: text(entry.song_name),
         artists: vec![domain::Artist {
             id: domain::ArtistId(0),
-            name: entry.artist,
+            name: text(entry.artist),
         }],
         album: Some(domain::Album {
             id: domain::AlbumId(0),
-            name: entry.album,
+            name: text(entry.album),
             cover_url: None,
         }),
         duration_ms: 0,
@@ -110,6 +115,21 @@ pub(crate) fn cloud_track(entry: provider::CloudTrack) -> Option<domain::Track> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sanitizes_provider_text_before_display() {
+        let raw = serde_json::json!({
+            "id": 1,
+            "name": "\u{1b}[31mowned\u{1b}[0m",
+            "artists": [{"id": 2, "name": "safe\u{202e}name"}],
+            "album": {"id": 3, "name": "ok\u{7}"}
+        });
+        let provider_track: provider::Track = serde_json::from_value(raw).unwrap();
+        let track = track(provider_track);
+        assert_eq!(track.name, "owned");
+        assert_eq!(track.artist_names(), "safename");
+        assert_eq!(track.album_name(), "ok");
+    }
 
     #[test]
     fn maps_a_complete_track() {

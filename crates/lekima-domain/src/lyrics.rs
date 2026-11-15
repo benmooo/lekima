@@ -113,14 +113,18 @@ fn parse_with_translation(raw: &str, translation: Option<&str>) -> Lyrics {
         if text.is_empty() {
             continue;
         }
+        let text = super::sanitize::sanitize_line(text);
+        if text.is_empty() {
+            continue;
+        }
         if times.is_empty() {
             if !metadata {
-                entries.push((0, text.to_owned(), true));
+                entries.push((0, text, true));
             }
             continue;
         }
         for time in times {
-            entries.push((time, text.to_owned(), false));
+            entries.push((time, text.clone(), false));
         }
     }
 
@@ -155,7 +159,7 @@ fn parse_with_translation(raw: &str, translation: Option<&str>) -> Lyrics {
     }
     Lyrics {
         lines,
-        raw: raw.to_owned(),
+        raw: super::sanitize::sanitize_multiline(raw),
     }
 }
 

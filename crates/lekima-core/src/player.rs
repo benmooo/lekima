@@ -41,6 +41,8 @@ pub struct Player {
     inner: Mutex<Inner>,
     liked: Mutex<HashSet<TrackId>>,
     trashed: Mutex<HashSet<TrackId>>,
+    /// Track id currently appended to the audio device as a gapless preload.
+    preloaded: Mutex<Option<TrackId>>,
 }
 
 impl Player {
@@ -71,6 +73,7 @@ impl Player {
             }),
             liked: Mutex::new(HashSet::new()),
             trashed: Mutex::new(HashSet::new()),
+            preloaded: Mutex::new(None),
         }
     }
 
@@ -84,6 +87,7 @@ impl Player {
         // Lock order: liked, then inner. No other path takes them in reverse.
         let liked = self.liked.lock().await;
         let inner = self.inner.lock().await;
+        let duration_ms = inner.queue.current().map_or(0, |track| track.duration_ms);
         let mut state = PlaybackState {
             status: inner.status,
             track: inner.queue.current().cloned(),
@@ -112,6 +116,7 @@ impl Player {
             quality: *self.quality.lock().await,
             sleep_remaining_ms: None,
             wave: self.audio.wave(),
+            buffered: self.audio.buffered_ranges(duration_ms),
         };
         if state.status != PlaybackStatus::Stopped
             && state.position_ms == 0
@@ -224,6 +229,7 @@ impl Player {
         inner.loading = false;
         inner.generation = inner.generation.wrapping_add(1);
         drop(inner);
+        *self.preloaded.lock().await = None;
         self.audio.stop()
     }
 
@@ -246,6 +252,7 @@ impl Player {
         };
 
         // A must go silent now, not after B has been fetched.
+        *self.preloaded.lock().await = None;
         let _ = self.audio.stop();
 
         let quality = *self.quality.lock().await;
@@ -329,6 +336,7 @@ impl Player {
     pub async fn stop(&self) -> Result<()> {
         let mut inner = self.inner.lock().await;
         self.audio.stop()?;
+        *self.preloaded.lock().await = None;
         inner.status = PlaybackStatus::Stopped;
         inner.position_ms = 0;
         inner.loading = false;
@@ -340,7 +348,7 @@ impl Player {
     pub async fn next(&self) -> Result<Option<Track>> {
         let advanced = {
             let mut inner = self.inner.lock().await;
-            let repeat = inner.repeat;
+            let repeat = effective_repeat(inner.kind, inner.repeat);
             inner.queue.advance(repeat).cloned()
         };
         match advanced {
@@ -358,7 +366,7 @@ impl Player {
     pub async fn previous(&self) -> Result<Option<Track>> {
         {
             let mut inner = self.inner.lock().await;
-            let repeat = inner.repeat;
+            let repeat = effective_repeat(inner.kind, inner.repeat);
             inner.queue.rewind(repeat);
         }
         self.load_current().await?;
@@ -411,10 +419,13 @@ impl Player {
         let (finished, playing) = {
             let inner = self.inner.lock().await;
             // `has_track` is already false when the sink reports finished, so it
-            // must not gate the advance.
+            // must not gate the advance. `loading` does: a second tick while the
+            // next stream is being resolved must not skip another queue entry.
             (
                 self.audio.is_finished(),
-                inner.status == PlaybackStatus::Playing && inner.queue.current().is_some(),
+                inner.status == PlaybackStatus::Playing
+                    && !inner.loading
+                    && inner.queue.current().is_some(),
             )
         };
         if finished && playing {
@@ -449,27 +460,144 @@ impl Player {
     }
 
     /// True once when a preloaded source has begun playing.
-    pub fn take_track_boundary(&self) -> bool {
+    pub fn take_track_boundary(&self) -> Option<TrackId> {
         self.audio.take_track_boundary()
     }
 
     /// Prepares and appends the next source to the audio queue.
-    pub async fn queue_next(&self, url: &str) -> Result<()> {
-        self.audio.queue_next_url(url).await
+    ///
+    /// Returns `true` when a new source was queued. A second call for the same
+    /// queue position is a no-op, so transport commands such as volume changes
+    /// cannot enqueue the next track twice.
+    pub async fn queue_next(&self, id: TrackId, url: &str) -> Result<bool> {
+        let (generation, next_id) = {
+            let inner = self.inner.lock().await;
+            let next_id = inner
+                .queue
+                .current_index()
+                .and_then(|index| inner.queue.get(index + 1))
+                .map(|track| track.id);
+            (inner.generation, next_id)
+        };
+        if next_id != Some(id) {
+            return Ok(false);
+        }
+        {
+            let mut preloaded = self.preloaded.lock().await;
+            if preloaded.is_some() {
+                return Ok(false);
+            }
+            // Reserve the slot before the network/appending work. A concurrent
+            // load clears it, and the generation check below detects that.
+            *preloaded = Some(id);
+        }
+
+        if let Err(error) = self.audio.queue_next_url(id, url).await {
+            let mut preloaded = self.preloaded.lock().await;
+            if *preloaded == Some(id) {
+                *preloaded = None;
+            }
+            return Err(error);
+        }
+
+        let current = {
+            let inner = self.inner.lock().await;
+            inner.generation == generation
+                && inner
+                    .queue
+                    .current_index()
+                    .and_then(|index| inner.queue.get(index + 1))
+                    .map(|track| track.id)
+                    == Some(id)
+        };
+        if !current {
+            let mut preloaded = self.preloaded.lock().await;
+            if *preloaded == Some(id) {
+                *preloaded = None;
+            }
+            return Ok(false);
+        }
+        Ok(true)
     }
 
-    /// Advances the queue because a preloaded source already started. No load
-    /// is performed; the audio device is already playing the next track.
-    pub async fn advance_gapless(&self) -> Result<Option<Track>> {
-        let mut inner = self.inner.lock().await;
-        let repeat = inner.repeat;
-        let next = inner.queue.advance(repeat).cloned();
-        if next.is_some() {
-            inner.status = PlaybackStatus::Playing;
-            inner.loading = false;
-            inner.position_ms = 0;
+    /// Advances the queue because `boundary` has started on the audio device.
+    ///
+    /// - Boundary equal to the current track: a manual load/jump already applied
+    ///   it, so nothing advances (this prevents a double skip when `n` and the
+    ///   natural rollover race).
+    /// - Boundary equal to the queue's next track: gapless advance.
+    /// - Anything else is stale: stop the stale audio and continue with the
+    ///   queue's next entry instead of replaying the track that just ended.
+    pub async fn advance_gapless(&self, boundary: TrackId) -> Result<Option<Track>> {
+        let (current, expected, kind, repeat, loading) = {
+            let inner = self.inner.lock().await;
+            let current = inner.queue.current().map(|track| track.id);
+            let expected = inner
+                .queue
+                .current_index()
+                .and_then(|index| inner.queue.get(index + 1))
+                .map(|track| track.id);
+            (current, expected, inner.kind, inner.repeat, inner.loading)
+        };
+        let repeat = effective_repeat(kind, repeat);
+        if loading {
+            let _ = self.preloaded.lock().await.take();
+            return Ok(None);
         }
-        Ok(next)
+
+        if current == Some(boundary) {
+            let _ = self.preloaded.lock().await.take();
+            return Ok(None);
+        }
+
+        if Some(boundary) == expected && repeat != RepeatMode::One {
+            let _ = self.preloaded.lock().await.take();
+            let mut inner = self.inner.lock().await;
+            let still_expected = inner
+                .queue
+                .current_index()
+                .and_then(|index| inner.queue.get(index + 1))
+                .map(|track| track.id)
+                == Some(boundary);
+            if !still_expected {
+                drop(inner);
+                self.audio.stop()?;
+                self.load_current().await?;
+                return Ok(None);
+            }
+            let next = inner.queue.advance(repeat).cloned();
+            if next.is_some() {
+                inner.status = PlaybackStatus::Playing;
+                inner.loading = false;
+                inner.position_ms = 0;
+            }
+            return Ok(next);
+        }
+
+        // Stale boundary, or repeat-one rejecting the preload: stop the audio
+        // and advance/rewind according to the repeat mode.
+        let _ = self.preloaded.lock().await.take();
+        self.audio.stop()?;
+        let next = {
+            let mut inner = self.inner.lock().await;
+            let next = inner.queue.advance(repeat).cloned();
+            if next.is_some() {
+                inner.status = PlaybackStatus::Playing;
+                inner.loading = true;
+                inner.position_ms = 0;
+            }
+            next
+        };
+        match next {
+            Some(track) => {
+                self.load_current().await?;
+                Ok(Some(track))
+            }
+            None => {
+                self.stop().await?;
+                Ok(None)
+            }
+        }
     }
 
     /// Changes the bitrate class for the next track.
@@ -514,18 +642,28 @@ impl Player {
 
     /// Advances FM, optionally trashing the current track first.
     pub async fn fm_next(&self, trash: bool) -> Result<Option<Track>> {
+        let before = self.snapshot().await.track.map(|track| track.id);
         if trash {
-            let current = self.snapshot().await.track;
-            if let Some(track) = current {
+            if let Some(track) = self.snapshot().await.track {
                 self.music.fm_trash(track.id).await?;
                 self.trashed.lock().await.insert(track.id);
+            }
+            // The network call above can take long enough for the track to end
+            // and a gapless boundary to advance the queue. Do not advance a
+            // second time when that happened.
+            let after = self.snapshot().await.track.map(|track| track.id);
+            if after != before {
+                return Ok(self.snapshot().await.track);
             }
         }
         self.next().await
     }
 
     /// Keeps the FM station fed: fetch a batch when two tracks remain.
-    pub async fn fm_maybe_prefetch(&self) -> Result<()> {
+    ///
+    /// Returns the number of tracks appended so the daemon can publish a queue
+    /// event even though no client command caused the change.
+    pub async fn fm_maybe_prefetch(&self) -> Result<usize> {
         let need = {
             let inner = self.inner.lock().await;
             inner.kind == QueueKind::Fm
@@ -537,7 +675,7 @@ impl Player {
                     .is_none_or(|index| inner.queue.len().saturating_sub(index + 1) <= 2)
         };
         if !need {
-            return Ok(());
+            return Ok(0);
         }
 
         let batch = self.music.fm_batch().await?;
@@ -551,14 +689,17 @@ impl Player {
             .filter(|track| !existing.contains(&track.id) && !trashed.contains(&track.id))
             .collect();
         if fresh.is_empty() {
-            return Ok(());
+            return Ok(0);
         }
 
+        let added = fresh.len();
         let mut inner = self.inner.lock().await;
         if inner.kind == QueueKind::Fm {
             inner.queue.extend(fresh);
+            Ok(added)
+        } else {
+            Ok(0)
         }
-        Ok(())
     }
 
     /// Seeds the liked cache. Failures are non-fatal (anonymous sessions).
@@ -616,6 +757,16 @@ impl Player {
     }
 }
 
+/// FM is an endless station: repeat modes should not wrap a finite batch back
+/// to old tracks when the station runs dry.
+const fn effective_repeat(kind: QueueKind, repeat: RepeatMode) -> RepeatMode {
+    if matches!(kind, QueueKind::Fm) {
+        RepeatMode::Off
+    } else {
+        repeat
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{
@@ -626,7 +777,7 @@ mod tests {
     use async_trait::async_trait;
     use lekima_domain::{
         Album, Artist, AudioEngine, MusicService, PlaybackStatus, Playlist, PlaylistId, Quality,
-        Result, SearchKind, SearchResults, Track, TrackId, UserId, UserProfile,
+        RepeatMode, Result, SearchKind, SearchResults, Track, TrackId, UserId, UserProfile,
     };
 
     use super::{PlayRequest, Player};
@@ -710,6 +861,7 @@ mod tests {
         volume: Mutex<f32>,
         last_url: Mutex<Option<String>>,
         stops: AtomicU64,
+        queued: AtomicU64,
     }
 
     #[async_trait]
@@ -759,12 +911,145 @@ mod tests {
         fn has_track(&self) -> bool {
             self.playing.load(Ordering::SeqCst)
         }
+
+        async fn queue_next_url(&self, _id: TrackId, _url: &str) -> Result<()> {
+            self.queued.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
     }
 
     fn player() -> (Player, Arc<StubAudio>) {
         let audio = Arc::new(StubAudio::default());
         let player = Player::new(Arc::new(StubMusic), audio.clone(), Quality::Exhigh, 0.5);
         (player, audio)
+    }
+
+    #[tokio::test]
+    async fn preloading_the_next_track_is_idempotent() {
+        let (player, audio) = player();
+        player
+            .play(PlayRequest::Tracks {
+                tracks: vec![track(1), track(2), track(3)],
+                kind: QueueKind::Manual,
+            })
+            .await
+            .unwrap();
+
+        assert!(
+            player
+                .queue_next(TrackId(2), "https://example.test/2.mp3")
+                .await
+                .unwrap()
+        );
+        assert!(
+            !player
+                .queue_next(TrackId(2), "https://example.test/2.mp3")
+                .await
+                .unwrap()
+        );
+        assert_eq!(audio.queued.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn gapless_advance_requires_a_matching_preload() {
+        let (player, audio) = player();
+        player
+            .play(PlayRequest::Tracks {
+                tracks: vec![track(1), track(2), track(3)],
+                kind: QueueKind::Manual,
+            })
+            .await
+            .unwrap();
+        player
+            .queue_next(TrackId(2), "https://example.test/2.mp3")
+            .await
+            .unwrap();
+
+        let next = player.advance_gapless(TrackId(2)).await.unwrap().unwrap();
+        assert_eq!(next.id, TrackId(2));
+        assert_eq!(player.snapshot().await.queue_index, Some(1));
+        assert_eq!(
+            audio.last_url.lock().unwrap().as_deref(),
+            Some("https://example.test/1.mp3")
+        );
+
+        // A duplicate boundary for the track that is already current (the `n`
+        // vs natural-rollover race) must not advance again.
+        assert!(player.advance_gapless(TrackId(2)).await.unwrap().is_none());
+        assert_eq!(player.snapshot().await.queue_index, Some(1));
+    }
+
+    #[tokio::test]
+    async fn jumping_discards_a_previous_preload() {
+        let (player, audio) = player();
+        player
+            .play(PlayRequest::Tracks {
+                tracks: vec![track(1), track(2), track(3), track(4)],
+                kind: QueueKind::Manual,
+            })
+            .await
+            .unwrap();
+        player
+            .queue_next(TrackId(2), "https://example.test/2.mp3")
+            .await
+            .unwrap();
+
+        player.play(PlayRequest::Index(2)).await.unwrap();
+        assert_eq!(player.snapshot().await.queue_index, Some(2));
+        let next = player.advance_gapless(TrackId(2)).await.unwrap().unwrap();
+        assert_eq!(next.id, TrackId(4));
+        assert_eq!(player.snapshot().await.queue_index, Some(3));
+        assert_eq!(
+            audio.last_url.lock().unwrap().as_deref(),
+            Some("https://example.test/4.mp3")
+        );
+    }
+
+    #[tokio::test]
+    async fn fm_prefetch_appends_and_reports_new_tracks() {
+        let (player, _audio) = player();
+        player
+            .play(PlayRequest::Tracks {
+                tracks: vec![track(1), track(2)],
+                kind: QueueKind::Fm,
+            })
+            .await
+            .unwrap();
+        let added = player.fm_maybe_prefetch().await.unwrap();
+        assert_eq!(added, 2);
+        let (tracks, index) = player.queue().await;
+        assert_eq!(tracks.len(), 4);
+        assert_eq!(index, Some(0));
+        assert_eq!(tracks[2].id, TrackId(7));
+        assert_eq!(tracks[3].id, TrackId(8));
+    }
+
+    #[tokio::test]
+    async fn fm_does_not_wrap_repeat_all_back_to_old_tracks() {
+        let (player, _audio) = player();
+        player.fm_start().await.unwrap();
+        player.set_repeat(RepeatMode::All).await;
+        assert_eq!(player.next().await.unwrap().unwrap().id, TrackId(8));
+        assert!(player.next().await.unwrap().is_none());
+        assert!(player.snapshot().await.track.is_none());
+    }
+
+    #[tokio::test]
+    async fn tick_waits_while_a_track_is_still_loading() {
+        let (player, audio) = player();
+        player
+            .play(PlayRequest::Tracks {
+                tracks: vec![track(1), track(2)],
+                kind: QueueKind::Manual,
+            })
+            .await
+            .unwrap();
+        audio.finished.store(true, Ordering::SeqCst);
+        player.inner.lock().await.loading = true;
+        assert!(player.tick().await.unwrap().is_none());
+        player.inner.lock().await.loading = false;
+        let next = player.tick().await.unwrap().unwrap();
+        assert_eq!(next.id, TrackId(2));
     }
 
     #[tokio::test]

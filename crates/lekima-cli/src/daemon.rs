@@ -211,17 +211,7 @@ impl Daemon {
         }
 
         let command = request.command;
-        if !matches!(
-            command,
-            Command::Status
-                | Command::Queue
-                | Command::Search { .. }
-                | Command::Playlists
-                | Command::Toplists
-                | Command::Whoami
-                | Command::Ping
-                | Command::Hello { .. }
-        ) {
+        if invalidates_preload(&command) {
             self.preloaded.store(false, Ordering::SeqCst);
         }
         let outcome = self.execute(command.clone()).await;
@@ -569,12 +559,17 @@ fn spawn_ticker(
         let mut interval = tokio::time::interval(Duration::from_millis(500));
         loop {
             interval.tick().await;
-            if player.take_track_boundary() {
-                if player.advance_gapless().await.is_ok() {
-                    preloaded.store(false, Ordering::SeqCst);
-                    hub.publish(Event::Status {
-                        state: player.snapshot().await,
-                    });
+            if let Some(boundary) = player.take_track_boundary() {
+                match player.advance_gapless(boundary).await {
+                    Ok(_) => {
+                        preloaded.store(false, Ordering::SeqCst);
+                        hub.publish(Event::Status {
+                            state: player.snapshot().await,
+                        });
+                        let (tracks, index) = player.queue().await;
+                        hub.publish(Event::Queue { tracks, index });
+                    }
+                    Err(error) => tracing::warn!(%error, "gapless advance failed"),
                 }
                 continue;
             }
@@ -583,12 +578,19 @@ fn spawn_ticker(
                     hub.publish(Event::Status {
                         state: player.snapshot().await,
                     });
+                    let (tracks, index) = player.queue().await;
+                    hub.publish(Event::Queue { tracks, index });
                 }
                 Ok(None) => {}
                 Err(error) => tracing::warn!(%error, "auto-advance failed"),
             }
-            if let Err(error) = player.fm_maybe_prefetch().await {
-                tracing::debug!(%error, "fm prefetch skipped");
+            match player.fm_maybe_prefetch().await {
+                Ok(0) => {}
+                Ok(_) => {
+                    let (tracks, index) = player.queue().await;
+                    hub.publish(Event::Queue { tracks, index });
+                }
+                Err(error) => tracing::debug!(%error, "fm prefetch skipped"),
             }
             let expired = sleep_until
                 .lock()
@@ -716,8 +718,9 @@ fn spawn_preloader(daemon: Arc<Daemon>) {
             let quality = daemon.player.quality().await;
             let url = daemon.player.music().stream_url(next.id, quality).await;
             if let Ok(url) = url {
-                match daemon.player.queue_next(&url).await {
-                    Ok(()) => tracing::debug!(track = %next.id, "preloaded next track"),
+                match daemon.player.queue_next(next.id, &url).await {
+                    Ok(true) => tracing::debug!(track = %next.id, "preloaded next track"),
+                    Ok(false) => tracing::debug!(track = %next.id, "next track already preloaded"),
                     Err(error) => {
                         tracing::debug!(%error, "next track cannot be preloaded");
                     }
@@ -727,6 +730,25 @@ fn spawn_preloader(daemon: Arc<Daemon>) {
             daemon.preloaded.store(true, Ordering::SeqCst);
         }
     });
+}
+
+fn invalidates_preload(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::Play { .. }
+            | Command::Jump { .. }
+            | Command::Stop
+            | Command::Next
+            | Command::Prev
+            | Command::QueueRemove { .. }
+            | Command::QueueMove { .. }
+            | Command::Enqueue { .. }
+            | Command::ClearQueue
+            | Command::Daily { play: true }
+            | Command::Fm { .. }
+            | Command::Cloud { play: true, .. }
+            | Command::Liked { play: true }
+    )
 }
 
 fn prepare_socket(socket: &Path) -> Result<()> {
