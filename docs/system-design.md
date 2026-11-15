@@ -331,7 +331,7 @@ Security:
 
 ### 8.1 Extending `ncmapi-rs`
 
-`ncmapi` 1.6 is published. 1.1 added playlist detail/paging, lyrics and QR
+`ncmapi` 1.7 is published. 1.1 added playlist detail/paging, lyrics and QR
 login; 1.2 added daily recommendations, personal FM, likes and toplists.
 `ncmapi` resolves catalogue data and stream URLs; byte-range fetching for
 seekable spools lives in `lekima-audio`, not the provider crate. Endpoint calls
@@ -344,7 +344,7 @@ transport's request-hash cache cannot replay stale answers.
 | QR login start/poll | `/eapi/login/qrcode/unikey`, `/eapi/login/qrcode/client/login` (`type: 3`) | `lekima login --qr` — **done in 1.3** |
 | Playlist detail with tracks | `/api/v6/playlist/detail` + `/api/v3/song/detail` | `playlist show`, sidebar — **done in 1.1** |
 | Lyrics | `/api/song/lyric` | `lekima lyrics` — **done in 1.1** |
-| Public comments | `/api/v1/resource/comments/R_SO_4_{id}` | `lekima comments`, TUI `C` — **direct read-only GET in `lekima-ncm`** |
+| Public comments | `/api/v1/resource/comments/R_SO_4_{id}` | `lekima comments`, TUI `C` — **done in 1.7** |
 | Daily recommendations | `/api/v3/discovery/recommend/songs` | Home / `lekima daily` — **done in 1.2** |
 | Personal FM | `/weapi/v1/radio/get`, `/weapi/radio/trash/add` | `lekima fm` — **done in 1.2** |
 | Likes | `/api/radio/like`, `/weapi/song/like/get` | `lekima like` / liked playlist — **done in 1.2** |

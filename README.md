@@ -56,6 +56,9 @@ $ lekima status --json
 
 ## Status
 
+`0.5.1` moves track comments onto `ncmapi` 1.7's public comments endpoint and
+drops the adapter's direct HTTP dependency.
+
 `0.5.0` adds a 256 MiB offline stream cache (`lekima cache`) with `CACHE`
 playback status and offline fallback, plus public track comments in the CLI, MCP
 and a scrollable TUI pane (`C`).
@@ -78,7 +81,7 @@ FM, likes, charts, the music cloud, playback through a background daemon, a
 vim-driven TUI (responsive HUD, real spectrum, buffered shading, lyrics pane,
 history, UI settings, twelve themes), device selection, gapless playback,
 MPRIS/Now Playing, push events (`lekima watch`) and an MCP stdio server
-(`lekima mcp`). `ncmapi` 1.6 is published on crates.io.
+(`lekima mcp`). `ncmapi` 1.7 is published on crates.io.
 
 ```console
 $ lekima login --qr          # scan with the NetEase app

@@ -17,7 +17,7 @@ Status: **Released in 0.5.0**
 
 ## Comments
 
-- Provider: public `comments` endpoint with typed models in the domain
+- Provider: `ncmapi` 1.7 `Library::comments` with typed models in the domain
   (`Comment`, `CommentReply`, `Comments`).
 - CLI: `lekima comments [--id ID] [--limit N] [--offset N] [--json]`, human
   output separates hot and regular comments.

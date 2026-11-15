@@ -6,7 +6,6 @@
 
 use lekima_domain as domain;
 use ncmapi as provider;
-use serde::Deserialize;
 
 pub(crate) fn track(track: provider::Track) -> domain::Track {
     let album = if track.album.id == 0 && track.album.name.is_empty() {
@@ -113,53 +112,7 @@ pub(crate) fn cloud_track(entry: provider::CloudTrack) -> Option<domain::Track> 
     })
 }
 
-#[derive(Debug, Deserialize)]
-pub(crate) struct ProviderComments {
-    #[serde(default)]
-    pub code: i32,
-    #[serde(default)]
-    pub total: u64,
-    #[serde(default)]
-    pub more: bool,
-    #[serde(default, rename = "hotComments")]
-    pub hot_comments: Vec<ProviderComment>,
-    #[serde(default)]
-    pub comments: Vec<ProviderComment>,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct ProviderComment {
-    #[serde(default, rename = "commentId")]
-    pub comment_id: u64,
-    #[serde(default)]
-    pub content: String,
-    #[serde(default)]
-    pub time: u64,
-    #[serde(default, rename = "likedCount")]
-    pub liked_count: u64,
-    #[serde(default)]
-    pub user: Option<ProviderCommentUser>,
-    #[serde(default, rename = "beReplied")]
-    pub replies: Vec<ProviderReply>,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct ProviderCommentUser {
-    #[serde(default)]
-    pub nickname: String,
-    #[serde(default, rename = "avatarUrl")]
-    pub avatar_url: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct ProviderReply {
-    #[serde(default)]
-    pub content: String,
-    #[serde(default)]
-    pub user: Option<ProviderCommentUser>,
-}
-
-pub(crate) fn comments(body: ProviderComments) -> domain::Comments {
+pub(crate) fn comments(body: provider::CommentsBody) -> domain::Comments {
     domain::Comments {
         total: body.total,
         has_more: body.more,
@@ -168,7 +121,7 @@ pub(crate) fn comments(body: ProviderComments) -> domain::Comments {
     }
 }
 
-fn comment(comment: ProviderComment) -> domain::Comment {
+fn comment(comment: provider::Comment) -> domain::Comment {
     let author = comment
         .user
         .as_ref()
@@ -184,7 +137,7 @@ fn comment(comment: ProviderComment) -> domain::Comment {
         timestamp_ms: comment.time,
         liked_count: comment.liked_count,
         replies: comment
-            .replies
+            .be_replied
             .into_iter()
             .map(|reply| domain::CommentReply {
                 author: reply
@@ -227,7 +180,7 @@ mod tests {
             }],
             "comments":[]
         });
-        let body: ProviderComments = serde_json::from_value(raw).unwrap();
+        let body: provider::CommentsBody = serde_json::from_value(raw).unwrap();
         let comments = comments(body);
         assert_eq!(comments.total, 1);
         assert_eq!(comments.hot.len(), 1);

@@ -3,6 +3,14 @@
 All notable changes to lekima are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## 0.5.1 — 2026-11-16
+
+### Changed
+
+- Track comments use `ncmapi` 1.7's `Library::comments` instead of a hand-rolled
+  HTTP request. `lekima-ncm` no longer depends on `reqwest` or `serde`
+  directly, and the workspace pin moves to `ncmapi` 1.7.
+
 ## 0.5.0 — 2026-11-15
 
 ### Added

@@ -12,8 +12,6 @@ authors.workspace = true
 lekima-domain.workspace = true
 async-trait.workspace = true
 ncmapi.workspace = true
-reqwest.workspace = true
-serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 
