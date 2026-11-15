@@ -37,7 +37,7 @@ Status: **Complete** (unreleased)
   missing comment author.
 - `cargo test --workspace`, `clippy -D warnings`, `fmt --check` are green.
 
-Evidence: 163 workspace tests, including cache round-trip/eviction/permission,
-comment mapping and TUI comment render tests. Live verification: a cached
-preview reported `cached: true`, and `lekima comments --id 186016` returned hot
-and regular comments from the provider.
+Evidence: 164 workspace tests, including cache round-trip/eviction/permission,
+comment mapping and TUI comment render/pagination tests. Live verification: a
+cached preview reported `cached: true`, and `lekima comments --id 186016`
+returned hot and regular comments from the provider.

@@ -194,6 +194,10 @@ pub struct App {
     pub comments_state: CommentsState,
     pub comments_scroll: usize,
     pub comments_view_height: u16,
+    /// Offset for the next page of regular comments.
+    pub comments_next_offset: usize,
+    /// Offset of an in-flight "load more" request.
+    pub comments_pending_offset: Option<usize>,
     pub lyrics_offset_ms: i64,
     pub playlists: Vec<Playlist>,
     pub queue: Vec<Track>,
@@ -255,6 +259,8 @@ impl Default for App {
             comments_state: CommentsState::Idle,
             comments_scroll: 0,
             comments_view_height: 0,
+            comments_next_offset: 0,
+            comments_pending_offset: None,
             lyrics_offset_ms: 0,
             playlists: Vec::new(),
             queue: Vec::new(),
@@ -1267,6 +1273,8 @@ impl App {
         let id = track.id;
         self.mode = Mode::Comments;
         self.comments_scroll = 0;
+        self.comments_next_offset = 0;
+        self.comments_pending_offset = None;
         self.comments_state = CommentsState::Loading { track: id };
         Action::Call(Command::Comments {
             id: Some(id),
@@ -1307,11 +1315,35 @@ impl App {
                     return Action::None;
                 };
                 self.comments_scroll = 0;
+                self.comments_next_offset = 0;
+                self.comments_pending_offset = None;
                 self.comments_state = CommentsState::Loading { track: id };
                 Action::Call(Command::Comments {
                     id: Some(id),
                     limit: 20,
                     offset: 0,
+                })
+            }
+            KeyCode::Char('n') => {
+                if self.comments_pending_offset.is_some() {
+                    return Action::None;
+                }
+                let Some(id) = self.status.track.as_ref().map(|track| track.id) else {
+                    return Action::None;
+                };
+                let has_more = self
+                    .comments_state
+                    .ready()
+                    .is_some_and(|comments| comments.has_more);
+                if !has_more {
+                    return Action::None;
+                }
+                let offset = self.comments_next_offset;
+                self.comments_pending_offset = Some(offset);
+                Action::Call(Command::Comments {
+                    id: Some(id),
+                    limit: 20,
+                    offset: u32::try_from(offset).unwrap_or(u32::MAX),
                 })
             }
             _ => Action::None,
@@ -1385,6 +1417,9 @@ impl App {
                             if self.mode == Mode::Comments {
                                 match current {
                                     Some(id) => {
+                                        self.comments_scroll = 0;
+                                        self.comments_next_offset = 0;
+                                        self.comments_pending_offset = None;
                                         self.comments_state = CommentsState::Loading { track: id };
                                         return Action::Call(Command::Comments {
                                             id: Some(id),
@@ -1467,9 +1502,25 @@ impl App {
                             .as_ref()
                             .is_some_and(|track| track.id == id)
                         {
-                            if comments.hot.is_empty() && comments.comments.is_empty() {
+                            if let Some(_offset) = self.comments_pending_offset.take() {
+                                if let CommentsState::Ready {
+                                    track,
+                                    comments: existing,
+                                } = &mut self.comments_state
+                                    && *track == id
+                                {
+                                    let added = comments.comments.len();
+                                    existing.total = comments.total;
+                                    existing.has_more = comments.has_more;
+                                    existing.comments.extend(comments.comments);
+                                    self.comments_next_offset =
+                                        self.comments_next_offset.saturating_add(added);
+                                }
+                            } else if comments.hot.is_empty() && comments.comments.is_empty() {
                                 self.comments_state = CommentsState::Empty { track: id };
+                                self.comments_next_offset = 0;
                             } else {
+                                self.comments_next_offset = comments.comments.len();
                                 self.comments_state = CommentsState::Ready {
                                     track: id,
                                     comments,
@@ -2144,6 +2195,56 @@ mod tests {
         }));
         let comments = app.comments_state.ready().expect("ready comments");
         assert_eq!(comments.hot[0].content, "great");
+    }
+
+    #[test]
+    fn comments_can_load_the_next_page() {
+        let mut app = App::new();
+        app.status.track = Some(sample_track(1));
+        app.handle_key(key(KeyCode::Char('C')));
+        app.apply(Ok(lekima_ipc::Reply::Comments {
+            id: 1.into(),
+            comments: lekima_domain::Comments {
+                total: 2,
+                has_more: true,
+                hot: Vec::new(),
+                comments: vec![lekima_domain::Comment {
+                    id: 1,
+                    author: "a".to_owned(),
+                    avatar_url: None,
+                    content: "first".to_owned(),
+                    timestamp_ms: 0,
+                    liked_count: 0,
+                    replies: Vec::new(),
+                }],
+            },
+        }));
+        assert_eq!(app.comments_next_offset, 1);
+        let action = app.handle_key(key(KeyCode::Char('n')));
+        assert!(matches!(
+            action,
+            Action::Call(lekima_ipc::Command::Comments { offset: 1, .. })
+        ));
+        app.apply(Ok(lekima_ipc::Reply::Comments {
+            id: 1.into(),
+            comments: lekima_domain::Comments {
+                total: 2,
+                has_more: false,
+                hot: Vec::new(),
+                comments: vec![lekima_domain::Comment {
+                    id: 2,
+                    author: "b".to_owned(),
+                    avatar_url: None,
+                    content: "second".to_owned(),
+                    timestamp_ms: 0,
+                    liked_count: 0,
+                    replies: Vec::new(),
+                }],
+            },
+        }));
+        let comments = app.comments_state.ready().unwrap();
+        assert_eq!(comments.comments.len(), 2);
+        assert!(!comments.has_more);
     }
 
     #[test]

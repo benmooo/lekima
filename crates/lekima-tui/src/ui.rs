@@ -1471,7 +1471,7 @@ fn draw_footer(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         Mode::Queue => ("QUEUE", queue_hints(theme, area.width)),
         Mode::Comments => (
             "COMMENTS",
-            "j/k scroll · ctrl-d/u page · r refresh · C/esc close".to_owned(),
+            "j/k scroll · ctrl-d/u page · n more · r refresh · C/esc close".to_owned(),
         ),
         Mode::Settings => (
             "UI",
