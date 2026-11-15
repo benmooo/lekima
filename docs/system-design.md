@@ -1,6 +1,7 @@
 # lekima — System Design
 
-Status: **Draft for v0.1** · Companion to [`product-design.md`](./product-design.md)
+Status: **Living document** — up to date through 0.3.0 · Companion to
+[`product-design.md`](./product-design.md)
 
 ---
 
@@ -108,7 +109,7 @@ classDiagram
   class Playlist { PlaylistId id; String name; u64 track_count; Option~String~ owner }
   class UserProfile { UserId id; String nickname; Option~String~ avatar_url }
   class Queue { Vec~Track~ tracks; Option~usize~ current }
-  class PlaybackState { PlaybackStatus status; Option~Track~ track; u64 position_ms; f32 volume; bool muted; RepeatMode repeat; bool shuffle }
+  class PlaybackState { PlaybackStatus status; Option~Track~ track; u64 position_ms; f32 volume; bool muted; RepeatMode repeat; bool shuffle; Vec~BufferedRange~ buffered }
   Queue --> Track
   PlaybackState --> Queue
 ```
@@ -223,24 +224,45 @@ sequenceDiagram
 ### 6.4 Audio pipeline
 
 ```
-stream URL ── reqwest GET (UA + Referer, cookie) ──► bytes
-   │                                                  │
-   │  (v0.1) full body, capped by Content-Length       │
-   └──────────────► rodio Decoder (symphonia) ──► Sink ──► OutputStream
+stream URL ── reqwest GET (UA + Referer, cookie) ──► bytes / spooled file
+   │                                                        │
+   │  ≤ 64 MiB: decode from memory                          │
+   │  larger/unknown: sparse spool + range worker          │
+   └──────────────► Decoder (symphonia) ──► Sink ──► OutputStream
                                                   │
                               volume / pause / try_seek / empty() poll
 ```
 
 Decisions:
 
-- **v0.1**: download the body fully before decoding. NetEase URLs are
-  HTTP-range-capable but full download is the smallest correct implementation;
-  `Content-Length` is checked against `LEKIMA_MAX_TRACK_BYTES` (default 64 MiB).
-- **v0.2**: progressive streaming via `reqwest::Response::bytes_stream()` into a
-  bounded channel feeding `Decoder`. Enables instant start and seek on large
-  lossless files.
-- Seek: `Sink::try_seek` when the decoder supports it; the UI additionally
-  updates `position_ms` optimistically and reconciles on the next status poll.
+- Streams with a known length up to `LEKIMA_MAX_TRACK_BYTES` (64 MiB) are read
+  into memory before decoding. Larger or unknown-length streams spool to an
+  anonymous temp file and start once `SPOOL_THRESHOLD` (512 KiB) is buffered,
+  falling back to `buffering` if the network stalls.
+- `PrefetchSource` runs the decoder on a background thread so the audio callback
+  never performs I/O. A sparse spool tracks which byte ranges have arrived.
+- Seeking within the buffered region is immediate; a seek beyond it asks the
+  range worker for an HTTP `Range` fetch of the target and surfaces `buffering`
+  until the decoder can continue.
+- The spool exposes its merged byte ranges; the audio adapter maps them to track
+  time (`buffered_ranges`) and the core publishes them as
+  `PlaybackState.buffered`, letting frontends shade what is already local.
+- Gapless: when the next queued track fits the preload budget and matches the
+  sample rate, its source is prepared and appended to the same rodio queue; a
+  boundary source advances core state on the first sample. Only one preload is
+  held at a time, keyed by track id; a second request for the same position is
+  a no-op, so volume/shuffle/repeat commands cannot enqueue the next track
+  twice. A stale boundary (queue edit or manual jump) stops the audio and
+  continues with the queue's next entry instead of replaying the track that
+  just ended, so lyrics and audio cannot diverge.
+- The boundary payload is the preloaded **track id**. A boundary for the
+  current track is ignored (manual `n` racing the rollover), a boundary for the
+  queue's next track advances, and anything else is stale. FM advances with
+  `RepeatMode::Off` regardless of the stored repeat mode, so a finite station
+  batch cannot wrap repeat-all back to old tracks.
+- Loads and stops clear the audio boundary flag before the next source is
+  appended; otherwise a boundary fired just before a manual jump could skip a
+  queue entry.
 - Device errors (`NoDevice`, `DeviceBusy`) map to `ErrorCode::Playback` with a
   hint; `lekima doctor` enumerates devices.
 - The output stream is kept alive for the daemon’s lifetime; one sink per track,
@@ -248,9 +270,9 @@ Decisions:
 
 ## 7. IPC protocol
 
-Line-delimited JSON over a Unix stream socket. Requests are connection-per-call
-in v0.1; protocol v2 adds a `hello` handshake, `subscribe` and sequenced event
-frames on a dedicated connection.
+Line-delimited JSON over a Unix stream socket. Requests are connection-per-call;
+protocol v2 adds a `hello` handshake, `subscribe` and sequenced event frames on a
+dedicated connection.
 
 ```jsonc
 // client → daemon
@@ -272,7 +294,9 @@ Properties:
   `subscribe {kinds, since}` acks and then streams `{seq, type, …}` frames.
   The daemon keeps a 256-frame replay ring, coalesces nothing at the socket and
   sends a `resync` frame when a subscriber lags. `lekima watch` prints NDJSON;
-  the TUI subscribes and keeps a 10 Hz status poll for the waveform.
+  the TUI subscribes and keeps a 20 Hz status poll for the spectrum.
+- Background changes publish events too: FM prefetch emits a `queue` frame when
+  it appends a batch, and gapless/auto advance emits both `status` and `queue`.
 - **MCP**: `lekima mcp` speaks JSON-RPC over stdio and maps 13 tools onto the
   same IPC commands; it owns no state and never reads the session file.
 
@@ -297,25 +321,23 @@ Security:
 
 ### 8.1 Extending `ncmapi-rs`
 
-`ncmapi` 1.2 is published. 1.1 added playlist detail/paging, lyrics and QR
+`ncmapi` 1.6 is published. 1.1 added playlist detail/paging, lyrics and QR
 login; 1.2 added daily recommendations, personal FM, likes and toplists.
-Endpoint calls that mutate state or whose answer changes between identical
-requests (QR polling, FM batches, likes, trashes) are marked `.uncacheable()`
-so the transport's request-hash cache cannot replay stale answers.
+`ncmapi` resolves catalogue data and stream URLs; byte-range fetching for
+seekable spools lives in `lekima-audio`, not the provider crate. Endpoint calls
+that mutate state or whose answer changes between identical requests (QR
+polling, FM batches, likes, trashes) are marked `.uncacheable()` so the
+transport's request-hash cache cannot replay stale answers.
 
 | Endpoint | Route | Used by |
 | --- | --- | --- |
-| QR login start/poll | `/eapi/login/qrcode/unikey`, `/eapi/login/qrcode/client/login` (`type: 3`) | `lekima login --qr` — **done in 1.3.0** |
+| QR login start/poll | `/eapi/login/qrcode/unikey`, `/eapi/login/qrcode/client/login` (`type: 3`) | `lekima login --qr` — **done in 1.3** |
 | Playlist detail with tracks | `/api/v6/playlist/detail` + `/api/v3/song/detail` | `playlist show`, sidebar — **done in 1.1** |
 | Lyrics | `/api/song/lyric` | `lekima lyrics` — **done in 1.1** |
-| Daily recommendations | `/api/v3/discovery/recommend/songs` | Home / `lekima daily` — **provider in 1.2** |
-| Personal FM | `/weapi/v1/radio/get`, `/weapi/radio/trash/add` | `lekima fm` — **provider in 1.2** |
-| Likes | `/api/radio/like`, `/weapi/song/like/get` | `lekima like` / liked playlist — **provider in 1.2** |
-| Toplists | `/api/toplist` | Home sidebar — **provider in 1.2** |
-| Daily recommendations | `/api/v3/discover/recommend` | Daily section — next |
-| Personal FM | `/api/v1/radio/get` | FM section — next |
-| Like / unlike | `/api/radio/like` | track actions (`f`) — next |
-| Toplists | `/api/toplist` | sidebar — next |
+| Daily recommendations | `/api/v3/discovery/recommend/songs` | Home / `lekima daily` — **done in 1.2** |
+| Personal FM | `/weapi/v1/radio/get`, `/weapi/radio/trash/add` | `lekima fm` — **done in 1.2** |
+| Likes | `/api/radio/like`, `/weapi/song/like/get` | `lekima like` / liked playlist — **done in 1.2** |
+| Toplists | `/api/toplist` | Home sidebar — **done in 1.2** |
 
 Note: `/api/playlist/track/all` is no longer served (404). Playlist detail
 returns the full ordered `trackIds` list; pages are sliced locally and hydrated
@@ -343,7 +365,7 @@ quality = "exhigh"   # standard | higher | exhigh | lossless
 autoplay = true
 
 [ui]
-theme = "cyber"          # cyber | amber | mono (NO_COLOR forces mono)
+theme = "cyber"          # cyber | amber | mono | light | … (LEKIMA_THEME wins)
 alternate_screen = true
 show_help_on_start = false
 
@@ -354,6 +376,8 @@ log_level = "info"
 
 Precedence: defaults → file → environment (`LEKIMA_CONFIG_DIR`,
 `LEKIMA_SOCKET`, `LEKIMA_LOG`, `LEKIMA_THEME`, `NO_COLOR`). Flags win over all.
+`LEKIMA_THEME` accepts a palette name, `light`, `dark` or `auto`; `NO_COLOR`
+forces mono and wins over both.
 
 Files: `config.toml`, `session.cookies` (0600), `lekima.log`, `cache/`
 (response cache, future offline metadata). Nothing outside the root is written.
@@ -392,9 +416,10 @@ from provider data; messages are structured and rendered by the frontend.
    in argv, never logged, redacted in error payloads, cleared by `logout`.
 2. `lekima login` accepts stdin/file only (`--cookie-file -`), warns when a TTY
    is absent and stdin is empty.
-3. Terminal injection: sanitize all provider strings (strip C0/C1, ESC, OSC/CSI,
-   bidi overrides) before rendering or printing. Unit-tested with hostile
-   fixtures.
+3. Terminal injection: `lekima_domain::sanitize_line` strips C0/C1, ANSI
+   escape sequences, bidi overrides and zero-width controls. Provider mapping
+   applies it on the way in; the TUI and human CLI output also sanitize before
+   writing. Unit-tested with hostile fixtures.
 4. No telemetry, no analytics, no phone-home. Provider requests go only to
    NetEase hosts.
 5. `#![forbid(unsafe_code)]` in every first-party crate.
@@ -409,7 +434,7 @@ from provider data; messages are structured and rendered by the frontend.
 | CLI cold start (`status`) | < 100 ms | hyperfine in CI benchmark |
 | Key → screen update | < 16 ms | `TestBackend` frame timing |
 | Daemon idle RSS | < 40 MB | CI on Linux |
-| Daemon RSS while playing | < 80 MB (128 kbps), < 200 MB (lossless, v0.1 full download) | manual |
+| Daemon RSS while playing | < 80 MB (128 kbps), < 200 MB (lossless, spooled to disk) | manual |
 | Provider search | < 800 ms p50 | tracing histogram |
 | Socket round-trip | < 2 ms p99 local | tracing |
 | Status poll rate | 2 Hz idle, 4 Hz visible, 0 when TUI hidden | code review |
@@ -471,38 +496,39 @@ account.
 | TUI killed with SIGKILL | Terminal may be left in raw mode; `lekima doctor --fix` and `reset` documented |
 | Malformed provider JSON | Mapping returns `Unavailable`, never panics |
 
-## 17b. Sprint 2
+## 17b. Sprint documents
 
 The TUI's visual language is defined in
 [`sprint-2/tui-visual-design.md`](./sprint-2/tui-visual-design.md): a HUD line,
 a rule, dense lists and a command bar, with no boxed chrome.
 
-
-Design for the next increment lives in
-[`sprint-2/system-design.md`](./sprint-2/system-design.md): protocol v2 push
-events, FM queue mode, likes, daily/toplists, lyrics pane and the MCP server.
+Sprints 2–5 are shipped; their designs live in `sprint-2/` through `sprint-5/`.
+No next increment is designed yet.
 
 ## 18. What exists today (honest status)
 
-All eight crates build and are covered by 35 unit tests, 24 `ncmapi` contract
-tests, TUI render tests and CLI contract tests (`cargo test --workspace`).
+All nine crates build and are covered by unit, IPC, TUI render and CLI contract
+tests (`cargo test --workspace`).
 
 Working end to end against the live provider:
 
-- search, stream URL resolution, playlist listing, full playlist paging, lyrics
+- search, stream URL resolution, playlist listing and paging, timed lyrics with
+  optional translations
+- daily recommendations, personal FM (prefetch/trash), likes, toplists and the
+  music cloud
 - playback (rodio/CoreAudio verified), pause/resume/stop/next/prev/seek/volume,
-  repeat cycle, queue add/jump/clear, auto-advance on track end
+  repeat cycle, queue add/remove/move/jump/clear, auto-advance on track end
+- streaming spool for large tracks with `loading`/`buffering` states, range
+  seeks, gapless preload, sleep timer, live quality switching and output device
+  selection
+- OS media integration: MPRIS on Linux, Now Playing and media keys on macOS
 - daemon lifecycle (autostart, socket permissions, SIGTERM, log file, autostart
   race handling), CLI JSON contract and exit codes, `doctor`, `capabilities`,
   completions, `login --qr`, `login --cookie-file -`, `logout`
-- TUI: header/progress, track table, sidebar playlists, queue overlay, search
+- TUI: HUD, real spectrum, track table, sidebar, queue and lyrics panes, history,
+  settings palette, twelve themes (including a light terminal palette), search
   prompt, `:` command line, help overlay, vim keys
+- sequenced push events (`lekima watch`) and an MCP stdio server (`lekima mcp`)
 
-`ncmapi` 1.2 provides daily recommendations, personal FM, likes and toplists at
-the provider layer; wiring them into the daemon/TUI is sprint 2 work.
-
-Sprint-2 is complete: daily, FM (prefetch/trash), optimistic likes, toplists,
-music cloud, timed lyrics pane, real RMS waveform, sequenced push events with
-`lekima watch`, an MCP stdio server, an in-TUI settings palette, and back/forward
-history. The TUI polls status at 10 Hz while playing for the waveform and also
-consumes events for immediate track/queue/like updates.
+The TUI polls status at 20 Hz while playing for the spectrum and also consumes
+events for immediate track/queue/like updates.

@@ -2,8 +2,8 @@
 
 > NetEase Cloud Music in your terminal. Vim-first, agent-native.
 
-Status: **Draft for v0.1** · Owner: @benmooo · Rewrite of the archived Go project
-[`benmooo/lekima`](https://github.com/benmooo/lekima)
+Status: **Living document** — shipped through 0.3.0 · Owner: @benmooo · Rewrite
+of the archived Go project [`benmooo/lekima`](https://github.com/benmooo/lekima)
 
 ---
 
@@ -70,7 +70,7 @@ provider, done well, with a UI that never gets in the way.
 
 ## 4. Scope
 
-### v0.1 — “it plays” (current milestone)
+### v0.1 — “it plays” (shipped in 0.1.0)
 
 | Area | Included |
 | --- | --- |
@@ -82,7 +82,7 @@ provider, done well, with a UI that never gets in the way.
 | CLI | Every action above as a subcommand, `--json`, stable exit codes, daemon autostart |
 | Ops | `doctor`, `daemon start/stop/status`, log file, `LEKIMA_CONFIG_DIR` for hermetic use |
 
-### v0.2 — “it feels finished”
+### v0.2 — “it feels finished” (shipped in 0.2.0)
 
 > Detailed specification: [`sprint-2/product-design.md`](./sprint-2/product-design.md)
 > and [`sprint-2/system-design.md`](./sprint-2/system-design.md).
@@ -91,12 +91,19 @@ Synced lyrics pane, daily recommendations, personal FM, liked playlist,
 like/unlike, playlist search, mouse-optional scroll, themes, `NO_COLOR`,
 `lekima mcp` stdio server, push events from the daemon instead of polling.
 
+### v0.3 — “platform integration” (shipped in 0.3.0)
+
+> Detailed specification: [`sprint-5/`](./sprint-5/).
+
+MPRIS on Linux, Now Playing and media keys on macOS, output device selection,
+range seeks for streamed tracks, and gapless playback for matching formats.
+
 ### Later
 
-Comments pane (“hot comments” was in the original), cloud disk, toplists,
-downloads for offline cache, MPRIS/D-Bus + macOS Now Playing integration,
+Comments pane (“hot comments” was in the original), downloads for offline cache,
 desktop notifications, Last.fm scrobbling, multiple profiles, plugin hooks,
-`lekima serve --http` for LAN control, WASM/embedded agent tooling.
+`lekima serve --http` for LAN control, Windows native support, WASM/embedded
+agent tooling.
 
 ### Explicit non-goals
 
@@ -158,13 +165,17 @@ Global — `q`/`Ctrl-c` quit, `?` help, `/` search, `:` command line,
 | `A` | Play next (insert after current) |
 | `x` | Remove selected queued track (with confirm) |
 | `l` / `h` | Seek forward / back 10 s (also `→`/`←`) |
-| `1`…`4` | Focus sidebar / main / queue / lyrics (v0.2) |
+| `Ctrl-w 1`…`4` | Focus sidebar / main / queue / lyrics (digits stay counts) |
 | `Q` | Show queue pane |
 | `y` | Yank track URL/ID to clipboard (v0.2) |
 | `P` | Toggle provider panel? (removed — `P` in the original was play mode) |
 
 > Compatibility note: the archived app used `o`/`Enter` to expand the playlist
 > tree. We keep `o` as “open” alias for muscle memory.
+>
+> Queue mode is a peer view, not a modal: `Space`, `n/p`, `h/l`, `m`, `r`, `s`,
+> `+/-` and `L` keep working while it is open, and `Enter` leaves it open. The
+> selection follows the playing entry until `j/k` takes over.
 
 ### 5.3 Interaction states
 
@@ -183,12 +194,13 @@ Global — `q`/`Ctrl-c` quit, `?` help, `/` search, `:` command line,
 - Every control is reachable by keyboard; no key requires a modifier combo that
   terminals commonly swallow.
 - Colour is never the only signal (icons + text).
-- `NO_COLOR`, `LEKIMA_THEME=light|dark|none`, and a monochrome-safe theme.
+- `NO_COLOR`, `LEKIMA_THEME=light|dark|auto|<palette>` (twelve palettes,
+  including a light-terminal theme), and a monochrome-safe theme.
 - Alternate screen is configurable; on exit the terminal is always restored
   (panic-safe guard).
-- Catalogue text is sanitized: C0/C1 control characters and OSC/CSI sequences
-  are stripped before rendering, preventing terminal escape injection from
-  playlist or track names.
+- Catalogue text is sanitized: C0/C1 control characters, ANSI/OSC sequences,
+  bidi overrides and zero-width characters are stripped before rendering,
+  preventing terminal escape injection from playlist or track names.
 
 ## 6. Agent contract
 
@@ -209,7 +221,7 @@ This is a product feature, not an afterthought. Rules:
 7. **No secrets in argv.** `lekima login` reads the cookie from stdin or a file,
    not `--cookie=<secret>` on the command line (the flag accepts `-` for stdin).
 
-### Command surface (v0.1)
+### Command surface (v0.1; `lekima capabilities --json` has the current list)
 
 ```
 lekima tui                                  open the interactive player
@@ -297,11 +309,13 @@ tools for agents that prefer tool calls over shell.
 | Milestone | Contents | Exit criteria |
 | --- | --- | --- |
 | **M0 Skeleton** (done) | Workspace, domain, config, IPC, core player rules | `cargo test` green |
-| **M1 Playback** | ncm adapter, rodio engine, daemon, CLI play/status | Sound from the CLI |
-| **M2 TUI** | ratatui shell, keymap, search, queue, help | Daily-drivable |
-| **M3 Agent surface** | JSON everywhere, capabilities, exit codes, doctor | Scripted demo passes |
-| **M4 Provider completeness** | ncmapi-rs 1.1: QR login, playlist detail, lyrics (done); daily/FM/like next | TUI feature parity with old app |
-| **M5 Release** | Packaging, docs, CI matrix, 0.1.0 tag | Installable from crates.io + release binaries |
+| **M1 Playback** (done) | ncm adapter, rodio engine, daemon, CLI play/status | Sound from the CLI |
+| **M2 TUI** (done) | ratatui shell, keymap, search, queue, help | Daily-drivable |
+| **M3 Agent surface** (done) | JSON everywhere, capabilities, exit codes, doctor | Scripted demo passes |
+| **M4 Provider completeness** (done) | QR login, playlist detail, lyrics, daily/FM/like/toplist | TUI feature parity with old app |
+| **M5 Release** (done, 0.1.0) | Packaging, docs, CI matrix, tag | Installable from crates.io + release binaries |
+| **M6 Playback depth** (done, 0.2.0) | Streaming spool, buffering, large files, sleep timer, quality switching | 0.2.0 shipped |
+| **M7 Platform** (done, 0.3.0) | Device picker, range seeks, gapless, MPRIS/Now Playing | 0.3.0 shipped |
 
 ## 9. Risks & mitigations
 
@@ -317,14 +331,10 @@ tools for agents that prefer tool calls over shell.
 
 ## 10. Open questions
 
-1. **Name.** The rewrite is called `lekima` for continuity; the binary is
-   `lekima`. Confirm before the first publish (renaming a crate later is a
-   breaking change).
-2. **Default UI density.** Do we keep the original’s always-visible sidebar, or
+1. **Default UI density.** Do we keep the original’s always-visible sidebar, or
    start in a single-pane “just the queue” mode?
-3. **Comments pane.** Beloved in the original; expensive to maintain. v0.3?
-4. **Lyrics rendering.** Synced highlighting requires a timed LRC parser — worth
-   the dependency, or plain text first?
-5. **Windows.** WSL only, or native named pipes in v1.0?
-6. **Publishing.** `ncmapi` 1.1 is published; `lekima` 0.1 itself still needs its
-   first crates.io release.
+2. **Comments pane.** Beloved in the original; expensive to maintain. A
+   candidate for a later sprint, not scheduled.
+3. **Windows.** WSL only, or native named pipes and SMTC in a later release?
+4. **Next theme.** Nothing is scheduled for 0.4 yet; offline cache, desktop
+   notifications and scrobbling are the leading candidates.

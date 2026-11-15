@@ -21,11 +21,6 @@ $ lekima status --json
 {"ok":true,"data":{"status":"playing","track":{…},"volume":0.7}}
 ```
 
-## Status
-
-`0.2.0` adds streaming playback for large files, a sleep timer and live quality switching. `0.1.1` was the first public release: crates.io, GitHub release binaries and a
-Homebrew tap. See [install](docs/install.md) and [first run](docs/first-run.md).
-
 ## Design documents
 
 - [`docs/product-design.md`](docs/product-design.md) — users, principles, feature
@@ -33,10 +28,11 @@ Homebrew tap. See [install](docs/install.md) and [first run](docs/first-run.md).
 - [`docs/system-design.md`](docs/system-design.md) — crate graph, playback state
   machine, daemon lifecycle, IPC protocol, provider adapter, security, testing,
   ADRs.
-- [`docs/sprint-2/`](docs/sprint-2/) — **design only**: product and system design
-  for daily/FM/likes/toplists/lyrics pane, push events, `lekima watch` and MCP.
+- [`docs/sprint-2/`](docs/sprint-2/) — **Provider depth** (shipped in 0.2.0):
+  daily/FM/likes/toplists/lyrics pane, push events, `lekima watch` and MCP.
 - [`docs/sprint-2/tui-visual-design.md`](docs/sprint-2/tui-visual-design.md) —
-  the console/HUD visual language (`cyber`, `amber`, `mono` themes).
+  the console/HUD visual language (`cyber`, `amber`, `mono`, `light` and eight
+  more palettes).
 - [`docs/terminal-setup.md`](docs/terminal-setup.md) — font families, sizes and
   profiles for iTerm2, Ghostty, kitty, Alacritty and WezTerm.
 - [`docs/sprint-3/`](docs/sprint-3/) — **Ship 0.1**: distribution, CI,
@@ -45,6 +41,10 @@ Homebrew tap. See [install](docs/install.md) and [first run](docs/first-run.md).
   buffering, large files, sleep timer, quality switching.
 - [`docs/sprint-5/`](docs/sprint-5/) — **Platform integration**: MPRIS/Now
   Playing, device picker, range seeks, gapless.
+- [`docs/tui-backlog.md`](docs/tui-backlog.md) — TUI rendering, interaction and
+  accessibility gaps against the visual design, ordered by priority.
+- [`docs/sprint-6/`](docs/sprint-6/) — **TUI correctness** (implemented):
+  responsiveness, accessibility, queue confirmation, sanitization.
 - [`docs/releasing.md`](docs/releasing.md) — release flow, including
   `--registry crates-io` on this USTC-mirrored machine.
 - [`docs/sessions/`](docs/sessions/) — archived OpenCode sessions (this rewrite,
@@ -52,10 +52,18 @@ Homebrew tap. See [install](docs/install.md) and [first run](docs/first-run.md).
 
 ## Status
 
+`0.3.0` adds OS media integration (MPRIS on Linux, Now Playing and media keys
+on macOS), output device selection, range seeks for streamed tracks and gapless
+playback. Earlier releases added streaming, a sleep timer, live quality
+switching, and the agent surface. `0.1.1` was the first public release:
+crates.io, GitHub release binaries and a Homebrew tap. See
+[install](docs/install.md) and [first run](docs/first-run.md).
+
 Working: search, playlists, timed lyrics, QR/cookie login, daily mix, personal
 FM, likes, charts, the music cloud, playback through a background daemon, a
-vim-driven TUI (HUD, real waveform, lyrics pane, history, UI settings, eleven
-themes), push events (`lekima watch`) and an MCP stdio server (`lekima mcp`). `ncmapi` 1.5 is
+vim-driven TUI (HUD, real spectrum, lyrics pane, history, UI settings, twelve
+themes), device selection, gapless playback, MPRIS/Now Playing, push events
+(`lekima watch`) and an MCP stdio server (`lekima mcp`). `ncmapi` 1.6 is
 published on crates.io.
 
 ```console

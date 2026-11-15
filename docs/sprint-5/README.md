@@ -5,8 +5,7 @@
 | [`product-design.md`](./product-design.md) | MPRIS/Now Playing, device picker, range seeks, gapless, phasing |
 | [`system-design.md`](./system-design.md) | Platform crate, MPRIS mapping, run-loop, sparse spool, gapless queue |
 
-Status: **In progress — 5.1 device picker, 5.2 MPRIS, 5.3 macOS Now Playing,
-5.4 range seeks and 5.5 gapless landed.**
+Status: **Shipped in 0.3.0.**
 
 - `lekima devices [--json]` lists outputs; `lekima audio-device <name|default>`
   persists `[audio] device` and restarts the daemon.
@@ -21,4 +20,5 @@ Status: **In progress — 5.1 device picker, 5.2 MPRIS, 5.3 macOS Now Playing,
   `lekima media-host` helper with an accessory `NSApplication` run loop that
   publishes Now Playing info and forwards media keys. Verified live with
   `nowplaying-cli`.
-- Remaining: 0.3.0 release (crates, tag, binaries, Homebrew).
+- Released: crates.io 0.3.0, a GitHub release with four binaries plus checksums,
+  and the Homebrew tap.

@@ -3,6 +3,9 @@
 Status: **Adopted** · Supersedes the boxed-panel layout inherited from the
 archived Go player.
 
+Known gaps between this specification and the implementation are tracked in
+[`../tui-backlog.md`](../tui-backlog.md).
+
 The first TUI draft looked like the old `termui` app: a bordered header, a
 bordered sidebar, a bordered table, a bordered footer. It worked, but it felt
 like a 2019 dashboard. This document defines a different identity: a **terminal
@@ -41,8 +44,9 @@ Default theme `cyber`, all colours on the terminal’s own background:
 | `panel` | `#007A64` | `//` section markers, table headers |
 | `badge_fg/bg` | `#000000` / `#00FF9C` | mode badge and brand chip |
 
-Alternates: `amber` (VT220 phosphor) and `mono` (`NO_COLOR`, no RGB at all).
-Configure with `[ui] theme = "cyber" | "amber" | "mono"`; `NO_COLOR` forces mono.
+Alternates: `amber` (VT220 phosphor), `light` for light terminals, and `mono`
+(`NO_COLOR`, no RGB at all). Configure with `[ui] theme = …`; `LEKIMA_THEME`
+accepts a palette name, `light`, `dark` or `auto`, and `NO_COLOR` forces mono.
 
 Colour is never the only signal:
 
@@ -107,7 +111,8 @@ terminals; the title is clipped first only when the terminal is very small.
 
 - Brand chip (` LEKIMA `), state glyph, bold title, artist.
 - A 12-cell progress rail with a distinct playhead (`━━━━●──────`), followed by
-  `position/duration`.
+  `position/duration`. Locally buffered cells use the `panel` colour so a
+  streamed track shows what is available before it is played.
 - Mode badges: `[⟲ OFF|ALL|1]` (dim / cyan / accent) and `[⇄]` (hot when on,
   dim when off). Playhead `●`; ASCII mode uses `>` with `=`/`-` rails.
 - `VOL` meter, queue count, quality class (`EXHIGH`), sleep countdown, then a
@@ -128,6 +133,8 @@ terminals; the title is clipped first only when the terminal is very small.
 ### Lists and tables
 
 - No surrounding block. A section label line sits above the list.
+- Pane keys: `Ctrl-w 1` library, `Ctrl-w 2` list, `Ctrl-w 3` queue,
+  `Ctrl-w 4` lyrics. Digits after `Ctrl-w` never become a count prefix.
 - Table header: `#`, blank marker column, `TITLE`, `ARTIST`, `TIME` in `panel`.
 - Row: dim index, marker column (only the playing track has one), title `text`,
   artist `muted`, duration `dim`.
@@ -150,11 +157,14 @@ terminals; the title is clipped first only when the terminal is very small.
 
 ### Settings palette
 
-- `S` opens a centred double-border overlay (`▓ UI ▓`) listing THEME, GLYPHS
-  and DENSITY as `< value >` rows. Eleven themes: cyber, amber, mono, dracula,
-  gruvbox, nord, synthwave, matrix, solarized, tokyonight, catppuccin.
+- `S` opens a centred double-border overlay (`▓ UI ▓`) listing THEME, GLYPHS,
+  DENSITY and TRANSLATION as `< value >` rows. Twelve themes: cyber, amber,
+  mono, dracula, gruvbox, nord, synthwave, matrix, solarized, tokyonight,
+  catppuccin and light.
 - `j/k` select, `h/l` or `Enter` cycle, `Esc` closes. Changes apply immediately
-  and are written to `config.toml` when the TUI exits.
+  and are written to `config.toml` when the TUI exits. The selected theme shows a
+  two-cell accent swatch and the active source (`config.toml`, `LEKIMA_THEME` or
+  `NO_COLOR`).
 - `:theme`, `:glyphs`, `:density` do the same from the command line.
 
 ### History
@@ -177,8 +187,13 @@ terminals; the title is clipped first only when the terminal is very small.
 
 ### Queue
 
-- Same list grammar as tracks, with `▶` on the current entry.
-- Title `// QUEUE · n`.
+- Same list grammar as tracks, with `▶` on the current entry, dimmed rows for
+  entries already played, and the selection gutter on the row being edited.
+- Title `// QUEUE · n · 12/25 · 1:02:10 left`, plus a focus tick.
+- The selection follows the playing entry until `j/k`/`g/G`/`J/K` move it.
+- `Enter` jumps and keeps the queue open; `Esc` closes it. Transport keys
+  (`Space`, `n/p`, `h/l`, `m`, `r`, `s`, `+/-`, `L`) work without leaving the
+  queue, and `x` asks for `y/N` before removing an entry.
 
 ### Footer
 
@@ -226,7 +241,10 @@ terminals; the title is clipped first only when the terminal is very small.
 ## 7. Accessibility
 
 - `NO_COLOR` or `theme = "mono"` yields white/gray with reversed selection and
-  identical glyphs.
+  identical glyphs. The `light` palette keeps dark text for light terminals.
+- ASCII glyph mode also uses `|` separators, plain overlay titles and `Enter`
+  instead of `⏎`; box-drawing borders stay because terminals that need ASCII
+  glyphs still render them acceptably.
 - Contrast: neon on the terminal background, never neon-on-neon text.
 - Information is always double-encoded (glyph + colour, `//` + weight).
 - No key requires a mouse; no key chord conflicts with tmux (`Ctrl-b` is not
@@ -263,7 +281,7 @@ terminals; the title is clipped first only when the terminal is very small.
 - [x] Overlays use the double border and magenta title.
 - [x] `mono` and `NO_COLOR` render identically in structure.
 - [x] Render tests cover empty, playing, narrow, tiny, search, queue and toast states.
-- [x] Signal bars animate at 10 Hz from real RMS; paused/stopped are distinct.
+- [x] Signal bars animate at 20 Hz from the real FFT; paused/stopped are distinct.
 - [x] Sidebar uses key chips and right-aligned playlist counts.
 - [x] Back/forward history on `Ctrl-o` / `Ctrl-i`.
 - [x] ASCII glyphs and comfortable density are configurable.
