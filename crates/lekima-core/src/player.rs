@@ -171,6 +171,7 @@ impl Player {
                 .is_some_and(|track| liked.contains(&track.id)),
             loading: inner.loading,
             buffering: self.audio.is_buffering(),
+            cached: self.audio.last_was_cached(),
             quality: *self.quality.lock().await,
             sleep_remaining_ms: None,
             wave: self.audio.wave(),
@@ -318,18 +319,23 @@ impl Player {
         let _ = self.audio.stop();
 
         let quality = *self.quality.lock().await;
-        let url = match self.music.stream_url(track.id, quality).await {
-            Ok(url) => url,
-            Err(error) => {
-                self.fail_load(generation).await;
-                return Err(error);
+        let cache_key = format!("{}-{}", track.id.get(), quality.as_str());
+        let url = if self.audio.has_cached(&cache_key) {
+            String::new()
+        } else {
+            match self.music.stream_url(track.id, quality).await {
+                Ok(url) => url,
+                Err(error) => {
+                    self.fail_load(generation).await;
+                    return Err(error);
+                }
             }
         };
         if self.is_stale(generation).await {
             return Ok(());
         }
 
-        if let Err(error) = self.audio.play_url(&url).await {
+        if let Err(error) = self.audio.play_url(&url, Some(&cache_key)).await {
             self.fail_load(generation).await;
             return Err(error);
         }
@@ -561,7 +567,9 @@ impl Player {
             *preloaded = Some(id);
         }
 
-        if let Err(error) = self.audio.queue_next_url(id, url).await {
+        let quality = *self.quality.lock().await;
+        let cache_key = format!("{}-{}", id.get(), quality.as_str());
+        if let Err(error) = self.audio.queue_next_url(id, url, Some(&cache_key)).await {
             let mut preloaded = self.preloaded.lock().await;
             if *preloaded == Some(id) {
                 *preloaded = None;
@@ -677,6 +685,13 @@ impl Player {
     #[must_use]
     pub async fn quality(&self) -> Quality {
         *self.quality.lock().await
+    }
+
+    /// True when this track/quality is already in the persistent cache.
+    #[must_use]
+    pub fn has_cached(&self, id: TrackId, quality: Quality) -> bool {
+        self.audio
+            .has_cached(&format!("{}-{}", id.get(), quality.as_str()))
     }
 
     /// Daily recommendations, played immediately.
@@ -935,7 +950,7 @@ mod tests {
 
     #[async_trait]
     impl AudioEngine for StubAudio {
-        async fn play_url(&self, url: &str) -> Result<()> {
+        async fn play_url(&self, url: &str, _cache_key: Option<&str>) -> Result<()> {
             *self.last_url.lock().unwrap() = Some(url.to_owned());
             self.playing.store(true, Ordering::SeqCst);
             self.finished.store(false, Ordering::SeqCst);
@@ -982,7 +997,12 @@ mod tests {
             self.playing.load(Ordering::SeqCst)
         }
 
-        async fn queue_next_url(&self, _id: TrackId, _url: &str) -> Result<()> {
+        async fn queue_next_url(
+            &self,
+            _id: TrackId,
+            _url: &str,
+            _cache_key: Option<&str>,
+        ) -> Result<()> {
             self.queued.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }

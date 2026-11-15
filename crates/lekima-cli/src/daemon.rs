@@ -57,6 +57,11 @@ pub async fn run(paths: &Paths, config: &Config, socket: &Path, _detached: bool)
         lekima_audio::RodioAudioEngine::open(
             config.playback.volume,
             config.audio.device.as_deref(),
+            lekima_audio::StreamCache::new(
+                paths.cache_dir().join("streams"),
+                config.cache.limit_mb,
+                config.cache.enabled,
+            ),
         )
         .map_err(|error| anyhow::anyhow!(error.to_string()))?,
     );
@@ -306,7 +311,7 @@ impl Daemon {
                 protocol: protocol.min(2),
                 seq: self.hub.seq.load(Ordering::SeqCst),
                 capabilities: [
-                    "events", "daily", "fm", "like", "toplists", "cloud", "lyrics",
+                    "events", "daily", "fm", "like", "toplists", "cloud", "lyrics", "comments",
                 ]
                 .iter()
                 .map(|capability| (*capability).to_owned())
@@ -424,6 +429,18 @@ impl Daemon {
                 Ok(Reply::Lyrics {
                     id: track_id,
                     lyrics,
+                })
+            }
+            Command::Comments { id, limit, offset } => {
+                let track_id = self.current_track_id(id).await?;
+                let comments = self
+                    .player
+                    .music()
+                    .comments(track_id, limit.max(1), offset)
+                    .await?;
+                Ok(Reply::Comments {
+                    id: track_id,
+                    comments,
                 })
             }
             Command::Daily { play } => {
@@ -751,8 +768,18 @@ fn spawn_preloader(daemon: Arc<Daemon>) {
                 continue;
             };
             let quality = daemon.player.quality().await;
-            let url = daemon.player.music().stream_url(next.id, quality).await;
-            if let Ok(url) = url {
+            let cached = daemon.player.has_cached(next.id, quality);
+            let url = if cached {
+                String::new()
+            } else {
+                daemon
+                    .player
+                    .music()
+                    .stream_url(next.id, quality)
+                    .await
+                    .unwrap_or_default()
+            };
+            if cached || !url.is_empty() {
                 match daemon.player.queue_next(next.id, &url).await {
                     Ok(true) => tracing::debug!(track = %next.id, "preloaded next track"),
                     Ok(false) => tracing::debug!(track = %next.id, "next track already preloaded"),

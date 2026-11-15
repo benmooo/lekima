@@ -246,6 +246,38 @@ impl Quality {
     }
 }
 
+/// One public track comment.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct Comment {
+    pub id: u64,
+    pub author: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
+    pub content: String,
+    pub timestamp_ms: u64,
+    pub liked_count: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub replies: Vec<CommentReply>,
+}
+
+/// A short quoted reply attached to a comment.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct CommentReply {
+    pub author: String,
+    pub content: String,
+}
+
+/// A page of track comments, with hot entries separated.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct Comments {
+    pub total: u64,
+    pub has_more: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hot: Vec<Comment>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub comments: Vec<Comment>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Track, format_duration_ms};

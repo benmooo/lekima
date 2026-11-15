@@ -17,6 +17,12 @@ All notable changes to lekima are documented here. The format follows
   volume, quality and resume position on start.
 - TUI restart UX: offline polling continues at 1 Hz, reconnects automatically,
   and announces `daemon restarted - queue restored - space to resume`.
+- Offline stream cache: `[cache] enabled/limit_mb` (256 MiB default),
+  `<config>/cache/streams`, LRU eviction, `lekima cache status|clear|limit|on|off`,
+  cached playback with `PlaybackState.cached` / `CACHE` badge, and offline
+  fallback when the provider cannot resolve a URL.
+- Comments: `lekima comments`, MCP `comments`, TUI `C` pane with hot/all
+  sections, replies, scrolling, refresh and sanitized provider text.
 
 ### Changed
 

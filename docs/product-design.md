@@ -98,10 +98,16 @@ like/unlike, playlist search, mouse-optional scroll, themes, `NO_COLOR`,
 MPRIS on Linux, Now Playing and media keys on macOS, output device selection,
 range seeks for streamed tracks, and gapless playback for matching formats.
 
+### v0.5 — “offline and comments” (unreleased)
+
+> Detailed specification: [`sprint-8/`](./sprint-8/).
+
+A 256 MiB LRU stream cache with `lekima cache`, cached-playback fallback and a
+`CACHE` badge; public track comments in the CLI, MCP and a scrollable TUI pane.
+
 ### Later
 
-Comments pane (“hot comments” was in the original), downloads for offline cache,
-desktop notifications, Last.fm scrobbling, multiple profiles, plugin hooks,
+Desktop notifications, Last.fm scrobbling, multiple profiles, plugin hooks,
 `lekima serve --http` for LAN control, Windows native support, WASM/embedded
 agent tooling.
 
@@ -336,8 +342,6 @@ tools for agents that prefer tool calls over shell.
 
 1. **Default UI density.** Do we keep the original’s always-visible sidebar, or
    start in a single-pane “just the queue” mode?
-2. **Comments pane.** Beloved in the original; expensive to maintain. A
-   candidate for a later sprint, not scheduled.
-3. **Windows.** WSL only, or native named pipes and SMTC in a later release?
-4. **Next theme.** Nothing is scheduled for 0.4 yet; offline cache, desktop
-   notifications and scrobbling are the leading candidates.
+2. **Windows.** WSL only, or native named pipes and SMTC in a later release?
+3. **Next theme.** Nothing is scheduled after offline cache/comments; desktop
+   notifications, scrobbling and LAN control are candidates.

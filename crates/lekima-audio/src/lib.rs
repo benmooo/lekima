@@ -10,11 +10,13 @@
 //! polls the sink, which is how `is_finished` is derived without callbacks
 //! mutating application state.
 
+mod cache;
 mod engine;
 mod prefetch;
 mod spool;
 mod wave;
 
+pub use cache::{CacheStats, StreamCache};
 pub use engine::{DeviceInfo, MAX_MEMORY_BYTES, RodioAudioEngine, devices};
 pub use prefetch::PrefetchSource;
 pub use spool::{GrowingFile, Spool};

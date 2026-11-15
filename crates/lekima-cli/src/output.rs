@@ -115,6 +115,7 @@ pub fn print_reply(reply: &Reply, json: bool) {
             None => crate::say!("not signed in"),
         },
         Reply::Lyrics { lyrics, .. } => crate::say!("{}", lyrics.plain()),
+        Reply::Comments { comments, .. } => print_comments(comments),
         Reply::Toplists { toplists } => {
             for chart in toplists {
                 crate::say!(
@@ -175,10 +176,11 @@ fn print_status(state: &PlaybackState) {
         || "nothing playing".to_owned(),
         |track| {
             format!(
-                "{} — {}{}",
+                "{} — {}{}{}",
                 sanitize_line(&track.name),
                 sanitize_line(&track.artist_names()),
-                if preview { "  [PREVIEW]" } else { "" }
+                if preview { "  [PREVIEW]" } else { "" },
+                if state.cached { "  [CACHE]" } else { "" }
             )
         },
     );
@@ -212,6 +214,43 @@ fn icon(state: &PlaybackState) -> &'static str {
         lekima_domain::PlaybackStatus::Playing => "▶",
         lekima_domain::PlaybackStatus::Paused => "⏸",
         lekima_domain::PlaybackStatus::Stopped => "■",
+    }
+}
+
+pub fn print_comments(comments: &lekima_domain::Comments) {
+    let mut printed = false;
+    for (label, list) in [("hot", &comments.hot), ("all", &comments.comments)] {
+        if list.is_empty() {
+            continue;
+        }
+        printed = true;
+        crate::say!("// {label} · {}", list.len());
+        for comment in list {
+            let author = if comment.author.is_empty() {
+                "anonymous"
+            } else {
+                comment.author.as_str()
+            };
+            crate::say!(
+                "{:>5}  {}: {}",
+                comment.liked_count,
+                sanitize_line(author),
+                sanitize_line(&comment.content)
+            );
+            for reply in &comment.replies {
+                crate::say!(
+                    "       ↳ {}: {}",
+                    sanitize_line(&reply.author),
+                    sanitize_line(&reply.content)
+                );
+            }
+        }
+    }
+    if !printed {
+        crate::say!("no comments");
+    }
+    if comments.has_more {
+        crate::say!("more available · use --offset");
     }
 }
 

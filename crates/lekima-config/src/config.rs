@@ -15,6 +15,7 @@ pub struct Config {
     pub playback: PlaybackConfig,
     pub ui: UiConfig,
     pub daemon: DaemonConfig,
+    pub cache: CacheConfig,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -103,6 +104,24 @@ impl Default for DaemonConfig {
         Self {
             autostart: true,
             log_level: "info".to_owned(),
+        }
+    }
+}
+
+/// Persistent stream cache.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct CacheConfig {
+    pub enabled: bool,
+    /// Capacity in MiB. The default is 256 MiB.
+    pub limit_mb: u64,
+}
+
+impl Default for CacheConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            limit_mb: 256,
         }
     }
 }
@@ -289,6 +308,56 @@ pub fn load(path: &Path) -> Result<Config, PathError> {
             source,
         }),
     }
+}
+
+/// Persists the cache settings, preserving every other setting.
+///
+/// # Errors
+///
+/// Returns [`PathError`] when the file cannot be read, parsed or written.
+pub fn save_cache(path: &Path, enabled: bool, limit_mb: u64) -> Result<(), PathError> {
+    let mut root: toml::Value = match std::fs::read_to_string(path) {
+        Ok(raw) => toml::from_str(&raw).map_err(|source| PathError::Parse {
+            path: path.to_path_buf(),
+            source,
+        })?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            toml::Value::Table(toml::map::Map::new())
+        }
+        Err(source) => {
+            return Err(PathError::Read {
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    };
+    let table = root
+        .as_table_mut()
+        .ok_or_else(|| PathError::Structure("config root is not a table".to_owned()))?;
+    let cache = table
+        .entry("cache")
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+        .as_table_mut()
+        .ok_or_else(|| PathError::Structure("`cache` is not a table".to_owned()))?;
+    cache.insert("enabled".to_owned(), toml::Value::Boolean(enabled));
+    cache.insert(
+        "limit_mb".to_owned(),
+        toml::Value::Integer(i64::try_from(limit_mb).unwrap_or(i64::MAX)),
+    );
+    let encoded = toml::to_string_pretty(&root).map_err(|source| PathError::Serialize {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|source| PathError::Write {
+            path: parent.to_path_buf(),
+            source,
+        })?;
+    }
+    std::fs::write(path, encoded).map_err(|source| PathError::Write {
+        path: path.to_path_buf(),
+        source,
+    })
 }
 
 #[cfg(test)]

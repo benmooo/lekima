@@ -16,6 +16,7 @@ pub enum Mode {
     Help,
     Queue,
     Settings,
+    Comments,
 }
 
 /// Persisted UI choices.
@@ -129,6 +130,48 @@ impl LyricsState {
     }
 }
 
+/// Lifecycle of the comments pane for one track.
+#[derive(Debug, Clone, Default)]
+pub enum CommentsState {
+    #[default]
+    Idle,
+    Loading {
+        track: TrackId,
+    },
+    Ready {
+        track: TrackId,
+        comments: lekima_domain::Comments,
+    },
+    Empty {
+        track: TrackId,
+    },
+    Error {
+        track: TrackId,
+        message: String,
+    },
+}
+
+impl CommentsState {
+    #[must_use]
+    pub fn track(&self) -> Option<TrackId> {
+        match self {
+            Self::Idle => None,
+            Self::Loading { track }
+            | Self::Ready { track, .. }
+            | Self::Empty { track }
+            | Self::Error { track, .. } => Some(*track),
+        }
+    }
+
+    #[must_use]
+    pub fn ready(&self) -> Option<&lekima_domain::Comments> {
+        match self {
+            Self::Ready { comments, .. } => Some(comments),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct HistoryEntry {
     view: View,
@@ -148,6 +191,9 @@ pub struct App {
     pub view: View,
     pub lyrics_state: LyricsState,
     pub lyrics_open: bool,
+    pub comments_state: CommentsState,
+    pub comments_scroll: usize,
+    pub comments_view_height: u16,
     pub lyrics_offset_ms: i64,
     pub playlists: Vec<Playlist>,
     pub queue: Vec<Track>,
@@ -206,6 +252,9 @@ impl Default for App {
             view: View::Tracks,
             lyrics_state: LyricsState::Idle,
             lyrics_open: false,
+            comments_state: CommentsState::Idle,
+            comments_scroll: 0,
+            comments_view_height: 0,
             lyrics_offset_ms: 0,
             playlists: Vec::new(),
             queue: Vec::new(),
@@ -443,6 +492,7 @@ impl App {
                 Action::None
             }
             Mode::Queue => self.handle_queue_key(key),
+            Mode::Comments => self.handle_comments_key(key),
             Mode::Search | Mode::Command => self.handle_prompt_key(key),
             Mode::Settings => self.handle_settings_key(key),
             Mode::Normal => self.handle_normal_key(key),
@@ -970,6 +1020,7 @@ impl App {
             }
             KeyCode::Char('f') => self.like_selected(),
             KeyCode::Char('L') => self.toggle_lyrics(),
+            KeyCode::Char('C') => self.toggle_comments(),
             KeyCode::Char('[') => {
                 if self.lyrics_open {
                     self.lyrics_offset_ms -= 250;
@@ -1204,6 +1255,69 @@ impl App {
         Action::Call(Command::Lyrics { id: Some(id) })
     }
 
+    fn toggle_comments(&mut self) -> Action {
+        if self.mode == Mode::Comments {
+            self.mode = Mode::Normal;
+            return Action::None;
+        }
+        let Some(track) = self.status.track.as_ref() else {
+            self.notify("nothing playing", true);
+            return Action::None;
+        };
+        let id = track.id;
+        self.mode = Mode::Comments;
+        self.comments_scroll = 0;
+        self.comments_state = CommentsState::Loading { track: id };
+        Action::Call(Command::Comments {
+            id: Some(id),
+            limit: 20,
+            offset: 0,
+        })
+    }
+
+    fn handle_comments_key(&mut self, key: KeyEvent) -> Action {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('C' | 'q') => {
+                self.mode = Mode::Normal;
+                Action::None
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.comments_scroll = self.comments_scroll.saturating_add(1);
+                Action::None
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.comments_scroll = self.comments_scroll.saturating_sub(1);
+                Action::None
+            }
+            KeyCode::Char('d') if ctrl => {
+                self.comments_scroll = self.comments_scroll.saturating_add(10);
+                Action::None
+            }
+            KeyCode::Char('u') if ctrl => {
+                self.comments_scroll = self.comments_scroll.saturating_sub(10);
+                Action::None
+            }
+            KeyCode::Char('g') => {
+                self.comments_scroll = 0;
+                Action::None
+            }
+            KeyCode::Char('r') => {
+                let Some(id) = self.status.track.as_ref().map(|track| track.id) else {
+                    return Action::None;
+                };
+                self.comments_scroll = 0;
+                self.comments_state = CommentsState::Loading { track: id };
+                Action::Call(Command::Comments {
+                    id: Some(id),
+                    limit: 20,
+                    offset: 0,
+                })
+            }
+            _ => Action::None,
+        }
+    }
+
     fn enqueue_selected(&mut self, next: bool) -> Action {
         if self.focus == Focus::Sidebar {
             self.notify("select a track to queue", true);
@@ -1268,6 +1382,22 @@ impl App {
                         }
                         let current = self.status.track.as_ref().map(|track| track.id);
                         if previous != current {
+                            if self.mode == Mode::Comments {
+                                match current {
+                                    Some(id) => {
+                                        self.comments_state = CommentsState::Loading { track: id };
+                                        return Action::Call(Command::Comments {
+                                            id: Some(id),
+                                            limit: 20,
+                                            offset: 0,
+                                        });
+                                    }
+                                    None => {
+                                        self.comments_state = CommentsState::Idle;
+                                        self.mode = Mode::Normal;
+                                    }
+                                }
+                            }
                             if self.lyrics_open {
                                 match current {
                                     Some(id) => {
@@ -1330,6 +1460,23 @@ impl App {
                             }
                         }
                     }
+                    Reply::Comments { id, comments } => {
+                        if self
+                            .status
+                            .track
+                            .as_ref()
+                            .is_some_and(|track| track.id == id)
+                        {
+                            if comments.hot.is_empty() && comments.comments.is_empty() {
+                                self.comments_state = CommentsState::Empty { track: id };
+                            } else {
+                                self.comments_state = CommentsState::Ready {
+                                    track: id,
+                                    comments,
+                                };
+                            }
+                        }
+                    }
                     Reply::Toplists { toplists } => {
                         self.toplists = toplists;
                         self.view = View::Toplists;
@@ -1358,6 +1505,12 @@ impl App {
             Err(error) => {
                 if let LyricsState::Loading { track } = self.lyrics_state {
                     self.lyrics_state = LyricsState::Error {
+                        track,
+                        message: crate::app::error_message(&error),
+                    };
+                }
+                if let CommentsState::Loading { track } = self.comments_state {
+                    self.comments_state = CommentsState::Error {
                         track,
                         message: crate::app::error_message(&error),
                     };
@@ -1955,6 +2108,42 @@ mod tests {
             message.text
         );
         assert!(message.text.contains("queue restored"));
+    }
+
+    #[test]
+    fn comments_mode_opens_and_folds_replies() {
+        let mut app = App::new();
+        app.status.track = Some(sample_track(1));
+        let action = app.handle_key(key(KeyCode::Char('C')));
+        assert!(matches!(
+            action,
+            Action::Call(lekima_ipc::Command::Comments {
+                limit: 20,
+                offset: 0,
+                ..
+            })
+        ));
+        assert_eq!(app.mode, Mode::Comments);
+
+        app.apply(Ok(lekima_ipc::Reply::Comments {
+            id: 1.into(),
+            comments: lekima_domain::Comments {
+                total: 1,
+                has_more: false,
+                hot: vec![lekima_domain::Comment {
+                    id: 1,
+                    author: "ben".to_owned(),
+                    avatar_url: None,
+                    content: "great".to_owned(),
+                    timestamp_ms: 0,
+                    liked_count: 3,
+                    replies: Vec::new(),
+                }],
+                comments: Vec::new(),
+            },
+        }));
+        let comments = app.comments_state.ready().expect("ready comments");
+        assert_eq!(comments.hot[0].content, "great");
     }
 
     #[test]

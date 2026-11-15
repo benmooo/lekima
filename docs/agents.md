@@ -45,7 +45,19 @@ lekima mcp
 
 JSON-RPC over stdio. Tools: `player_status`, `search`, `play`, `pause`,
 `resume`, `next`, `previous`, `set_volume`, `queue_list`, `queue_add`,
-`queue_remove`, `queue_move`, `sleep`, `set_quality`, `lyrics`, `daily`, `fm`.
+`queue_remove`, `queue_move`, `sleep`, `set_quality`, `lyrics`, `comments`,
+`daily`, `fm`.
+
+## Cache
+
+```bash
+lekima cache status --json      # files, bytes, limit_bytes, path, enabled
+lekima cache limit 256          # MiB; restarts the daemon
+lekima cache clear
+```
+
+The default limit is 256 MiB. Cached playback reports `"cached": true` in
+`status`.
 
 Host config:
 

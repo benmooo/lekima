@@ -47,6 +47,8 @@ $ lekima status --json
   responsiveness, accessibility, queue confirmation, sanitization.
 - [`docs/sprint-7/`](docs/sprint-7/) — **Playback hardening** (complete):
   preview duration, queue-end recovery, persistence and restart UX.
+- [`docs/sprint-8/`](docs/sprint-8/) — **Offline cache and comments** (complete,
+  unreleased): 256 MiB stream cache, `lekima cache`, comments CLI/MCP/TUI.
 - [`docs/releasing.md`](docs/releasing.md) — release flow, including
   `--registry crates-io` on this USTC-mirrored machine.
 - [`docs/sessions/`](docs/sessions/) — archived OpenCode sessions (this rewrite,
@@ -57,6 +59,9 @@ $ lekima status --json
 `0.4.1` fixes gapless previews and track transitions: boundary sources fire
 once, a new track starts at zero, and stale status polls can no longer flip the
 track, progress or lyrics back to the previous song.
+
+Unreleased on `main`: a 256 MiB offline stream cache (`lekima cache`) with
+`CACHE` playback status, and public track comments in the CLI, MCP and TUI (`C`).
 
 `0.4.0` is a TUI and playback-reliability release: a width-aware HUD with
 buffered-range shading, a light palette and `LEKIMA_THEME`, count and pane keys,

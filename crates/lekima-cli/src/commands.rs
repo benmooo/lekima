@@ -16,7 +16,8 @@ use lekima_ncm::{NcmMusicService, NcmOptions};
 
 use crate::{
     cli::{
-        Cli, DaemonCommand, FmCommand, PlaylistCommand, QueueCommand, TopCommand, ToplistCommand,
+        CacheCommand, Cli, DaemonCommand, FmCommand, PlaylistCommand, QueueCommand, TopCommand,
+        ToplistCommand,
     },
     daemon,
     output::{self, Failure},
@@ -325,6 +326,34 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
             Ok(())
         }
 
+        TopCommand::Comments { id, limit, offset } => {
+            if limit == 0 || limit > 100 {
+                return Err(Failure::new(
+                    ErrorCode::BadRequest,
+                    "comment limit must be between 1 and 100",
+                ));
+            }
+            let reply = daemon_call(
+                &socket,
+                &paths,
+                &config,
+                Command::Comments {
+                    id: id.map(Into::into),
+                    limit,
+                    offset,
+                },
+            )
+            .await?;
+            if json {
+                output::print_reply(&reply, true);
+            } else if let Reply::Comments { comments, .. } = &reply {
+                output::print_comments(comments);
+            } else {
+                output::print_reply(&reply, false);
+            }
+            Ok(())
+        }
+
         TopCommand::Sleep { spec } => {
             let minutes = parse_sleep(&spec)?;
             let reply = daemon_call(&socket, &paths, &config, Command::Sleep { minutes }).await?;
@@ -446,6 +475,87 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
             }
         }
 
+        TopCommand::Cache { action } => {
+            let root = paths.cache_dir().join("streams");
+            match action {
+                CacheCommand::Status => {
+                    let cache = lekima_audio::StreamCache::new(
+                        root,
+                        config.cache.limit_mb,
+                        config.cache.enabled,
+                    );
+                    let stats = cache.stats();
+                    if json {
+                        let value = serde_json::to_value(&stats).map_err(|error| {
+                            Failure::new(ErrorCode::Internal, error.to_string())
+                        })?;
+                        output::emit_json(true, Some(value), None);
+                    } else {
+                        crate::say!(
+                            "cache: {} files, {:.1} MiB / {:.1} MiB ({}) at {}",
+                            stats.files,
+                            stats.bytes as f64 / 1_048_576.0,
+                            stats.limit_bytes as f64 / 1_048_576.0,
+                            if stats.enabled { "enabled" } else { "disabled" },
+                            stats.path.display()
+                        );
+                    }
+                }
+                CacheCommand::Clear => {
+                    let cache = lekima_audio::StreamCache::new(
+                        root,
+                        config.cache.limit_mb,
+                        config.cache.enabled,
+                    );
+                    let removed = cache.clear().map_err(|error| {
+                        Failure::new(ErrorCode::Internal, format!("clear cache: {error}"))
+                    })?;
+                    if json {
+                        output::emit_json(
+                            true,
+                            Some(serde_json::json!({ "removed": removed })),
+                            None,
+                        );
+                    } else {
+                        crate::say!("removed {removed} cached stream(s)");
+                    }
+                }
+                CacheCommand::Limit { mb } => {
+                    if mb == 0 {
+                        return Err(Failure::new(
+                            ErrorCode::BadRequest,
+                            "cache limit must be at least 1 MiB",
+                        ));
+                    }
+                    lekima_config::save_cache(&paths.config_file(), config.cache.enabled, mb)?;
+                    restart_daemon(&socket).await;
+                    if json {
+                        output::emit_json(true, Some(serde_json::json!({ "limit_mb": mb })), None);
+                    } else {
+                        crate::say!("cache limit set to {mb} MiB");
+                    }
+                }
+                CacheCommand::On | CacheCommand::Off => {
+                    let enabled = matches!(action, CacheCommand::On);
+                    lekima_config::save_cache(
+                        &paths.config_file(),
+                        enabled,
+                        config.cache.limit_mb,
+                    )?;
+                    restart_daemon(&socket).await;
+                    if json {
+                        output::emit_json(
+                            true,
+                            Some(serde_json::json!({ "enabled": enabled })),
+                            None,
+                        );
+                    } else {
+                        crate::say!("cache {}", if enabled { "enabled" } else { "disabled" });
+                    }
+                }
+            }
+            Ok(())
+        }
         TopCommand::Themes => {
             let themes: Vec<&str> = lekima_tui::THEMES.to_vec();
             if json {
@@ -837,7 +947,11 @@ async fn doctor(socket: &Path, paths: &Paths, config: &Config, json: bool) -> Re
     let session_present = FileCredentials::new(paths.session_file()).load()?.is_some();
     let daemon_running = is_running(socket).await;
 
-    let audio = match lekima_audio::RodioAudioEngine::open(0.0, config.audio.device.as_deref()) {
+    let audio = match lekima_audio::RodioAudioEngine::open(
+        0.0,
+        config.audio.device.as_deref(),
+        lekima_audio::StreamCache::disabled(),
+    ) {
         Ok(engine) => {
             drop(engine);
             serde_json::json!({ "ok": true })
@@ -862,6 +976,12 @@ async fn doctor(socket: &Path, paths: &Paths, config: &Config, json: bool) -> Re
     let media = serde_json::json!({
         "backend": lekima_platform::backend_name(),
     });
+    let cache = lekima_audio::StreamCache::new(
+        paths.cache_dir().join("streams"),
+        config.cache.limit_mb,
+        config.cache.enabled,
+    )
+    .stats();
 
     let report = serde_json::json!({
         "version": env!("CARGO_PKG_VERSION"),
@@ -871,6 +991,7 @@ async fn doctor(socket: &Path, paths: &Paths, config: &Config, json: bool) -> Re
         "audio": audio,
         "media": media,
         "provider": provider,
+        "cache": cache,
         "log": paths.log_file(),
     });
 
@@ -905,6 +1026,13 @@ async fn doctor(socket: &Path, paths: &Paths, config: &Config, json: bool) -> Re
     crate::say!("config   {}", paths.config_file().display());
     crate::say!("audio    {audio}");
     crate::say!("media    {}", lekima_platform::backend_name());
+    crate::say!(
+        "cache    {} files, {:.1} / {:.1} MiB ({})",
+        cache.files,
+        cache.bytes as f64 / 1_048_576.0,
+        cache.limit_bytes as f64 / 1_048_576.0,
+        if cache.enabled { "enabled" } else { "disabled" }
+    );
     crate::say!("provider {provider}");
     crate::say!("log      {}", paths.log_file().display());
     Ok(())

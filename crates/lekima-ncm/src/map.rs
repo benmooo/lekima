@@ -6,6 +6,7 @@
 
 use lekima_domain as domain;
 use ncmapi as provider;
+use serde::Deserialize;
 
 pub(crate) fn track(track: provider::Track) -> domain::Track {
     let album = if track.album.id == 0 && track.album.name.is_empty() {
@@ -112,6 +113,90 @@ pub(crate) fn cloud_track(entry: provider::CloudTrack) -> Option<domain::Track> 
     })
 }
 
+#[derive(Debug, Deserialize)]
+pub(crate) struct ProviderComments {
+    #[serde(default)]
+    pub code: i32,
+    #[serde(default)]
+    pub total: u64,
+    #[serde(default)]
+    pub more: bool,
+    #[serde(default, rename = "hotComments")]
+    pub hot_comments: Vec<ProviderComment>,
+    #[serde(default)]
+    pub comments: Vec<ProviderComment>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct ProviderComment {
+    #[serde(default, rename = "commentId")]
+    pub comment_id: u64,
+    #[serde(default)]
+    pub content: String,
+    #[serde(default)]
+    pub time: u64,
+    #[serde(default, rename = "likedCount")]
+    pub liked_count: u64,
+    #[serde(default)]
+    pub user: Option<ProviderCommentUser>,
+    #[serde(default, rename = "beReplied")]
+    pub replies: Vec<ProviderReply>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct ProviderCommentUser {
+    #[serde(default)]
+    pub nickname: String,
+    #[serde(default, rename = "avatarUrl")]
+    pub avatar_url: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct ProviderReply {
+    #[serde(default)]
+    pub content: String,
+    #[serde(default)]
+    pub user: Option<ProviderCommentUser>,
+}
+
+pub(crate) fn comments(body: ProviderComments) -> domain::Comments {
+    domain::Comments {
+        total: body.total,
+        has_more: body.more,
+        hot: body.hot_comments.into_iter().map(comment).collect(),
+        comments: body.comments.into_iter().map(comment).collect(),
+    }
+}
+
+fn comment(comment: ProviderComment) -> domain::Comment {
+    let author = comment
+        .user
+        .as_ref()
+        .map_or_else(String::new, |user| domain::sanitize_line(&user.nickname));
+    let avatar_url = comment.user.as_ref().and_then(|user| {
+        (!user.avatar_url.is_empty()).then(|| domain::sanitize_line(&user.avatar_url))
+    });
+    domain::Comment {
+        id: comment.comment_id,
+        author,
+        avatar_url,
+        content: domain::sanitize_line(&comment.content),
+        timestamp_ms: comment.time,
+        liked_count: comment.liked_count,
+        replies: comment
+            .replies
+            .into_iter()
+            .map(|reply| domain::CommentReply {
+                author: reply
+                    .user
+                    .as_ref()
+                    .map_or_else(String::new, |user| domain::sanitize_line(&user.nickname)),
+                content: domain::sanitize_line(&reply.content),
+            })
+            .collect(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,6 +214,27 @@ mod tests {
         assert_eq!(track.name, "owned");
         assert_eq!(track.artist_names(), "safename");
         assert_eq!(track.album_name(), "ok");
+    }
+
+    #[test]
+    fn maps_and_sanitizes_comments() {
+        let raw = serde_json::json!({
+            "code":200,"total":1,"more":false,
+            "hotComments":[{
+                "commentId":5,"content":"\u{1b}[31mhot\u{1b}[0m","time":10,"likedCount":3,
+                "user":{"nickname":"ben","avatarUrl":"https://img/ben"},
+                "beReplied":[{"content":"parent","user":{"nickname":"aka"}}]
+            }],
+            "comments":[]
+        });
+        let body: ProviderComments = serde_json::from_value(raw).unwrap();
+        let comments = comments(body);
+        assert_eq!(comments.total, 1);
+        assert_eq!(comments.hot.len(), 1);
+        assert_eq!(comments.hot[0].content, "hot");
+        assert_eq!(comments.hot[0].author, "ben");
+        assert_eq!(comments.hot[0].liked_count, 3);
+        assert_eq!(comments.hot[0].replies[0].author, "aka");
     }
 
     #[test]

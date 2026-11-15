@@ -125,6 +125,9 @@ pub struct PlaybackState {
     /// True while a streaming track is waiting for more network data.
     #[serde(default)]
     pub buffering: bool,
+    /// True when the current audio came from the persistent stream cache.
+    #[serde(default)]
+    pub cached: bool,
     #[serde(default)]
     pub quality: Quality,
     /// Active sleep timer, if any.
@@ -174,6 +177,7 @@ impl Default for PlaybackState {
             liked: false,
             loading: false,
             buffering: false,
+            cached: false,
             quality: Quality::Exhigh,
             sleep_remaining_ms: None,
             wave: Vec::new(),

@@ -156,6 +156,15 @@ terminals; the title is clipped first only when the terminal is very small.
   track that is no longer playing.
 - Toasts shift left of the pane so they never cover its footer.
 
+### Comments pane
+
+- `C` opens a full-width comments view (`// COMMENTS · n · track`) with `HOT`
+  and `ALL` sections, like counts, authors and quoted replies.
+- `j/k` and `Ctrl-d/u` scroll, `g` returns to the top, `r` refetches, `C`/`Esc`
+  closes. Loading, empty and error states are explicit.
+- Comments follow track changes while the pane is open.
+- Provider text is sanitized before rendering; long lines truncate with `…`.
+
 ### Settings palette
 
 - `S` opens a centred double-border overlay (`▓ UI ▓`) listing THEME, GLYPHS,

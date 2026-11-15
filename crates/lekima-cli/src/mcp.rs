@@ -167,6 +167,18 @@ fn build_command(name: &str, args: &Value) -> Result<Command, String> {
         "lyrics" => Command::Lyrics {
             id: args.get("id").and_then(Value::as_u64).map(TrackId),
         },
+        "comments" => Command::Comments {
+            id: args.get("id").and_then(Value::as_u64).map(TrackId),
+            limit: args
+                .get("limit")
+                .and_then(Value::as_u64)
+                .map_or(20, |limit| u16::try_from(limit).unwrap_or(20))
+                .max(1),
+            offset: args
+                .get("offset")
+                .and_then(Value::as_u64)
+                .map_or(0, |offset| u32::try_from(offset).unwrap_or(0)),
+        },
         "daily" => Command::Daily {
             play: args.get("play").and_then(Value::as_bool).unwrap_or(true),
         },
@@ -264,6 +276,13 @@ fn summary(reply: &Reply) -> String {
             format!("{} {id}", if *liked { "liked" } else { "unliked" })
         }
         Reply::Lyrics { lyrics, .. } => format!("{} lyric lines", lyrics.lines.len()),
+        Reply::Comments { comments, .. } => {
+            format!(
+                "{} hot / {} comments",
+                comments.hot.len(),
+                comments.comments.len()
+            )
+        }
         Reply::User { user } => user
             .as_ref()
             .map_or_else(|| "signed out".to_owned(), |user| user.nickname.clone()),
@@ -418,6 +437,19 @@ fn tools() -> Vec<Value> {
             true,
         ),
         tool(
+            "comments",
+            "Public comments for the current or a specific track.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "id": { "type": "integer" },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 100 },
+                    "offset": { "type": "integer", "minimum": 0 }
+                }
+            }),
+            true,
+        ),
+        tool(
             "daily",
             "Daily recommendations; plays by default.",
             json!({
@@ -465,6 +497,7 @@ mod tests {
             "sleep",
             "set_quality",
             "lyrics",
+            "comments",
             "daily",
             "fm",
         ] {

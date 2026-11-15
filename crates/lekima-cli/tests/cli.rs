@@ -81,6 +81,50 @@ fn themes_are_listed_for_agents() {
 }
 
 #[test]
+fn cache_status_reports_the_default_limit() {
+    let dir = hermetic("cache-status");
+    let output = binary()
+        .env("LEKIMA_CONFIG_DIR", &dir)
+        .args(["cache", "status", "--json"])
+        .output()
+        .expect("run lekima");
+    assert!(output.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json");
+    assert_eq!(json["data"]["enabled"], true);
+    assert_eq!(json["data"]["limit_bytes"], 256 * 1024 * 1024);
+    assert_eq!(json["data"]["files"], 0);
+}
+
+#[test]
+fn cache_limit_persists_and_clears() {
+    let dir = hermetic("cache-limit");
+    let output = binary()
+        .env("LEKIMA_CONFIG_DIR", &dir)
+        .args(["cache", "limit", "512", "--json"])
+        .output()
+        .expect("set limit");
+    assert!(output.status.success());
+
+    let output = binary()
+        .env("LEKIMA_CONFIG_DIR", &dir)
+        .args(["cache", "status", "--json"])
+        .output()
+        .expect("status");
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json");
+    assert_eq!(json["data"]["limit_bytes"], 512 * 1024 * 1024);
+
+    fs::create_dir_all(dir.join("cache/streams")).unwrap();
+    std::fs::write(dir.join("cache/streams/one.audio"), b"audio").unwrap();
+    let output = binary()
+        .env("LEKIMA_CONFIG_DIR", &dir)
+        .args(["cache", "clear", "--json"])
+        .output()
+        .expect("clear");
+    assert!(output.status.success());
+    assert!(!dir.join("cache/streams/one.audio").exists());
+}
+
+#[test]
 fn mcp_speaks_initialize_and_tools_list() {
     let dir = hermetic("mcp");
     let mut child = binary()

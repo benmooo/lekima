@@ -6,8 +6,8 @@
 //! agents all speak the same language.
 
 use lekima_domain::{
-    Lyrics, PlaybackState, Playlist, PlaylistId, Quality, RepeatMode, SearchKind, SearchResults,
-    Toplist, Track, TrackId, UserProfile,
+    Comments, Lyrics, PlaybackState, Playlist, PlaylistId, Quality, RepeatMode, SearchKind,
+    SearchResults, Toplist, Track, TrackId, UserProfile,
 };
 use serde::{Deserialize, Serialize};
 
@@ -94,6 +94,12 @@ pub enum Command {
     Like {
         id: Option<TrackId>,
         liked: bool,
+    },
+    /// Public comments for a track (defaults to the current track).
+    Comments {
+        id: Option<TrackId>,
+        limit: u16,
+        offset: u32,
     },
     /// The account's liked tracks; list or play.
     Liked {
@@ -213,6 +219,10 @@ pub enum Reply {
     Lyrics {
         id: TrackId,
         lyrics: Lyrics,
+    },
+    Comments {
+        id: TrackId,
+        comments: Comments,
     },
     Toplists {
         toplists: Vec<Toplist>,

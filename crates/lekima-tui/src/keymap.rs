@@ -124,8 +124,8 @@ pub const DISCOVER: &[Binding] = &[
         description: "charts / translation",
     },
     Binding {
-        key: "c",
-        description: "cloud disk",
+        key: "c / C",
+        description: "cloud / comments",
     },
     Binding {
         key: "f",

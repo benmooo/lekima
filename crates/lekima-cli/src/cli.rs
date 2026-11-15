@@ -178,6 +178,16 @@ pub enum TopCommand {
         translate: bool,
     },
 
+    /// Print public comments for a track.
+    Comments {
+        #[arg(long, value_name = "ID")]
+        id: Option<u64>,
+        #[arg(long, default_value_t = 20)]
+        limit: u16,
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+    },
+
     /// Stop (pause) playback after a delay. `30m`, `1h`, `90s`, `off`.
     Sleep {
         #[arg(value_name = "DURATION")]
@@ -223,6 +233,12 @@ pub enum TopCommand {
         device: String,
     },
 
+    /// Manage the persistent stream cache.
+    Cache {
+        #[command(subcommand)]
+        action: CacheCommand,
+    },
+
     /// List the available colour themes.
     Themes,
 
@@ -256,6 +272,23 @@ pub enum TopCommand {
         #[arg(value_enum)]
         shell: Shell,
     },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum CacheCommand {
+    /// Show cache usage and limits.
+    Status,
+    /// Remove every cached stream.
+    Clear,
+    /// Set the capacity in MiB; the daemon restarts.
+    Limit {
+        #[arg(value_name = "MB")]
+        mb: u64,
+    },
+    /// Enable the cache; the daemon restarts.
+    On,
+    /// Disable the cache; the daemon restarts.
+    Off,
 }
 
 #[derive(Debug, Subcommand)]

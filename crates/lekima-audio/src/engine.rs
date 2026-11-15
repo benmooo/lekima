@@ -71,17 +71,20 @@ const REFERER: &str = "https://music.163.com/";
 enum Command {
     Load {
         bytes: Vec<u8>,
+        cached: bool,
         ack: oneshot::Sender<std::result::Result<(), String>>,
     },
     LoadStream {
         reader: File,
         total: Option<u64>,
         spool: Arc<Spool>,
+        cached: bool,
         ack: oneshot::Sender<std::result::Result<(), String>>,
     },
     QueueNext {
         track: TrackId,
         bytes: Vec<u8>,
+        cached: bool,
         ack: oneshot::Sender<std::result::Result<(), String>>,
     },
     Pause,
@@ -100,6 +103,7 @@ struct Shared {
     wave: Arc<Waveform>,
     boundary: Mutex<Option<TrackId>>,
     stream_duration_ms: AtomicU64,
+    cached: AtomicBool,
 }
 
 impl Shared {
@@ -112,6 +116,7 @@ impl Shared {
             wave: Arc::new(Waveform::new()),
             boundary: Mutex::new(None),
             stream_duration_ms: AtomicU64::new(0),
+            cached: AtomicBool::new(false),
         }
     }
 
@@ -145,6 +150,7 @@ pub struct RodioAudioEngine {
     shared: Arc<Shared>,
     client: reqwest::Client,
     spool: Mutex<Option<Arc<Spool>>>,
+    cache: crate::cache::StreamCache,
 }
 
 impl RodioAudioEngine {
@@ -153,7 +159,11 @@ impl RodioAudioEngine {
     /// # Errors
     ///
     /// Returns [`DomainError::Playback`] when no output device is available.
-    pub fn open(volume: f32, device: Option<&str>) -> Result<Self> {
+    pub fn open(
+        volume: f32,
+        device: Option<&str>,
+        cache: crate::cache::StreamCache,
+    ) -> Result<Self> {
         let shared = Arc::new(Shared::new(volume));
         let (commands, receiver) = channel();
         let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
@@ -190,6 +200,7 @@ impl RodioAudioEngine {
             shared,
             client,
             spool: Mutex::new(None),
+            cache,
         })
     }
 
@@ -210,10 +221,33 @@ impl RodioAudioEngine {
 
 #[async_trait]
 impl AudioEngine for RodioAudioEngine {
-    async fn play_url(&self, url: &str) -> Result<()> {
+    async fn play_url(&self, url: &str, cache_key: Option<&str>) -> Result<()> {
         self.cancel_spool();
         // Stop the previous track before the network work.
         let _ = self.send(Command::Stop);
+
+        if let Some(key) = cache_key
+            && let Some(bytes) = self.cache.get(key)
+        {
+            if bytes.is_empty() {
+                return Err(DomainError::Playback(
+                    "the cached stream is empty".to_owned(),
+                ));
+            }
+            let (ack, ack_rx) = oneshot::channel();
+            self.send(Command::Load {
+                bytes,
+                cached: true,
+                ack,
+            })?;
+            return await_load(ack_rx).await;
+        }
+
+        if url.is_empty() {
+            return Err(DomainError::Playback(
+                "no stream URL and no cached copy".to_owned(),
+            ));
+        }
 
         let response = self
             .client
@@ -242,9 +276,13 @@ impl AudioEngine for RodioAudioEngine {
             if bytes.is_empty() {
                 return Err(DomainError::Playback("stream is empty".to_owned()));
             }
+            if let Some(key) = cache_key {
+                self.cache.put(key, &bytes);
+            }
             let (ack, ack_rx) = oneshot::channel();
             self.send(Command::Load {
                 bytes: bytes.to_vec(),
+                cached: false,
                 ack,
             })?;
             return await_load(ack_rx).await;
@@ -302,6 +340,7 @@ impl AudioEngine for RodioAudioEngine {
             reader,
             total,
             spool: Arc::clone(&spool),
+            cached: false,
             ack,
         })?;
         await_load(ack_rx).await
@@ -357,6 +396,14 @@ impl AudioEngine for RodioAudioEngine {
         self.shared.stream_duration()
     }
 
+    fn has_cached(&self, key: &str) -> bool {
+        self.cache.has(key)
+    }
+
+    fn last_was_cached(&self) -> bool {
+        self.shared.cached.load(Ordering::Relaxed)
+    }
+
     fn buffered_ranges(&self, duration_ms: u64) -> Vec<BufferedRange> {
         let Ok(slot) = self.spool.lock() else {
             return Vec::new();
@@ -370,7 +417,24 @@ impl AudioEngine for RodioAudioEngine {
         map_buffered_ranges(&spool.ranges(), total, duration_ms)
     }
 
-    async fn queue_next_url(&self, id: TrackId, url: &str) -> Result<()> {
+    async fn queue_next_url(&self, id: TrackId, url: &str, cache_key: Option<&str>) -> Result<()> {
+        if let Some(key) = cache_key
+            && let Some(bytes) = self.cache.get(key)
+        {
+            let (ack, ack_rx) = oneshot::channel();
+            self.send(Command::QueueNext {
+                track: id,
+                bytes,
+                cached: true,
+                ack,
+            })?;
+            return await_load(ack_rx).await;
+        }
+        if url.is_empty() {
+            return Err(DomainError::Playback(
+                "no stream URL and no cached copy".to_owned(),
+            ));
+        }
         let response = self
             .client
             .get(url)
@@ -397,10 +461,14 @@ impl AudioEngine for RodioAudioEngine {
         let bytes = response.bytes().await.map_err(|error| {
             DomainError::Playback(format!("failed to read the next stream: {error}"))
         })?;
+        if let Some(key) = cache_key {
+            self.cache.put(key, &bytes);
+        }
         let (ack, ack_rx) = oneshot::channel();
         self.send(Command::QueueNext {
             track: id,
             bytes: bytes.to_vec(),
+            cached: false,
             ack,
         })?;
         await_load(ack_rx).await
@@ -437,6 +505,7 @@ struct Boundary<S> {
     inner: S,
     track: TrackId,
     duration: Option<Duration>,
+    cached: bool,
     shared: Arc<Shared>,
     fired: bool,
 }
@@ -454,6 +523,7 @@ impl<S: rodio::Source> Iterator for Boundary<S> {
                 .lock()
                 .unwrap_or_else(|poison| poison.into_inner()) = Some(self.track);
             self.shared.set_stream_duration(self.duration);
+            self.shared.cached.store(self.cached, Ordering::Relaxed);
             self.shared.position_ms.store(0, Ordering::Relaxed);
         }
         Some(sample)
@@ -640,9 +710,10 @@ fn audio_thread(
 
     loop {
         match receiver.recv_timeout(POLL_INTERVAL) {
-            Ok(Command::Load { bytes, ack }) => {
+            Ok(Command::Load { bytes, cached, ack }) => {
                 player.stop();
                 shared.set_stream_duration(None);
+                shared.cached.store(cached, Ordering::Relaxed);
                 *shared
                     .boundary
                     .lock()
@@ -676,10 +747,12 @@ fn audio_thread(
                 reader,
                 total,
                 spool,
+                cached,
                 ack,
             }) => {
                 player.stop();
                 shared.set_stream_duration(None);
+                shared.cached.store(cached, Ordering::Relaxed);
                 *shared
                     .boundary
                     .lock()
@@ -711,7 +784,12 @@ fn audio_thread(
                     }
                 }
             }
-            Ok(Command::QueueNext { track, bytes, ack }) => {
+            Ok(Command::QueueNext {
+                track,
+                bytes,
+                cached,
+                ack,
+            }) => {
                 let byte_len = bytes.len() as u64;
                 let decoder = Decoder::builder()
                     .with_data(Cursor::new(bytes))
@@ -725,6 +803,7 @@ fn audio_thread(
                             inner: Metered::new(decoder, Arc::clone(&shared.wave)),
                             track,
                             duration,
+                            cached,
                             shared: Arc::clone(&shared),
                             fired: false,
                         };
@@ -745,6 +824,7 @@ fn audio_thread(
                     .lock()
                     .unwrap_or_else(|poison| poison.into_inner()) = None;
                 shared.set_stream_duration(None);
+                shared.cached.store(false, Ordering::Relaxed);
                 shared.loaded.store(false, Ordering::Relaxed);
                 shared.finished.store(false, Ordering::Relaxed);
                 shared.position_ms.store(0, Ordering::Relaxed);
@@ -925,6 +1005,7 @@ mod tests {
             inner: rodio::source::SineWave::new(440.0),
             track: lekima_domain::TrackId(7),
             duration: Some(Duration::from_secs(30)),
+            cached: false,
             shared: Arc::clone(&shared),
             fired: false,
         };

@@ -19,7 +19,9 @@ use ratatui::{
 };
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::app::{App, Focus, LyricsState, Mode, SETTINGS_ROWS, SIDEBAR_STATICS, View};
+use crate::app::{
+    App, CommentsState, Focus, LyricsState, Mode, SETTINGS_ROWS, SIDEBAR_STATICS, View,
+};
 use crate::keymap::{self, Section};
 use crate::theme::{Density, Theme};
 
@@ -171,6 +173,14 @@ fn draw_hud(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             groups.push(vec![Span::styled(
                 "PREVIEW",
                 Style::new().fg(theme.warn).add_modifier(Modifier::BOLD),
+            )]);
+        }
+        if app.status.cached {
+            groups.push(vec![Span::styled(
+                "CACHE",
+                Style::new()
+                    .fg(theme.accent_alt)
+                    .add_modifier(Modifier::BOLD),
             )]);
         }
         groups.push(spectrum_group(app, theme));
@@ -522,6 +532,7 @@ fn draw_main(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     };
     match (app.mode, app.view) {
         (Mode::Queue, _) => draw_queue(frame, app, theme, inner),
+        (Mode::Comments, _) => draw_comments(frame, app, theme, inner),
         (_, View::Toplists) => draw_toplists(frame, app, theme, inner),
         _ => draw_tracks(frame, app, theme, inner),
     }
@@ -1306,6 +1317,145 @@ fn queue_remaining(
         .fold(0_u64, u64::saturating_add)
 }
 
+fn draw_comments(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
+    let [label, content] =
+        Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(area);
+    let track_name = app
+        .status
+        .track
+        .as_ref()
+        .map_or_else(String::new, |track| sanitize_line(&track.name));
+    let total = app
+        .comments_state
+        .ready()
+        .map_or(0, |comments| comments.hot.len() + comments.comments.len());
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("// ", Style::new().fg(theme.panel)),
+            Span::styled("COMMENTS", Style::new().fg(theme.muted)),
+            Span::styled(
+                format!(" {} {total}", theme.glyphs.separator),
+                Style::new().fg(theme.accent_alt),
+            ),
+            Span::styled(
+                format!(" {} {track_name}", theme.glyphs.separator),
+                Style::new().fg(theme.dim),
+            ),
+            Span::styled(
+                format!(" {}", theme.glyphs.active),
+                Style::new().fg(theme.accent),
+            ),
+        ])),
+        label,
+    );
+
+    let width = usize::from(content.width).saturating_sub(1);
+    let mut lines: Vec<Line> = Vec::new();
+    match &app.comments_state {
+        CommentsState::Idle | CommentsState::Loading { .. } => {
+            let dots = match (app.frame / 5) % 4 {
+                0 => "",
+                1 => ".",
+                2 => "..",
+                _ => "...",
+            };
+            lines.push(Line::from(Span::styled(
+                format!("loading comments{dots}"),
+                Style::new().fg(theme.muted),
+            )));
+        }
+        CommentsState::Empty { .. } => {
+            lines.push(Line::from(Span::styled(
+                "no comments for this track",
+                Style::new().fg(theme.muted),
+            )));
+        }
+        CommentsState::Error { message, .. } => {
+            lines.push(Line::from(Span::styled(
+                format!("! {}", sanitize_line(message)),
+                Style::new().fg(theme.hot),
+            )));
+        }
+        CommentsState::Ready { comments, .. } => {
+            append_comment_section(&mut lines, "HOT", &comments.hot, width, theme);
+            append_comment_section(&mut lines, "ALL", &comments.comments, width, theme);
+            if comments.has_more {
+                lines.push(Line::from(Span::styled(
+                    "more comments available",
+                    Style::new().fg(theme.dim),
+                )));
+            }
+        }
+    }
+
+    let height = usize::from(content.height);
+    let max_scroll = lines.len().saturating_sub(height);
+    app.comments_scroll = app.comments_scroll.min(max_scroll);
+    app.comments_view_height = content.height;
+    frame.render_widget(
+        Paragraph::new(Text::from(lines))
+            .scroll((u16::try_from(app.comments_scroll).unwrap_or(u16::MAX), 0)),
+        content,
+    );
+}
+
+fn append_comment_section(
+    lines: &mut Vec<Line<'static>>,
+    title: &str,
+    comments: &[lekima_domain::Comment],
+    width: usize,
+    theme: &Theme,
+) {
+    if comments.is_empty() {
+        return;
+    }
+    if !lines.is_empty() {
+        lines.push(Line::from(""));
+    }
+    lines.push(Line::from(Span::styled(
+        format!("// {title} {} {}", theme.glyphs.separator, comments.len()),
+        Style::new().fg(theme.panel).add_modifier(Modifier::BOLD),
+    )));
+    for comment in comments {
+        let author = if comment.author.is_empty() {
+            "anonymous"
+        } else {
+            comment.author.as_str()
+        };
+        let content = truncate_to_width(
+            &format!(
+                "{:>5} {} {}: {}",
+                comment.liked_count,
+                theme.glyphs.liked,
+                sanitize_line(author),
+                sanitize_line(&comment.content)
+            ),
+            width,
+            theme.glyphs.ellipsis,
+        );
+        lines.push(Line::from(Span::styled(
+            content,
+            Style::new().fg(theme.text),
+        )));
+        for reply in &comment.replies {
+            let reply = truncate_to_width(
+                &format!(
+                    "       {} {}: {}",
+                    theme.glyphs.enter,
+                    sanitize_line(&reply.author),
+                    sanitize_line(&reply.content)
+                ),
+                width,
+                theme.glyphs.ellipsis,
+            );
+            lines.push(Line::from(Span::styled(
+                reply,
+                Style::new().fg(theme.muted),
+            )));
+        }
+    }
+}
+
 fn draw_footer(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let (mode, hints) = match app.mode {
         Mode::Normal => ("NORMAL", normal_hints(app, theme, area.width)),
@@ -1319,6 +1469,10 @@ fn draw_footer(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             ),
         ),
         Mode::Queue => ("QUEUE", queue_hints(theme, area.width)),
+        Mode::Comments => (
+            "COMMENTS",
+            "j/k scroll · ctrl-d/u page · r refresh · C/esc close".to_owned(),
+        ),
         Mode::Settings => (
             "UI",
             format!(
@@ -2332,6 +2486,56 @@ mod tests {
         let screen = render(&mut app, 120, 24);
         assert!(screen.contains("PREVIEW"), "{screen}");
         assert!(screen.contains("00:00/00:30"), "{screen}");
+    }
+
+    #[test]
+    fn cached_playback_shows_the_cache_badge() {
+        let mut app = App::new();
+        app.status.status = lekima_domain::PlaybackStatus::Playing;
+        app.status.track = Some(track("Mota"));
+        app.status.cached = true;
+        let screen = render(&mut app, 120, 24);
+        assert!(screen.contains("CACHE"), "{screen}");
+    }
+
+    #[test]
+    fn comments_pane_renders_hot_and_regular_entries() {
+        use crate::app::CommentsState;
+
+        let mut app = App::new();
+        app.mode = Mode::Comments;
+        app.status.track = Some(track("Mota"));
+        app.comments_state = CommentsState::Ready {
+            track: 1.into(),
+            comments: lekima_domain::Comments {
+                total: 2,
+                has_more: true,
+                hot: vec![lekima_domain::Comment {
+                    id: 1,
+                    author: "ben".to_owned(),
+                    avatar_url: None,
+                    content: "hot take".to_owned(),
+                    timestamp_ms: 0,
+                    liked_count: 9,
+                    replies: Vec::new(),
+                }],
+                comments: vec![lekima_domain::Comment {
+                    id: 2,
+                    author: "aka".to_owned(),
+                    avatar_url: None,
+                    content: "regular".to_owned(),
+                    timestamp_ms: 0,
+                    liked_count: 1,
+                    replies: Vec::new(),
+                }],
+            },
+        };
+        let screen = render(&mut app, 100, 30);
+        assert!(screen.contains("COMMENTS"), "{screen}");
+        assert!(screen.contains("HOT"), "{screen}");
+        assert!(screen.contains("hot take"), "{screen}");
+        assert!(screen.contains("regular"), "{screen}");
+        assert!(screen.contains("more comments available"), "{screen}");
     }
 
     #[test]

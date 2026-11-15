@@ -250,6 +250,10 @@ Decisions:
 - The decoder's real duration is published as `stream_duration_ms` when it is
   shorter than catalogue metadata; frontends label the track `PREVIEW` and draw
   progress against the actual stream length.
+- Fully downloaded streams up to `MAX_MEMORY_BYTES` are cached under
+  `<config>/cache/streams/<id>-<quality>.audio` (0600, LRU, default 256 MiB).
+  A cache hit skips `stream_url` resolution and sets `PlaybackState.cached`;
+  larger/unknown streams keep using the ephemeral spool.
 - Gapless: when the next queued track fits the preload budget and matches the
   sample rate, its source is prepared and appended to the same rodio queue; a
   boundary source advances core state on the first sample. Only one preload is
@@ -303,7 +307,7 @@ Properties:
 - Status replies carry the daemon’s current event revision. Clients that also
   subscribe to events discard a poll whose revision predates the newest event,
   so a slow reply cannot move progress/lyrics back to the previous track.
-- **MCP**: `lekima mcp` speaks JSON-RPC over stdio and maps 13 tools onto the
+- **MCP**: `lekima mcp` speaks JSON-RPC over stdio and maps its tools onto the
   same IPC commands; it owns no state and never reads the session file.
 
 Security:
@@ -340,6 +344,7 @@ transport's request-hash cache cannot replay stale answers.
 | QR login start/poll | `/eapi/login/qrcode/unikey`, `/eapi/login/qrcode/client/login` (`type: 3`) | `lekima login --qr` — **done in 1.3** |
 | Playlist detail with tracks | `/api/v6/playlist/detail` + `/api/v3/song/detail` | `playlist show`, sidebar — **done in 1.1** |
 | Lyrics | `/api/song/lyric` | `lekima lyrics` — **done in 1.1** |
+| Public comments | `/api/v1/resource/comments/R_SO_4_{id}` | `lekima comments`, TUI `C` — **direct read-only GET in `lekima-ncm`** |
 | Daily recommendations | `/api/v3/discovery/recommend/songs` | Home / `lekima daily` — **done in 1.2** |
 | Personal FM | `/weapi/v1/radio/get`, `/weapi/radio/trash/add` | `lekima fm` — **done in 1.2** |
 | Likes | `/api/radio/like`, `/weapi/song/like/get` | `lekima like` / liked playlist — **done in 1.2** |
@@ -369,6 +374,10 @@ cache_ttl_secs = 180
 volume = 0.7
 quality = "exhigh"   # standard | higher | exhigh | lossless
 autoplay = true
+
+[cache]
+enabled = true
+limit_mb = 256
 
 [ui]
 theme = "cyber"          # cyber | amber | mono | light | … (LEKIMA_THEME wins)

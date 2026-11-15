@@ -1,18 +1,21 @@
 //! `MusicService` implemented over `ncmapi`.
 
-use std::{path::PathBuf, time::Duration};
+use std::{fs, path::PathBuf, time::Duration};
 
+use crate::map::{self, ProviderComments};
 use async_trait::async_trait;
 use lekima_domain::{
-    self as domain, DomainError, Lyrics, MusicService, PlaylistId, QrLogin, QrStatus, Quality,
-    SearchKind, Toplist, TrackId, UserId, UserProfile,
+    self as domain, Comments, DomainError, Lyrics, MusicService, PlaylistId, QrLogin, QrStatus,
+    Quality, SearchKind, Toplist, TrackId, UserId, UserProfile,
 };
 use ncmapi::{
     ApiResponse, NcmClient, Page, SearchKind as ProviderSearchKind, SearchQuery,
     TrackId as ProviderTrackId, UserId as ProviderUserId,
 };
 
-use crate::map;
+const COMMENT_URL: &str = "https://music.163.com/api/v1/resource/comments/R_SO_4_";
+const REFERER: &str = "https://music.163.com/";
+const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
 
 /// Construction inputs for [`NcmMusicService`].
 #[derive(Debug, Clone)]
@@ -38,6 +41,8 @@ impl NcmOptions {
 /// NetEase-backed catalogue and account service.
 pub struct NcmMusicService {
     client: NcmClient,
+    http: reqwest::Client,
+    cookie_path: PathBuf,
 }
 
 impl NcmMusicService {
@@ -48,13 +53,25 @@ impl NcmMusicService {
     /// Returns a domain error when the SDK cannot be constructed (for example a
     /// cookie file with invalid permissions content).
     pub fn new(options: NcmOptions) -> domain::Result<Self> {
+        let cookie_path = options.cookie_path.clone();
         let client = NcmClient::builder()
             .cache(options.cache)
             .cache_ttl(options.cache_ttl)
             .cookie_path(options.cookie_path)
             .build()
             .map_err(provider_error)?;
-        Ok(Self { client })
+        let http = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .user_agent(USER_AGENT)
+            .build()
+            .map_err(|error| {
+                DomainError::Unavailable(format!("failed to build the comment client: {error}"))
+            })?;
+        Ok(Self {
+            client,
+            http,
+            cookie_path,
+        })
     }
 }
 
@@ -261,6 +278,43 @@ impl MusicService for NcmMusicService {
             response.body.text(),
             translation.as_deref(),
         ))
+    }
+
+    async fn comments(&self, id: TrackId, limit: u16, offset: u32) -> domain::Result<Comments> {
+        if limit == 0 {
+            return Err(DomainError::InvalidInput(
+                "comment limit must be greater than zero".to_owned(),
+            ));
+        }
+        let url = format!("{COMMENT_URL}{}?limit={limit}&offset={offset}", id.0);
+        let mut request = self.http.get(url).header(reqwest::header::REFERER, REFERER);
+        if let Ok(cookie) = fs::read_to_string(&self.cookie_path) {
+            let cookie = cookie.trim();
+            if !cookie.is_empty() {
+                request = request.header(reqwest::header::COOKIE, cookie);
+            }
+        }
+        let response = request.send().await.map_err(|error| {
+            DomainError::Unavailable(format!("failed to fetch comments: {error}"))
+        })?;
+        if !response.status().is_success() {
+            return Err(DomainError::Unavailable(format!(
+                "the comment server returned {}",
+                response.status()
+            )));
+        }
+        let body: ProviderComments = response.json().await.map_err(|error| {
+            DomainError::Unavailable(format!("failed to decode comments: {error}"))
+        })?;
+        match body.code {
+            200 => Ok(map::comments(body)),
+            301 => Err(DomainError::AuthenticationRequired(
+                "the music provider rejected the session; run `lekima login`".to_owned(),
+            )),
+            code => Err(DomainError::Unavailable(format!(
+                "the music provider returned code {code} for comments"
+            ))),
+        }
     }
 
     async fn daily(&self) -> domain::Result<Vec<domain::Track>> {

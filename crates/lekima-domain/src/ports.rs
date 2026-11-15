@@ -9,7 +9,9 @@ use async_trait::async_trait;
 use crate::{
     Result,
     lyrics::Lyrics,
-    model::{QrLogin, QrStatus, Quality, SearchKind, SearchResults, Toplist, Track, TrackId},
+    model::{
+        Comments, QrLogin, QrStatus, Quality, SearchKind, SearchResults, Toplist, Track, TrackId,
+    },
     playback::{BufferedRange, PlaybackState},
 };
 
@@ -59,6 +61,14 @@ pub trait MusicService: Send + Sync {
         let _ = id;
         Err(crate::DomainError::Unsupported(
             "lyrics are not supported by this provider".to_owned(),
+        ))
+    }
+
+    /// Public track comments.
+    async fn comments(&self, id: TrackId, limit: u16, offset: u32) -> Result<Comments> {
+        let _ = (id, limit, offset);
+        Err(crate::DomainError::Unsupported(
+            "comments are not supported by this provider".to_owned(),
         ))
     }
 
@@ -138,7 +148,21 @@ pub trait MusicService: Send + Sync {
 #[async_trait]
 pub trait AudioEngine: Send + Sync {
     /// Starts playback of a remote stream, replacing whatever was playing.
-    async fn play_url(&self, url: &str) -> Result<()>;
+    ///
+    /// `cache_key` identifies the stream in the persistent cache; when it is a
+    /// hit the URL may be empty and no network request is made.
+    async fn play_url(&self, url: &str, cache_key: Option<&str>) -> Result<()>;
+
+    /// True when this track/quality is already in the persistent cache.
+    fn has_cached(&self, key: &str) -> bool {
+        let _ = key;
+        false
+    }
+
+    /// Whether the currently loaded track came from the cache.
+    fn last_was_cached(&self) -> bool {
+        false
+    }
 
     fn pause(&self) -> Result<()>;
 
@@ -190,8 +214,13 @@ pub trait AudioEngine: Send + Sync {
 
     /// Prepares a source for the next track and appends it to the same output
     /// queue, so the transition can be gapless.
-    async fn queue_next_url(&self, id: crate::model::TrackId, url: &str) -> Result<()> {
-        let _ = (id, url);
+    async fn queue_next_url(
+        &self,
+        id: crate::model::TrackId,
+        url: &str,
+        cache_key: Option<&str>,
+    ) -> Result<()> {
+        let _ = (id, url, cache_key);
         Err(crate::DomainError::Unsupported(
             "this audio backend cannot preload tracks".to_owned(),
         ))
