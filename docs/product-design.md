@@ -2,7 +2,7 @@
 
 > NetEase Cloud Music in your terminal. Vim-first, agent-native.
 
-Status: **Living document** — shipped through 0.4.1 · Owner: @benmooo · Rewrite
+Status: **Living document** — shipped through 0.5.0 · Owner: @benmooo · Rewrite
 of the archived Go project [`benmooo/lekima`](https://github.com/benmooo/lekima)
 
 ---

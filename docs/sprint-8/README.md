@@ -1,6 +1,6 @@
 # Sprint 8 — Offline cache and comments
 
-Status: **Complete** (unreleased)
+Status: **Released in 0.5.0**
 
 ## Offline cache
 

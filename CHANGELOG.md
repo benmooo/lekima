@@ -3,7 +3,7 @@
 All notable changes to lekima are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
-## Unreleased
+## 0.5.0 — 2026-11-15
 
 ### Added
 
