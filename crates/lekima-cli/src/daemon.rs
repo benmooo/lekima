@@ -14,7 +14,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use lekima_config::{Config, FileCredentials, Paths};
+use lekima_config::{Config, FileCredentials, Paths, PlaybackStore, SavedPlayback};
 use lekima_core::{PlayRequest, Player};
 use lekima_domain::{CredentialsStore, PlaybackState, QueueKind, SearchKind};
 use lekima_ipc::{
@@ -66,6 +66,28 @@ pub async fn run(paths: &Paths, config: &Config, socket: &Path, _detached: bool)
         config.playback.quality,
         config.playback.volume,
     ));
+    let playback_store = PlaybackStore::new(paths.playback_file());
+    match playback_store.load() {
+        Ok(Some(saved)) => {
+            if let Err(error) = player
+                .restore(
+                    saved.tracks,
+                    saved.index,
+                    saved.kind,
+                    saved.repeat,
+                    saved.shuffle,
+                    saved.volume,
+                    saved.quality,
+                    saved.position_ms,
+                )
+                .await
+            {
+                tracing::warn!(%error, "failed to restore the saved queue");
+            }
+        }
+        Ok(None) => {}
+        Err(error) => tracing::warn!(%error, "ignoring a malformed playback snapshot"),
+    }
 
     let hub = Arc::new(EventHub::new());
     let sleep_until = Arc::new(StdMutex::new(None));
@@ -80,6 +102,7 @@ pub async fn run(paths: &Paths, config: &Config, socket: &Path, _detached: bool)
         sleep_until: Arc::clone(&sleep_until),
         preloaded: Arc::clone(&preloaded),
         controls,
+        playback_store: playback_store.clone(),
     });
 
     {
@@ -92,6 +115,7 @@ pub async fn run(paths: &Paths, config: &Config, socket: &Path, _detached: bool)
         sleep_until,
         Arc::clone(&preloaded),
     );
+    spawn_persister(Arc::clone(&player), playback_store.clone());
     spawn_preloader(Arc::clone(&daemon));
     spawn_platform(Arc::clone(&daemon));
 
@@ -127,6 +151,7 @@ pub async fn run(paths: &Paths, config: &Config, socket: &Path, _detached: bool)
     }
 
     tracing::info!("shutting down");
+    persist_playback(&daemon.player, &daemon.playback_store).await;
     let _ = daemon.player.stop().await;
     drop(listener);
     let _ = fs::remove_file(socket);
@@ -141,6 +166,7 @@ struct Daemon {
     sleep_until: Arc<StdMutex<Option<Instant>>>,
     preloaded: Arc<AtomicBool>,
     controls: Arc<dyn MediaControls>,
+    playback_store: PlaybackStore,
 }
 
 /// Sequenced broadcast with a replay ring.
@@ -739,6 +765,66 @@ fn spawn_preloader(daemon: Arc<Daemon>) {
             daemon.preloaded.store(true, Ordering::SeqCst);
         }
     });
+}
+
+fn spawn_persister(player: Arc<Player>, store: PlaybackStore) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(2));
+        let mut last: Option<SavedPlayback> = None;
+        loop {
+            interval.tick().await;
+            let saved = playback_snapshot(&player).await;
+            if saved != last {
+                match &saved {
+                    Some(saved) => {
+                        if let Err(error) = store.save(saved) {
+                            tracing::warn!(%error, "failed to save the playback queue");
+                        }
+                    }
+                    None => {
+                        if let Err(error) = store.clear() {
+                            tracing::warn!(%error, "failed to clear the playback queue");
+                        }
+                    }
+                }
+                last = saved;
+            }
+        }
+    });
+}
+
+async fn playback_snapshot(player: &Player) -> Option<SavedPlayback> {
+    let state = player.snapshot().await;
+    let (tracks, index) = player.queue().await;
+    if tracks.is_empty() {
+        return None;
+    }
+    let pending = player.pending_position_ms().await.unwrap_or(0);
+    Some(SavedPlayback {
+        tracks,
+        index,
+        position_ms: state.position_ms.max(pending),
+        repeat: state.repeat,
+        shuffle: state.shuffle,
+        volume: state.volume,
+        quality: state.quality,
+        kind: state.queue_kind,
+    })
+}
+
+async fn persist_playback(player: &Player, store: &PlaybackStore) {
+    match playback_snapshot(player).await {
+        Some(saved) => {
+            if let Err(error) = store.save(&saved) {
+                tracing::warn!(%error, "failed to save the playback queue");
+            }
+        }
+        None => {
+            if let Err(error) = store.clear() {
+                tracing::warn!(%error, "failed to clear the playback queue");
+            }
+        }
+    }
 }
 
 fn invalidates_preload(command: &Command) -> bool {

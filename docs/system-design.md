@@ -386,7 +386,14 @@ Precedence: defaults → file → environment (`LEKIMA_CONFIG_DIR`,
 forces mono and wins over both.
 
 Files: `config.toml`, `session.cookies` (0600), `lekima.log`, `cache/`
-(response cache, future offline metadata). Nothing outside the root is written.
+(response cache, future offline metadata, and `playback.json`). Nothing outside
+the root is written.
+
+`cache/playback.json` is a 0600 snapshot of the queue, current index,
+repeat/shuffle, volume, quality and position. The daemon rewrites it every two
+seconds and on shutdown; on start it restores the queue in a stopped state, and
+the next `resume`/`play` seeks to the saved position. Streams themselves are not
+persisted.
 
 ## 10. Error taxonomy and mapping
 

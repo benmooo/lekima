@@ -55,6 +55,12 @@ impl Paths {
         self.root.join("cache")
     }
 
+    /// Durable queue snapshot rewritten by the daemon.
+    #[must_use]
+    pub fn playback_file(&self) -> PathBuf {
+        crate::playback::playback_path(&self.cache_dir())
+    }
+
     #[must_use]
     pub fn log_file(&self) -> PathBuf {
         self.root.join("lekima.log")

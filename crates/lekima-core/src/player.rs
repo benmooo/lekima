@@ -31,6 +31,8 @@ struct Inner {
     /// Incremented for every load; stale loads stop themselves.
     generation: u64,
     loading: bool,
+    /// Position to apply after the next successful load of this track.
+    resume_at: Option<(TrackId, u64)>,
 }
 
 /// Owns queue and transport state for the daemon.
@@ -70,6 +72,7 @@ impl Player {
                 kind: QueueKind::Manual,
                 generation: 0,
                 loading: false,
+                resume_at: None,
             }),
             liked: Mutex::new(HashSet::new()),
             trashed: Mutex::new(HashSet::new()),
@@ -80,6 +83,61 @@ impl Player {
     #[must_use]
     pub fn music(&self) -> &Arc<dyn MusicService> {
         &self.music
+    }
+
+    /// Position that will be applied when the current restored track is loaded.
+    #[must_use]
+    pub async fn pending_position_ms(&self) -> Option<u64> {
+        self.inner
+            .lock()
+            .await
+            .resume_at
+            .map(|(_, position)| position)
+    }
+
+    /// Rebuilds a stopped queue from a persisted snapshot.
+    ///
+    /// No stream is fetched and nothing plays until `resume`/`play`; a saved
+    /// position is applied to the first load of that same track.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn restore(
+        &self,
+        tracks: Vec<Track>,
+        index: Option<usize>,
+        kind: QueueKind,
+        repeat: RepeatMode,
+        shuffle: bool,
+        volume: f32,
+        quality: Quality,
+        position_ms: u64,
+    ) -> Result<()> {
+        if tracks.is_empty() {
+            return Ok(());
+        }
+        let index = index.unwrap_or(0).min(tracks.len() - 1);
+        let elapsed = tracks[index].duration_ms;
+        let position_ms = position_ms.min(elapsed.saturating_sub(1));
+        let id = tracks[index].id;
+
+        let volume = volume.clamp(0.0, 1.0);
+        {
+            let mut inner = self.inner.lock().await;
+            inner.queue = Queue::new(tracks);
+            inner.queue.jump(index);
+            inner.kind = kind;
+            inner.repeat = repeat;
+            inner.shuffle = shuffle;
+            inner.volume = volume;
+            inner.muted = false;
+            inner.status = PlaybackStatus::Stopped;
+            inner.position_ms = 0;
+            inner.loading = false;
+            inner.generation = inner.generation.wrapping_add(1);
+            inner.resume_at = (position_ms > 0).then_some((id, position_ms));
+        }
+        let _ = self.audio.set_volume(volume);
+        *self.quality.lock().await = quality;
+        Ok(())
     }
 
     /// Immutable view of the current state.
@@ -222,6 +280,7 @@ impl Player {
         inner.position_ms = 0;
         inner.kind = QueueKind::Manual;
         inner.loading = false;
+        inner.resume_at = None;
         inner.generation = inner.generation.wrapping_add(1);
         drop(inner);
         *self.preloaded.lock().await = None;
@@ -234,7 +293,7 @@ impl Player {
     /// next stream: silence first, then buffering. A generation counter makes
     /// rapid skips cancel superseded loads.
     async fn load_current(&self) -> Result<()> {
-        let (track, generation) = {
+        let (track, generation, resume_at) = {
             let mut inner = self.inner.lock().await;
             let track = inner
                 .queue
@@ -246,7 +305,12 @@ impl Player {
             // Do not show the previous track's position while the next URL is
             // resolved; otherwise B briefly reports A's 0:30 and then snaps to 0.
             inner.position_ms = 0;
-            (track, inner.generation)
+            let resume_at = inner
+                .resume_at
+                .take()
+                .filter(|(id, _)| *id == track.id)
+                .map(|(_, position)| position);
+            (track, inner.generation, resume_at)
         };
 
         // A must go silent now, not after B has been fetched.
@@ -284,6 +348,12 @@ impl Player {
             inner.position_ms = 0;
             let gain = if inner.muted { 0.0 } else { inner.volume };
             let _ = self.audio.set_volume(gain);
+        }
+        if let Some(position) = resume_at {
+            match self.audio.seek(position) {
+                Ok(()) => inner.position_ms = position,
+                Err(error) => tracing::warn!(%error, "failed to restore the saved position"),
+            }
         }
         tracing::debug!(track = %track.id, "playback started");
         Ok(())
@@ -338,6 +408,7 @@ impl Player {
         inner.status = PlaybackStatus::Stopped;
         inner.position_ms = 0;
         inner.loading = false;
+        inner.resume_at = None;
         inner.generation = inner.generation.wrapping_add(1);
         Ok(())
     }
@@ -1033,6 +1104,64 @@ mod tests {
         let state = player.snapshot().await;
         assert_eq!(state.status, PlaybackStatus::Stopped);
         assert_eq!(state.track.unwrap().id, TrackId(8));
+    }
+
+    #[tokio::test]
+    async fn restored_queue_resumes_at_the_saved_position() {
+        let (player, audio) = player();
+        player
+            .restore(
+                vec![track(1), track(2)],
+                Some(1),
+                QueueKind::Manual,
+                RepeatMode::All,
+                true,
+                0.4,
+                Quality::Lossless,
+                500,
+            )
+            .await
+            .unwrap();
+
+        let stopped = player.snapshot().await;
+        assert_eq!(stopped.status, PlaybackStatus::Stopped);
+        assert_eq!(stopped.track.unwrap().id, TrackId(2));
+        assert_eq!(stopped.queue_index, Some(1));
+        assert_eq!(stopped.repeat, RepeatMode::All);
+        assert!(stopped.shuffle);
+        assert_eq!(stopped.quality, Quality::Lossless);
+
+        player.resume().await.unwrap();
+        let playing = player.snapshot().await;
+        assert_eq!(playing.status, PlaybackStatus::Playing);
+        assert_eq!(playing.track.unwrap().id, TrackId(2));
+        assert_eq!(playing.position_ms, 500);
+        assert_eq!(
+            audio.last_url.lock().unwrap().as_deref(),
+            Some("https://example.test/2.mp3")
+        );
+    }
+
+    #[tokio::test]
+    async fn manual_next_at_a_boundary_does_not_skip_twice() {
+        let (player, _audio) = player();
+        player
+            .play(PlayRequest::Tracks {
+                tracks: vec![track(1), track(2), track(3)],
+                kind: QueueKind::Manual,
+            })
+            .await
+            .unwrap();
+        player
+            .queue_next(TrackId(2), "https://example.test/2.mp3")
+            .await
+            .unwrap();
+
+        // The user presses next just as B is (or was about to be) started.
+        assert_eq!(player.next().await.unwrap().unwrap().id, TrackId(2));
+        // The boundary for B arrives afterwards; B is already current.
+        assert!(player.advance_gapless(TrackId(2)).await.unwrap().is_none());
+        assert_eq!(player.snapshot().await.queue_index, Some(1));
     }
 
     #[tokio::test]

@@ -12,6 +12,11 @@ All notable changes to lekima are documented here. The format follows
   status output show a `PREVIEW` badge and progress to the real end.
 - Queue-end recovery: the last entry stays selected when playback stops, so
   `resume`/`space` reloads it instead of failing on a missing current track.
+- Queue persistence: the daemon writes `cache/playback.json` (0600) every two
+  seconds and on shutdown, then restores the queue, index, repeat/shuffle,
+  volume, quality and resume position on start.
+- TUI restart UX: offline polling continues at 1 Hz, reconnects automatically,
+  and announces `daemon restarted - queue restored - space to resume`.
 
 ### Changed
 

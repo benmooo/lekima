@@ -188,6 +188,8 @@ pub struct App {
     pub frame: u64,
     /// Highest daemon event sequence applied; stale status replies are ignored.
     pub last_event_seq: u64,
+    /// Whether the first daemon status has been folded into the view.
+    bootstrapped: bool,
     history_back: Vec<HistoryEntry>,
     history_forward: Vec<HistoryEntry>,
     pub preferences: UiPreferences,
@@ -234,6 +236,7 @@ impl Default for App {
             daemon_down: false,
             frame: 0,
             last_event_seq: 0,
+            bootstrapped: false,
             history_back: Vec::new(),
             history_forward: Vec::new(),
             preferences: UiPreferences::default(),
@@ -1228,6 +1231,7 @@ impl App {
     /// Folds a daemon reply into the view state. Returns a follow-up command.
     pub fn apply(&mut self, result: Result<Reply, IpcError>) -> Action {
         self.status_inflight = false;
+        let was_down = self.daemon_down;
         match result {
             Ok(reply) => {
                 self.daemon_down = false;
@@ -1239,6 +1243,23 @@ impl App {
                         let previous = self.status.track.as_ref().map(|track| track.id);
                         let current_index = state.queue_index;
                         self.status = state;
+                        let first = !self.bootstrapped;
+                        self.bootstrapped = true;
+                        if was_down {
+                            self.notify(
+                                if self.status.queue_length > 0 {
+                                    "daemon restarted - queue restored - space to resume"
+                                } else {
+                                    "daemon restarted"
+                                },
+                                false,
+                            );
+                        } else if first
+                            && self.status.queue_length > 0
+                            && self.status.status == lekima_domain::PlaybackStatus::Stopped
+                        {
+                            self.notify("queue restored - space to resume", false);
+                        }
                         if self.mode == Mode::Queue
                             && self.queue_follow
                             && let Some(index) = current_index
@@ -1343,7 +1364,9 @@ impl App {
                 }
                 if error.is_not_running() {
                     self.daemon_down = true;
-                    self.notify("daemon not running - press R to start it", true);
+                    if !was_down {
+                        self.notify("daemon not running - press R to start it", true);
+                    }
                 } else {
                     self.notify(error_message(&error), true);
                 }
@@ -1900,6 +1923,38 @@ mod tests {
         fresh.position_ms = 500;
         app.apply(Ok(lekima_ipc::Reply::Status { state: fresh }));
         assert_eq!(app.status.position_ms, 500);
+    }
+
+    #[test]
+    fn restored_queue_is_announced_on_first_status() {
+        let mut app = App::new();
+        let mut state = app.status.clone();
+        state.queue_length = 2;
+        state.queue_index = Some(0);
+        state.status = lekima_domain::PlaybackStatus::Stopped;
+        state.track = Some(sample_track(1));
+        app.apply(Ok(lekima_ipc::Reply::Status { state }));
+        let message = app.message.as_ref().expect("restore notice");
+        assert!(message.text.contains("queue restored"), "{}", message.text);
+        assert!(message.text.contains("space to resume"));
+    }
+
+    #[test]
+    fn daemon_restart_is_announced_and_queue_restored() {
+        let mut app = App::new();
+        app.daemon_down = true;
+        let mut state = app.status.clone();
+        state.queue_length = 2;
+        state.status = lekima_domain::PlaybackStatus::Stopped;
+        app.apply(Ok(lekima_ipc::Reply::Status { state }));
+        assert!(!app.daemon_down);
+        let message = app.message.as_ref().expect("restart notice");
+        assert!(
+            message.text.contains("daemon restarted"),
+            "{}",
+            message.text
+        );
+        assert!(message.text.contains("queue restored"));
     }
 
     #[test]

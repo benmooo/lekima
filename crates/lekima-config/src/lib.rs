@@ -7,10 +7,12 @@
 
 mod config;
 mod paths;
+mod playback;
 mod session;
 
 pub use config::{AudioConfig, Config, DaemonConfig, PlaybackConfig, ProviderConfig, UiConfig};
 pub use paths::{PathError, Paths};
+pub use playback::{PlaybackStore, SavedPlayback, playback_path};
 pub use session::FileCredentials;
 
 pub use config::{load as load_config, save_audio_device, save_quality, save_ui};
