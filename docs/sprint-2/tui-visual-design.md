@@ -115,8 +115,9 @@ terminals; the title is clipped first only when the terminal is very small.
   streamed track shows what is available before it is played.
 - Mode badges: `[⟲ OFF|ALL|1]` (dim / cyan / accent) and `[⇄]` (hot when on,
   dim when off). Playhead `●`; ASCII mode uses `>` with `=`/`-` rails.
-- `VOL` meter, queue count, quality class (`EXHIGH`), sleep countdown, then a
-  compact 12-column spectrum strip (`SIG`).
+- `VOL` meter, queue count, quality class (`EXHIGH`), a `PREVIEW` badge when
+  the decoded stream is shorter than the catalogue duration, sleep countdown,
+  then a compact 12-column spectrum strip (`SIG`).
 
 ### Library sidebar
 

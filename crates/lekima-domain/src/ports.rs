@@ -173,6 +173,12 @@ pub trait AudioEngine: Send + Sync {
         false
     }
 
+    /// Actual decoded stream duration when the provider clipped it shorter than
+    /// the catalogue metadata (a preview). `None` for normal/unknown streams.
+    fn stream_duration_ms(&self) -> Option<u64> {
+        None
+    }
+
     /// Ranges of the current track already available locally, in milliseconds.
     ///
     /// Empty means either the whole track is buffered or the backend cannot

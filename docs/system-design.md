@@ -109,7 +109,7 @@ classDiagram
   class Playlist { PlaylistId id; String name; u64 track_count; Option~String~ owner }
   class UserProfile { UserId id; String nickname; Option~String~ avatar_url }
   class Queue { Vec~Track~ tracks; Option~usize~ current }
-  class PlaybackState { PlaybackStatus status; Option~Track~ track; u64 position_ms; f32 volume; bool muted; RepeatMode repeat; bool shuffle; Vec~BufferedRange~ buffered; u64 revision }
+  class PlaybackState { PlaybackStatus status; Option~Track~ track; u64 position_ms; f32 volume; bool muted; RepeatMode repeat; bool shuffle; Vec~BufferedRange~ buffered; u64 revision; Option~u64~ stream_duration_ms }
   Queue --> Track
   PlaybackState --> Queue
 ```
@@ -247,6 +247,9 @@ Decisions:
 - The spool exposes its merged byte ranges; the audio adapter maps them to track
   time (`buffered_ranges`) and the core publishes them as
   `PlaybackState.buffered`, letting frontends shade what is already local.
+- The decoder's real duration is published as `stream_duration_ms` when it is
+  shorter than catalogue metadata; frontends label the track `PREVIEW` and draw
+  progress against the actual stream length.
 - Gapless: when the next queued track fits the preload budget and matches the
   sample rate, its source is prepared and appended to the same rodio queue; a
   boundary source advances core state on the first sample. Only one preload is

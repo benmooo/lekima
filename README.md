@@ -45,6 +45,8 @@ $ lekima status --json
   accessibility gaps against the visual design, ordered by priority.
 - [`docs/sprint-6/`](docs/sprint-6/) — **TUI correctness** (shipped in 0.4.0):
   responsiveness, accessibility, queue confirmation, sanitization.
+- [`docs/sprint-7/`](docs/sprint-7/) — **Playback hardening** (in progress):
+  preview duration, queue-end recovery and transition tests.
 - [`docs/releasing.md`](docs/releasing.md) — release flow, including
   `--registry crates-io` on this USTC-mirrored machine.
 - [`docs/sessions/`](docs/sessions/) — archived OpenCode sessions (this rewrite,

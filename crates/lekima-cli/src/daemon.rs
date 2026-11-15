@@ -237,7 +237,7 @@ impl Daemon {
         match reply {
             Reply::Status { state } if !matches!(command, Command::Status) => {
                 self.hub.publish(Event::Status {
-                    state: state.clone(),
+                    state: Box::new(state.clone()),
                 });
             }
             Reply::Queue { tracks, index } => self.hub.publish(Event::Queue {
@@ -573,7 +573,7 @@ fn spawn_ticker(
                     Ok(_) => {
                         preloaded.store(false, Ordering::SeqCst);
                         hub.publish(Event::Status {
-                            state: player.snapshot().await,
+                            state: Box::new(player.snapshot().await),
                         });
                         let (tracks, index) = player.queue().await;
                         hub.publish(Event::Queue { tracks, index });
@@ -585,7 +585,7 @@ fn spawn_ticker(
             match player.tick().await {
                 Ok(Some(_)) => {
                     hub.publish(Event::Status {
-                        state: player.snapshot().await,
+                        state: Box::new(player.snapshot().await),
                     });
                     let (tracks, index) = player.queue().await;
                     hub.publish(Event::Queue { tracks, index });
@@ -611,7 +611,7 @@ fn spawn_ticker(
                 }
                 let _ = player.pause().await;
                 hub.publish(Event::Status {
-                    state: player.snapshot().await,
+                    state: Box::new(player.snapshot().await),
                 });
             }
         }

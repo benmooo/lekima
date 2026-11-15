@@ -14,7 +14,7 @@ use std::{
 
 use async_trait::async_trait;
 use lekima_domain::{AudioEngine, BufferedRange, DomainError, Result, TrackId};
-use rodio::{Decoder, DeviceSinkBuilder, Player, cpal, cpal::traits::HostTrait};
+use rodio::{Decoder, DeviceSinkBuilder, Player, Source, cpal, cpal::traits::HostTrait};
 
 use crate::{
     prefetch::PrefetchSource,
@@ -99,6 +99,7 @@ struct Shared {
     volume_bits: AtomicU32,
     wave: Arc<Waveform>,
     boundary: Mutex<Option<TrackId>>,
+    stream_duration_ms: AtomicU64,
 }
 
 impl Shared {
@@ -110,6 +111,7 @@ impl Shared {
             volume_bits: AtomicU32::new(volume.clamp(0.0, 1.0).to_bits()),
             wave: Arc::new(Waveform::new()),
             boundary: Mutex::new(None),
+            stream_duration_ms: AtomicU64::new(0),
         }
     }
 
@@ -120,6 +122,20 @@ impl Shared {
     fn set_volume(&self, volume: f32) {
         self.volume_bits
             .store(volume.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+    }
+
+    fn set_stream_duration(&self, duration: Option<Duration>) {
+        let millis = duration
+            .map(|duration| u64::try_from(duration.as_millis()).unwrap_or(u64::MAX))
+            .unwrap_or(0);
+        self.stream_duration_ms.store(millis, Ordering::Relaxed);
+    }
+
+    fn stream_duration(&self) -> Option<u64> {
+        match self.stream_duration_ms.load(Ordering::Relaxed) {
+            0 => None,
+            millis => Some(millis),
+        }
     }
 }
 
@@ -337,6 +353,10 @@ impl AudioEngine for RodioAudioEngine {
             .unwrap_or(false)
     }
 
+    fn stream_duration_ms(&self) -> Option<u64> {
+        self.shared.stream_duration()
+    }
+
     fn buffered_ranges(&self, duration_ms: u64) -> Vec<BufferedRange> {
         let Ok(slot) = self.spool.lock() else {
             return Vec::new();
@@ -416,6 +436,7 @@ impl Drop for RodioAudioEngine {
 struct Boundary<S> {
     inner: S,
     track: TrackId,
+    duration: Option<Duration>,
     shared: Arc<Shared>,
     fired: bool,
 }
@@ -432,6 +453,7 @@ impl<S: rodio::Source> Iterator for Boundary<S> {
                 .boundary
                 .lock()
                 .unwrap_or_else(|poison| poison.into_inner()) = Some(self.track);
+            self.shared.set_stream_duration(self.duration);
             self.shared.position_ms.store(0, Ordering::Relaxed);
         }
         Some(sample)
@@ -620,6 +642,7 @@ fn audio_thread(
         match receiver.recv_timeout(POLL_INTERVAL) {
             Ok(Command::Load { bytes, ack }) => {
                 player.stop();
+                shared.set_stream_duration(None);
                 *shared
                     .boundary
                     .lock()
@@ -633,6 +656,7 @@ fn audio_thread(
                     .build();
                 match decoder {
                     Ok(decoder) => {
+                        shared.set_stream_duration(decoder.total_duration());
                         shared.loaded.store(true, Ordering::Relaxed);
                         shared.finished.store(false, Ordering::Relaxed);
                         shared.position_ms.store(0, Ordering::Relaxed);
@@ -655,6 +679,7 @@ fn audio_thread(
                 ack,
             }) => {
                 player.stop();
+                shared.set_stream_duration(None);
                 *shared
                     .boundary
                     .lock()
@@ -667,6 +692,7 @@ fn audio_thread(
                 }
                 match builder.build() {
                     Ok(decoder) => {
+                        shared.set_stream_duration(decoder.total_duration());
                         shared.loaded.store(true, Ordering::Relaxed);
                         shared.finished.store(false, Ordering::Relaxed);
                         shared.position_ms.store(0, Ordering::Relaxed);
@@ -694,9 +720,11 @@ fn audio_thread(
                     .build();
                 match decoder {
                     Ok(decoder) => {
+                        let duration = decoder.total_duration();
                         let source = Boundary {
                             inner: Metered::new(decoder, Arc::clone(&shared.wave)),
                             track,
+                            duration,
                             shared: Arc::clone(&shared),
                             fired: false,
                         };
@@ -716,6 +744,7 @@ fn audio_thread(
                     .boundary
                     .lock()
                     .unwrap_or_else(|poison| poison.into_inner()) = None;
+                shared.set_stream_duration(None);
                 shared.loaded.store(false, Ordering::Relaxed);
                 shared.finished.store(false, Ordering::Relaxed);
                 shared.position_ms.store(0, Ordering::Relaxed);
@@ -794,6 +823,7 @@ mod tests {
         io::{Read as _, Seek as _, SeekFrom, Write as _},
         net::TcpListener,
         sync::Arc,
+        time::Duration,
     };
 
     use tempfile::NamedTempFile;
@@ -894,10 +924,16 @@ mod tests {
         let mut source = Boundary {
             inner: rodio::source::SineWave::new(440.0),
             track: lekima_domain::TrackId(7),
+            duration: Some(Duration::from_secs(30)),
             shared: Arc::clone(&shared),
             fired: false,
         };
         assert!(source.next().is_some());
+        assert_eq!(
+            shared.stream_duration(),
+            Some(30_000),
+            "boundary should publish its stream duration"
+        );
         let boundary = shared
             .boundary
             .lock()

@@ -133,6 +133,10 @@ pub struct PlaybackState {
     /// Recent amplitude envelope from the audio device (oldest first, 0..=1).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub wave: Vec<f32>,
+    /// Actual decoded stream duration, when it is shorter than the metadata
+    /// duration (a provider preview). `None` for full tracks or unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream_duration_ms: Option<u64>,
     /// Locally buffered ranges of the current track, for progress shading.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub buffered: Vec<BufferedRange>,
@@ -173,6 +177,7 @@ impl Default for PlaybackState {
             quality: Quality::Exhigh,
             sleep_remaining_ms: None,
             wave: Vec::new(),
+            stream_duration_ms: None,
             buffered: Vec::new(),
             revision: 0,
         }
@@ -289,7 +294,8 @@ impl Queue {
     /// Advances to the next track according to the repeat mode.
     ///
     /// `RepeatMode::One` replays the current track; `All` wraps around;
-    /// `Off` stops at the end by returning `None`.
+    /// `Off` stops at the end by returning `None`, leaving the cursor on the
+    /// final track so the UI can still show what stopped.
     pub fn advance(&mut self, repeat: RepeatMode) -> Option<&Track> {
         let current = self.current?;
         let next = match repeat {
@@ -303,8 +309,12 @@ impl Queue {
                 }
             }
         };
-        self.current = next;
-        self.current()
+        if let Some(next) = next {
+            self.current = Some(next);
+            self.current()
+        } else {
+            None
+        }
     }
 
     /// Moves backwards, wrapping only when repeating everything.
@@ -397,6 +407,8 @@ mod tests {
         queue.advance(RepeatMode::Off);
         assert_eq!(queue.current().unwrap().id.get(), 2);
         assert!(queue.advance(RepeatMode::Off).is_none());
+        assert_eq!(queue.current().unwrap().id.get(), 2);
+        assert_eq!(queue.current_index(), Some(1));
     }
 
     #[test]

@@ -6,7 +6,7 @@
 
 use std::borrow::Cow;
 
-use lekima_domain::{PlaybackStatus, RepeatMode, sanitize_line};
+use lekima_domain::{PlaybackState, PlaybackStatus, RepeatMode, Track, sanitize_line};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
@@ -130,7 +130,7 @@ fn draw_hud(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         .status
         .track
         .as_ref()
-        .map_or(0, |track| track.duration_ms);
+        .map_or(0, |track| effective_duration(&app.status, track));
 
     // Optional segments, ordered by priority. The tail is dropped first when
     // the terminal is narrow; progress and time are the last to go.
@@ -162,6 +162,17 @@ fn draw_hud(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             app.status.quality.as_str().to_ascii_uppercase(),
             Style::new().fg(theme.accent_alt),
         )]);
+        if app
+            .status
+            .track
+            .as_ref()
+            .is_some_and(|track| is_preview(&app.status, track))
+        {
+            groups.push(vec![Span::styled(
+                "PREVIEW",
+                Style::new().fg(theme.warn).add_modifier(Modifier::BOLD),
+            )]);
+        }
         groups.push(spectrum_group(app, theme));
     }
 
@@ -936,7 +947,7 @@ fn draw_lyrics(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         .status
         .track
         .as_ref()
-        .map_or(0, |track| track.duration_ms);
+        .map_or(0, |track| effective_duration(&app.status, track));
     let footer_line = Line::from(vec![
         Span::styled(
             format!("{offset:+} ms"),
@@ -1173,7 +1184,12 @@ fn draw_queue(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     } else {
         String::new()
     };
-    let remaining = queue_remaining(&app.queue, app.status.queue_index, app.status.position_ms);
+    let remaining = queue_remaining(
+        &app.queue,
+        app.status.queue_index,
+        app.status.position_ms,
+        &app.status,
+    );
     let remaining_label = if remaining > 0 && label.width >= 44 {
         format!(" {} {} left", theme.glyphs.separator, clock(remaining))
     } else {
@@ -1253,10 +1269,22 @@ fn draw_queue(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     frame.render_stateful_widget(table, content, &mut state);
 }
 
+fn effective_duration(state: &PlaybackState, track: &Track) -> u64 {
+    match state.stream_duration_ms {
+        Some(stream) if stream > 0 && stream.saturating_add(2_000) < track.duration_ms => stream,
+        _ => track.duration_ms,
+    }
+}
+
+fn is_preview(state: &PlaybackState, track: &Track) -> bool {
+    effective_duration(state, track) < track.duration_ms
+}
+
 fn queue_remaining(
     queue: &[lekima_domain::Track],
     current: Option<usize>,
     position_ms: u64,
+    state: &PlaybackState,
 ) -> u64 {
     let start = current.unwrap_or(0).min(queue.len());
     queue
@@ -1264,10 +1292,15 @@ fn queue_remaining(
         .enumerate()
         .skip(start)
         .map(|(index, track)| {
-            if Some(index) == current {
-                track.duration_ms.saturating_sub(position_ms)
+            let duration = if Some(index) == current {
+                effective_duration(state, track)
             } else {
                 track.duration_ms
+            };
+            if Some(index) == current {
+                duration.saturating_sub(position_ms)
+            } else {
+                duration
             }
         })
         .fold(0_u64, u64::saturating_add)
@@ -2288,6 +2321,17 @@ mod tests {
         app.status.position_ms = 42_000;
         let screen = render(&mut app, 100, 30);
         assert!(screen.contains("9:18 left"), "{screen}");
+    }
+
+    #[test]
+    fn preview_streams_use_their_real_duration() {
+        let mut app = App::new();
+        app.status.status = lekima_domain::PlaybackStatus::Playing;
+        app.status.track = Some(track("Mota"));
+        app.status.stream_duration_ms = Some(30_000);
+        let screen = render(&mut app, 120, 24);
+        assert!(screen.contains("PREVIEW"), "{screen}");
+        assert!(screen.contains("00:00/00:30"), "{screen}");
     }
 
     #[test]

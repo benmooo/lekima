@@ -184,6 +184,8 @@ Global — `q`/`Ctrl-c` quit, `?` help, `/` search, `:` command line,
   loading glyph until the next stream starts. Keys stay responsive.
 - **No stream**: “This track has no playable stream (VIP or region).” The queue
   skips automatically after 2 s unless `--strict`.
+- **Preview stream**: when the decoded stream is shorter than catalogue metadata,
+  show `PREVIEW` and progress against the real duration; advance once at its end.
 - **Offline / provider down**: banner “offline — showing cached library”;
   playback of already-resolved URLs continues.
 - **Unauthenticated**: browsing works where the provider allows it; play shows

@@ -91,7 +91,7 @@ async fn event_loop(
                 let Some(frame) = frame else { break };
                 app.note_event(frame.seq);
                 let reply = match frame.event {
-                    DaemonEvent::Status { state } => Some(Reply::Status { state }),
+                    DaemonEvent::Status { state } => Some(Reply::Status { state: *state }),
                     DaemonEvent::Queue { tracks, index } => {
                         Some(Reply::Queue { tracks, index })
                     }

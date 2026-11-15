@@ -116,6 +116,7 @@ impl Player {
             quality: *self.quality.lock().await,
             sleep_remaining_ms: None,
             wave: self.audio.wave(),
+            stream_duration_ms: self.audio.stream_duration_ms(),
             buffered: self.audio.buffered_ranges(duration_ms),
             revision: 0,
         }
@@ -1029,7 +1030,37 @@ mod tests {
         player.set_repeat(RepeatMode::All).await;
         assert_eq!(player.next().await.unwrap().unwrap().id, TrackId(8));
         assert!(player.next().await.unwrap().is_none());
-        assert!(player.snapshot().await.track.is_none());
+        let state = player.snapshot().await;
+        assert_eq!(state.status, PlaybackStatus::Stopped);
+        assert_eq!(state.track.unwrap().id, TrackId(8));
+    }
+
+    #[tokio::test]
+    async fn queue_end_keeps_the_last_track_and_can_resume() {
+        let (player, audio) = player();
+        player
+            .play(PlayRequest::Tracks {
+                tracks: vec![track(1), track(2)],
+                kind: QueueKind::Manual,
+            })
+            .await
+            .unwrap();
+        assert_eq!(player.next().await.unwrap().unwrap().id, TrackId(2));
+        assert!(player.next().await.unwrap().is_none());
+
+        let stopped = player.snapshot().await;
+        assert_eq!(stopped.status, PlaybackStatus::Stopped);
+        assert_eq!(stopped.track.unwrap().id, TrackId(2));
+        assert_eq!(stopped.queue_index, Some(1));
+
+        player.resume().await.unwrap();
+        let resumed = player.snapshot().await;
+        assert_eq!(resumed.status, PlaybackStatus::Playing);
+        assert_eq!(resumed.track.unwrap().id, TrackId(2));
+        assert_eq!(
+            audio.last_url.lock().unwrap().as_deref(),
+            Some("https://example.test/2.mp3")
+        );
     }
 
     #[tokio::test]

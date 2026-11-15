@@ -166,16 +166,30 @@ pub fn print_failure(failure: &Failure, json: bool) {
 }
 
 fn print_status(state: &PlaybackState) {
+    let preview = state.track.as_ref().is_some_and(|track| {
+        state
+            .stream_duration_ms
+            .is_some_and(|stream| stream > 0 && stream.saturating_add(2_000) < track.duration_ms)
+    });
     let track = state.track.as_ref().map_or_else(
         || "nothing playing".to_owned(),
         |track| {
             format!(
-                "{} — {}",
+                "{} — {}{}",
                 sanitize_line(&track.name),
-                sanitize_line(&track.artist_names())
+                sanitize_line(&track.artist_names()),
+                if preview { "  [PREVIEW]" } else { "" }
             )
         },
     );
+    let duration = state.track.as_ref().map_or("--:--".to_owned(), |track| {
+        let duration = if preview {
+            state.stream_duration_ms.unwrap_or(track.duration_ms)
+        } else {
+            track.duration_ms
+        };
+        format_clock(duration)
+    });
     let sleep = state
         .sleep_remaining_ms
         .map_or_else(String::new, |ms| format!("  sleep {}", format_clock(ms)));
@@ -183,11 +197,8 @@ fn print_status(state: &PlaybackState) {
         "{}  {}  [{}/{}]  vol {:.0}%  repeat {}  queue {}  {}{}",
         icon(state),
         track,
-        format_ms(state.position_ms),
-        state
-            .track
-            .as_ref()
-            .map_or("--:--".to_owned(), |track| format_ms(track.duration_ms)),
+        format_clock(state.position_ms),
+        duration,
         state.effective_volume() * 100.0,
         state.repeat.as_str(),
         state.queue_length,
@@ -253,11 +264,6 @@ fn print_queue(tracks: &[Track], index: Option<usize>) {
 fn format_clock(ms: u64) -> String {
     let seconds = ms / 1000;
     format!("{:02}:{:02}", seconds / 60, seconds % 60)
-}
-
-fn format_ms(ms: u64) -> String {
-    let seconds = ms / 1000;
-    format!("{}/{:02}", seconds / 60, seconds % 60)
 }
 
 fn truncate(value: &str, width: usize) -> String {

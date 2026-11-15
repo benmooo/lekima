@@ -20,7 +20,7 @@ pub enum EventKind {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
     Status {
-        state: PlaybackState,
+        state: Box<PlaybackState>,
     },
     Queue {
         tracks: Vec<Track>,

@@ -3,6 +3,21 @@
 All notable changes to lekima are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## Unreleased
+
+### Added
+
+- `PlaybackState.stream_duration_ms`: the decoder's real duration when a
+  provider preview is shorter than the catalogue metadata. The HUD and human
+  status output show a `PREVIEW` badge and progress to the real end.
+- Queue-end recovery: the last entry stays selected when playback stops, so
+  `resume`/`space` reloads it instead of failing on a missing current track.
+
+### Changed
+
+- Status event frames box their `PlaybackState` payload so the event enum stays
+  small after the new status fields.
+
 ## 0.4.1 — 2026-11-15
 
 ### Fixed
