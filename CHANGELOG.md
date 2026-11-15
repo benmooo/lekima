@@ -3,6 +3,17 @@
 All notable changes to lekima are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## Unreleased
+
+### Fixed
+
+- Switching to a new track resets the playback position before the stream URL
+  is resolved. An incomplete preview of A no longer makes B briefly report A's
+  last position and then snap to zero.
+- Status replies now carry a daemon revision, and the TUI ignores a poll that
+  was answered before a newer event. This prevents the track, progress and
+  lyrics from flickering back to the previous song at a transition.
+
 ## 0.4.0 — 2026-11-15
 
 ### Added

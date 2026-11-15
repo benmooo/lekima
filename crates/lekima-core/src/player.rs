@@ -88,7 +88,7 @@ impl Player {
         let liked = self.liked.lock().await;
         let inner = self.inner.lock().await;
         let duration_ms = inner.queue.current().map_or(0, |track| track.duration_ms);
-        let mut state = PlaybackState {
+        PlaybackState {
             status: inner.status,
             track: inner.queue.current().cloned(),
             // The device is the source of truth while a track is loaded; `max`
@@ -117,14 +117,8 @@ impl Player {
             sleep_remaining_ms: None,
             wave: self.audio.wave(),
             buffered: self.audio.buffered_ranges(duration_ms),
-        };
-        if state.status != PlaybackStatus::Stopped
-            && state.position_ms == 0
-            && inner.position_ms > 0
-        {
-            state.position_ms = inner.position_ms;
+            revision: 0,
         }
-        state
     }
 
     /// Replaces the queue and starts the first track.
@@ -248,6 +242,9 @@ impl Player {
                 .ok_or_else(|| DomainError::NotFound("current track".to_owned()))?;
             inner.generation = inner.generation.wrapping_add(1);
             inner.loading = true;
+            // Do not show the previous track's position while the next URL is
+            // resolved; otherwise B briefly reports A's 0:30 and then snaps to 0.
+            inner.position_ms = 0;
             (track, inner.generation)
         };
 
@@ -870,6 +867,7 @@ mod tests {
             *self.last_url.lock().unwrap() = Some(url.to_owned());
             self.playing.store(true, Ordering::SeqCst);
             self.finished.store(false, Ordering::SeqCst);
+            self.position.store(0, Ordering::SeqCst);
             Ok(())
         }
 
@@ -1032,6 +1030,45 @@ mod tests {
         assert_eq!(player.next().await.unwrap().unwrap().id, TrackId(8));
         assert!(player.next().await.unwrap().is_none());
         assert!(player.snapshot().await.track.is_none());
+    }
+
+    #[tokio::test]
+    async fn incomplete_track_hands_off_to_the_next_track_at_zero() {
+        let (player, audio) = player();
+        player
+            .play(PlayRequest::Tracks {
+                tracks: vec![track(1), track(2)],
+                kind: QueueKind::Manual,
+            })
+            .await
+            .unwrap();
+        // A 30 s preview of a 2 min track: it ends early, and the next track
+        // must not inherit 0:30 as its starting position.
+        audio.position.store(30_000, Ordering::SeqCst);
+        audio.finished.store(true, Ordering::SeqCst);
+        let next = player.tick().await.unwrap().unwrap();
+        assert_eq!(next.id, TrackId(2));
+        let state = player.snapshot().await;
+        assert_eq!(state.track.unwrap().id, TrackId(2));
+        assert_eq!(state.position_ms, 0);
+    }
+
+    #[tokio::test]
+    async fn switching_tracks_does_not_inherit_the_previous_position() {
+        let (player, _audio) = player();
+        player
+            .play(PlayRequest::Tracks {
+                tracks: vec![track(1), track(2)],
+                kind: QueueKind::Manual,
+            })
+            .await
+            .unwrap();
+        player.inner.lock().await.position_ms = 30_000;
+        assert_eq!(player.snapshot().await.position_ms, 0);
+
+        player.next().await.unwrap();
+        assert_eq!(player.snapshot().await.position_ms, 0);
+        assert_eq!(player.snapshot().await.queue_index, Some(1));
     }
 
     #[tokio::test]

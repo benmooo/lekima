@@ -216,11 +216,20 @@ impl Daemon {
         }
         let outcome = self.execute(command.clone()).await;
         match outcome {
-            Ok(reply) => {
+            Ok(mut reply) => {
+                self.stamp_revision(&mut reply);
                 self.publish(&command, &reply).await;
                 Handled::reply(Response::ok(id, reply))
             }
             Err(error) => Handled::reply(Response::err(id, error)),
+        }
+    }
+
+    /// Stamps status replies with the event revision clients should compare
+    /// against; a poll handled before a newer event cannot overwrite it.
+    fn stamp_revision(&self, reply: &mut Reply) {
+        if let Reply::Status { state } = reply {
+            state.revision = self.hub.seq.load(Ordering::SeqCst);
         }
     }
 

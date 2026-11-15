@@ -186,6 +186,8 @@ pub struct App {
     pub daemon_down: bool,
     /// Monotonic tick counter; drives cursor blink and subtle animation.
     pub frame: u64,
+    /// Highest daemon event sequence applied; stale status replies are ignored.
+    pub last_event_seq: u64,
     history_back: Vec<HistoryEntry>,
     history_forward: Vec<HistoryEntry>,
     pub preferences: UiPreferences,
@@ -231,6 +233,7 @@ impl Default for App {
             status_inflight: false,
             daemon_down: false,
             frame: 0,
+            last_event_seq: 0,
             history_back: Vec::new(),
             history_forward: Vec::new(),
             preferences: UiPreferences::default(),
@@ -373,6 +376,11 @@ impl App {
             error,
             created: self.frame,
         });
+    }
+
+    /// Records the newest daemon event sequence.
+    pub fn note_event(&mut self, seq: u64) {
+        self.last_event_seq = self.last_event_seq.max(seq);
     }
 
     #[must_use]
@@ -1225,6 +1233,9 @@ impl App {
                 self.daemon_down = false;
                 match reply {
                     Reply::Status { state } => {
+                        if state.revision != 0 && state.revision < self.last_event_seq {
+                            return Action::None;
+                        }
                         let previous = self.status.track.as_ref().map(|track| track.id);
                         let current_index = state.queue_index;
                         self.status = state;
@@ -1872,6 +1883,23 @@ mod tests {
         }));
         assert_eq!(app.queue.len(), 4);
         assert_eq!(app.queue_selection, 1);
+    }
+
+    #[test]
+    fn stale_status_replies_are_ignored_after_a_newer_event() {
+        let mut app = App::new();
+        app.note_event(10);
+        let mut stale = app.status.clone();
+        stale.revision = 9;
+        stale.position_ms = 30_000;
+        app.apply(Ok(lekima_ipc::Reply::Status { state: stale }));
+        assert_eq!(app.status.position_ms, 0);
+
+        let mut fresh = app.status.clone();
+        fresh.revision = 10;
+        fresh.position_ms = 500;
+        app.apply(Ok(lekima_ipc::Reply::Status { state: fresh }));
+        assert_eq!(app.status.position_ms, 500);
     }
 
     #[test]

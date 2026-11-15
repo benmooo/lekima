@@ -136,6 +136,9 @@ pub struct PlaybackState {
     /// Locally buffered ranges of the current track, for progress shading.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub buffered: Vec<BufferedRange>,
+    /// Monotonic daemon revision; clients use it to ignore stale status polls.
+    #[serde(default)]
+    pub revision: u64,
 }
 
 const fn default_volume() -> f32 {
@@ -171,6 +174,7 @@ impl Default for PlaybackState {
             sleep_remaining_ms: None,
             wave: Vec::new(),
             buffered: Vec::new(),
+            revision: 0,
         }
     }
 }

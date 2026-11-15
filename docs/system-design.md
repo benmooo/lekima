@@ -109,7 +109,7 @@ classDiagram
   class Playlist { PlaylistId id; String name; u64 track_count; Option~String~ owner }
   class UserProfile { UserId id; String nickname; Option~String~ avatar_url }
   class Queue { Vec~Track~ tracks; Option~usize~ current }
-  class PlaybackState { PlaybackStatus status; Option~Track~ track; u64 position_ms; f32 volume; bool muted; RepeatMode repeat; bool shuffle; Vec~BufferedRange~ buffered }
+  class PlaybackState { PlaybackStatus status; Option~Track~ track; u64 position_ms; f32 volume; bool muted; RepeatMode repeat; bool shuffle; Vec~BufferedRange~ buffered; u64 revision }
   Queue --> Track
   PlaybackState --> Queue
 ```
@@ -297,6 +297,9 @@ Properties:
   the TUI subscribes and keeps a 20 Hz status poll for the spectrum.
 - Background changes publish events too: FM prefetch emits a `queue` frame when
   it appends a batch, and gapless/auto advance emits both `status` and `queue`.
+- Status replies carry the daemon’s current event revision. Clients that also
+  subscribe to events discard a poll whose revision predates the newest event,
+  so a slow reply cannot move progress/lyrics back to the previous track.
 - **MCP**: `lekima mcp` speaks JSON-RPC over stdio and maps 13 tools onto the
   same IPC commands; it owns no state and never reads the session file.
 
