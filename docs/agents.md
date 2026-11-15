@@ -45,7 +45,7 @@ lekima mcp
 
 JSON-RPC over stdio. Tools: `player_status`, `search`, `play`, `pause`,
 `resume`, `next`, `previous`, `set_volume`, `queue_list`, `queue_add`,
-`queue_remove`, `queue_move`, `lyrics`, `daily`, `fm`.
+`queue_remove`, `queue_move`, `sleep`, `set_quality`, `lyrics`, `daily`, `fm`.
 
 Host config:
 

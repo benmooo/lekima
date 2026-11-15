@@ -199,7 +199,7 @@ pub enum TopCommand {
         #[arg(long, value_name = "PATH")]
         cookie_file: Option<PathBuf>,
 
-        /// Start the QR flow in the terminal (not available yet).
+        /// Start the QR flow in the terminal.
         #[arg(long)]
         qr: bool,
     },

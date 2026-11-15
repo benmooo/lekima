@@ -362,6 +362,53 @@ fn tools() -> Vec<Value> {
             false,
         ),
         tool(
+            "queue_remove",
+            "Remove a queued track by index.",
+            json!({
+                "type": "object",
+                "properties": { "index": { "type": "integer", "minimum": 0 } },
+                "required": ["index"]
+            }),
+            false,
+        ),
+        tool(
+            "queue_move",
+            "Move a queued track to another position.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "from": { "type": "integer", "minimum": 0 },
+                    "to": { "type": "integer", "minimum": 0 }
+                },
+                "required": ["from", "to"]
+            }),
+            false,
+        ),
+        tool(
+            "sleep",
+            "Pause playback after the given number of minutes; omit to cancel.",
+            json!({
+                "type": "object",
+                "properties": { "minutes": { "type": "integer", "minimum": 0 } }
+            }),
+            false,
+        ),
+        tool(
+            "set_quality",
+            "Set the streaming quality for subsequent tracks.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "quality": {
+                        "type": "string",
+                        "enum": ["standard", "higher", "exhigh", "lossless"]
+                    }
+                },
+                "required": ["quality"]
+            }),
+            false,
+        ),
+        tool(
             "lyrics",
             "Timed lyrics for the current or a specific track.",
             json!({
@@ -402,7 +449,25 @@ mod tests {
             .iter()
             .filter_map(|tool| tool["name"].as_str().map(str::to_owned))
             .collect();
-        for expected in ["player_status", "play", "pause", "search", "lyrics", "fm"] {
+        for expected in [
+            "player_status",
+            "search",
+            "play",
+            "pause",
+            "resume",
+            "next",
+            "previous",
+            "set_volume",
+            "queue_list",
+            "queue_add",
+            "queue_remove",
+            "queue_move",
+            "sleep",
+            "set_quality",
+            "lyrics",
+            "daily",
+            "fm",
+        ] {
             assert!(names.iter().any(|name| name == expected), "{names:?}");
         }
     }
