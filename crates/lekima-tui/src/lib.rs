@@ -6,6 +6,7 @@
 //! network is slow and lets a CLI or an agent change what you are looking at.
 
 pub mod app;
+pub mod keymap;
 pub mod theme;
 pub mod ui;
 
@@ -135,7 +136,7 @@ fn apply_action(
         Action::UiChanged => false,
         Action::SpawnDaemon => {
             spawn_daemon();
-            app.notify("starting the daemon…", false);
+            app.notify("starting the daemon...", false);
             false
         }
     }

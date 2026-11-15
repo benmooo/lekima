@@ -81,12 +81,66 @@ fn main() {
         },
     ];
 
-    let width = 126u16;
-    let height = 22u16;
-    let theme_name = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "cyber".to_owned());
-    let theme = Theme::resolve(&theme_name, "unicode", "compact");
+    let mut width = 126u16;
+    let mut height = 22u16;
+    let mut theme_name = "cyber".to_owned();
+    let mut glyphs = "unicode".to_owned();
+    let mut density = "compact".to_owned();
+    let mut mode = "normal".to_owned();
+
+    let mut arguments = std::env::args().skip(1);
+    while let Some(argument) = arguments.next() {
+        match argument.as_str() {
+            "--width" => {
+                width = arguments
+                    .next()
+                    .and_then(|value| value.parse().ok())
+                    .unwrap_or(width);
+            }
+            "--height" => {
+                height = arguments
+                    .next()
+                    .and_then(|value| value.parse().ok())
+                    .unwrap_or(height);
+            }
+            "--theme" => theme_name = arguments.next().unwrap_or(theme_name),
+            "--glyphs" => glyphs = arguments.next().unwrap_or(glyphs),
+            "--density" => density = arguments.next().unwrap_or(density),
+            "--mode" => mode = arguments.next().unwrap_or(mode),
+            "--long-title" => {
+                if let Some(track) = app.status.track.as_mut() {
+                    track.name =
+                        "A very long track title that should never hide the clock".to_owned();
+                }
+            }
+            "--buffered" => {
+                app.status.buffered = vec![lekima_domain::BufferedRange {
+                    start_ms: 0,
+                    end_ms: 90_000,
+                }];
+            }
+            "--help" | "-h" => {
+                println!(
+                    "usage: preview [--width N] [--height N] [--theme NAME] \
+                     [--glyphs unicode|ascii] [--density compact|comfortable] \
+                     [--mode normal|queue|help|settings] [--long-title] [--buffered]"
+                );
+                return;
+            }
+            other => theme_name = other.to_owned(),
+        }
+    }
+
+    app.mode = match mode.as_str() {
+        "queue" => lekima_tui::app::Mode::Queue,
+        "help" => lekima_tui::app::Mode::Help,
+        "settings" => {
+            app.settings_selection = 3;
+            lekima_tui::app::Mode::Settings
+        }
+        _ => lekima_tui::app::Mode::Normal,
+    };
+    let theme = Theme::resolve(&theme_name, &glyphs, &density);
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).expect("test terminal");
     terminal

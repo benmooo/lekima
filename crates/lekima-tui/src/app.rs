@@ -40,6 +40,10 @@ impl Default for UiPreferences {
 
 const GLYPHS: [&str; 2] = ["unicode", "ascii"];
 const DENSITIES: [&str; 2] = ["compact", "comfortable"];
+/// Rows in the settings overlay: theme, glyphs, density, translation.
+pub const SETTINGS_ROWS: usize = 4;
+/// Prompt history is capped per mode.
+const HISTORY_LIMIT: usize = 50;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum View {
@@ -150,6 +154,28 @@ pub struct App {
     pub mode: Mode,
     pub focus: Focus,
     pub input: String,
+    /// Byte cursor inside `input` for the prompt editor.
+    pub cursor: usize,
+    /// Offset into the help overlay; `draw_help` clamps it to the content.
+    pub help_scroll: usize,
+    /// Largest valid help offset, recomputed on every draw.
+    pub help_max_scroll: usize,
+    /// Visible body rows, used by half-page motion.
+    pub main_view_height: u16,
+    pub sidebar_view_height: u16,
+    pub queue_view_height: u16,
+    /// Queue entry awaiting a `y`/`n` confirmation.
+    pub queue_confirm: Option<usize>,
+    /// True while the queue selection follows the playing entry.
+    pub queue_follow: bool,
+    /// Count prefix (`5j`, `12G`); `None` when no digits are pending.
+    pub pending_count: Option<u32>,
+    /// True after `Ctrl-w`; the next key selects a pane.
+    pub window_prefix: bool,
+    search_history: Vec<String>,
+    command_history: Vec<String>,
+    history_cursor: Option<usize>,
+    history_draft: String,
     pub main_selection: usize,
     pub sidebar_selection: usize,
     pub queue_selection: usize,
@@ -182,6 +208,20 @@ impl Default for App {
             mode: Mode::Normal,
             focus: Focus::Main,
             input: String::new(),
+            cursor: 0,
+            help_scroll: 0,
+            help_max_scroll: 0,
+            main_view_height: 0,
+            sidebar_view_height: 0,
+            queue_view_height: 0,
+            queue_confirm: None,
+            queue_follow: true,
+            pending_count: None,
+            window_prefix: false,
+            search_history: Vec::new(),
+            command_history: Vec::new(),
+            history_cursor: None,
+            history_draft: String::new(),
             main_selection: 0,
             sidebar_selection: 0,
             queue_selection: 0,
@@ -282,19 +322,14 @@ impl App {
     }
 
     fn cycle_setting(&mut self, delta: isize) -> Action {
-        let (list, current, field): (&[&str], &mut String, usize) = match self.settings_selection {
-            0 => (&crate::theme::THEMES, &mut self.preferences.theme, 0),
-            1 => (&GLYPHS, &mut self.preferences.glyphs, 1),
-            _ => (&DENSITIES, &mut self.preferences.density, 2),
-        };
-        let index = list
-            .iter()
-            .position(|value| *value == current.as_str())
-            .unwrap_or(0) as isize;
-        let len = list.len() as isize;
-        let next = (index + delta).rem_euclid(len) as usize;
-        *current = list[next].to_owned();
-        let _ = field;
+        match self.settings_selection {
+            0 => cycle_list(&crate::theme::THEMES, &mut self.preferences.theme, delta),
+            1 => cycle_list(&GLYPHS, &mut self.preferences.glyphs, delta),
+            2 => cycle_list(&DENSITIES, &mut self.preferences.density, delta),
+            _ => {
+                self.preferences.lyrics_translation = !self.preferences.lyrics_translation;
+            }
+        }
         self.settings_dirty = true;
         Action::UiChanged
     }
@@ -306,7 +341,8 @@ impl App {
                 Action::None
             }
             KeyCode::Char('j') | KeyCode::Down => {
-                self.settings_selection = (self.settings_selection + 1).min(3);
+                self.settings_selection =
+                    (self.settings_selection + 1).min(SETTINGS_ROWS.saturating_sub(1));
                 Action::None
             }
             KeyCode::Char('k') | KeyCode::Up => {
@@ -367,8 +403,31 @@ impl App {
         }
         match self.mode {
             Mode::Help => {
-                if matches!(key.code, KeyCode::Esc | KeyCode::Char('q' | '?')) {
-                    self.mode = Mode::Normal;
+                match key.code {
+                    KeyCode::Esc | KeyCode::Char('q' | '?') => {
+                        self.mode = Mode::Normal;
+                    }
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        self.help_scroll = (self.help_scroll + 1).min(self.help_max_scroll);
+                    }
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        self.help_scroll = self.help_scroll.saturating_sub(1);
+                    }
+                    KeyCode::PageDown => {
+                        self.help_scroll = (self.help_scroll + 10).min(self.help_max_scroll);
+                    }
+                    KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        self.help_scroll = (self.help_scroll + 10).min(self.help_max_scroll);
+                    }
+                    KeyCode::PageUp => {
+                        self.help_scroll = self.help_scroll.saturating_sub(10);
+                    }
+                    KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        self.help_scroll = self.help_scroll.saturating_sub(10);
+                    }
+                    KeyCode::Char('g') => self.help_scroll = 0,
+                    KeyCode::Char('G') => self.help_scroll = self.help_max_scroll,
+                    _ => {}
                 }
                 Action::None
             }
@@ -380,23 +439,25 @@ impl App {
     }
 
     fn handle_prompt_key(&mut self, key: KeyEvent) -> Action {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         match key.code {
             KeyCode::Esc => {
                 self.mode = Mode::Normal;
                 self.input.clear();
-                Action::None
-            }
-            KeyCode::Backspace => {
-                self.input.pop();
+                self.cursor = 0;
+                self.history_cursor = None;
                 Action::None
             }
             KeyCode::Enter => {
                 let input = std::mem::take(&mut self.input);
                 let mode = self.mode;
+                self.cursor = 0;
+                self.history_cursor = None;
                 self.mode = Mode::Normal;
                 if input.trim().is_empty() {
                     return Action::None;
                 }
+                self.remember_prompt(mode, input.trim());
                 match mode {
                     Mode::Search => {
                         self.remember();
@@ -411,12 +472,161 @@ impl App {
                     _ => self.run_command(input.trim()),
                 }
             }
-            KeyCode::Char(character) => {
-                self.input.push(character);
+            KeyCode::Backspace => {
+                self.delete_before_cursor();
+                Action::None
+            }
+            KeyCode::Delete => {
+                self.delete_at_cursor();
+                Action::None
+            }
+            KeyCode::Left => {
+                self.cursor = prev_boundary(&self.input, self.cursor);
+                Action::None
+            }
+            KeyCode::Right => {
+                self.cursor = next_boundary(&self.input, self.cursor);
+                Action::None
+            }
+            KeyCode::Home => {
+                self.cursor = 0;
+                Action::None
+            }
+            KeyCode::End => {
+                self.cursor = self.input.len();
+                Action::None
+            }
+            KeyCode::Up => {
+                self.history_up();
+                Action::None
+            }
+            KeyCode::Down => {
+                self.history_down();
+                Action::None
+            }
+            KeyCode::Char('w') if ctrl => {
+                self.delete_word_before_cursor();
+                Action::None
+            }
+            KeyCode::Char('u') if ctrl => {
+                self.input.drain(..self.cursor);
+                self.cursor = 0;
+                Action::None
+            }
+            KeyCode::Char(character) if !ctrl => {
+                self.input.insert(self.cursor, character);
+                self.cursor += character.len_utf8();
                 Action::None
             }
             _ => Action::None,
         }
+    }
+
+    fn delete_before_cursor(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+        let start = prev_boundary(&self.input, self.cursor);
+        self.input.replace_range(start..self.cursor, "");
+        self.cursor = start;
+    }
+
+    fn delete_at_cursor(&mut self) {
+        if self.cursor >= self.input.len() {
+            return;
+        }
+        let end = next_boundary(&self.input, self.cursor);
+        self.input.replace_range(self.cursor..end, "");
+    }
+
+    fn delete_word_before_cursor(&mut self) {
+        let mut start = self.cursor;
+        while start > 0 {
+            let character = self.input[..start].chars().next_back();
+            if !character.is_some_and(char::is_whitespace) {
+                break;
+            }
+            start = prev_boundary(&self.input, start);
+        }
+        while start > 0 {
+            let character = self.input[..start].chars().next_back();
+            if character.is_some_and(char::is_whitespace) {
+                break;
+            }
+            start = prev_boundary(&self.input, start);
+        }
+        self.input.replace_range(start..self.cursor, "");
+        self.cursor = start;
+    }
+
+    fn history(&self, mode: Mode) -> &[String] {
+        match mode {
+            Mode::Search => &self.search_history,
+            _ => &self.command_history,
+        }
+    }
+
+    fn remember_prompt(&mut self, mode: Mode, text: &str) {
+        let history = match mode {
+            Mode::Search => &mut self.search_history,
+            _ => &mut self.command_history,
+        };
+        if history.last().is_none_or(|entry| entry != text) {
+            history.push(text.to_owned());
+            if history.len() > HISTORY_LIMIT {
+                history.remove(0);
+            }
+        }
+    }
+
+    fn history_up(&mut self) {
+        let (len, last) = {
+            let history = self.history(self.mode);
+            (history.len(), history.last().cloned())
+        };
+        if len == 0 {
+            return;
+        }
+        let index = match self.history_cursor {
+            None => {
+                self.history_draft.clone_from(&self.input);
+                len - 1
+            }
+            Some(index) => index.saturating_sub(1),
+        };
+        self.history_cursor = Some(index);
+        let entry = {
+            let history = self.history(self.mode);
+            history.get(index).cloned().or(last)
+        };
+        if let Some(entry) = entry {
+            self.input = entry;
+        }
+        self.cursor = self.input.len();
+    }
+
+    fn history_down(&mut self) {
+        let next = {
+            let history = self.history(self.mode);
+            match self.history_cursor {
+                Some(index) if index + 1 < history.len() => Some(history[index + 1].clone()),
+                Some(_) => None,
+                None => return,
+            }
+        };
+        match next {
+            Some(entry) => {
+                if let Some(index) = self.history_cursor {
+                    self.history_cursor = Some(index + 1);
+                }
+                self.input = entry;
+            }
+            None => {
+                self.history_cursor = None;
+                self.input.clone_from(&self.history_draft);
+            }
+        }
+        self.cursor = self.input.len();
     }
 
     /// Minimal ex-style command line. Anything longer belongs in the CLI.
@@ -518,32 +728,78 @@ impl App {
     }
 
     fn handle_queue_key(&mut self, key: KeyEvent) -> Action {
+        if let Some(index) = self.queue_confirm {
+            return match key.code {
+                KeyCode::Char('y' | 'Y') => {
+                    self.queue_confirm = None;
+                    self.notify(format!("removed queue entry {:03}", index + 1), false);
+                    Action::Call(Command::QueueRemove { index })
+                }
+                KeyCode::Esc | KeyCode::Char('n' | 'N') => {
+                    self.queue_confirm = None;
+                    Action::None
+                }
+                _ => Action::None,
+            };
+        }
         match key.code {
             KeyCode::Esc | KeyCode::Char('q' | 'Q') => {
                 self.mode = Mode::Normal;
                 Action::None
             }
+            KeyCode::Char(' ') => Action::Call(Command::Toggle),
+            KeyCode::Char('n') => Action::Call(Command::Next),
+            KeyCode::Char('p') => Action::Call(Command::Prev),
+            KeyCode::Char('m') => Action::Call(Command::ToggleMute),
+            KeyCode::Char('r') => Action::Call(Command::CycleRepeat),
+            KeyCode::Char('s') => Action::Call(Command::SetShuffle {
+                enabled: !self.status.shuffle,
+            }),
+            KeyCode::Char('+') | KeyCode::Char('=') => Action::Call(Command::SetVolume {
+                level: (self.status.volume + 0.05).min(1.0),
+            }),
+            KeyCode::Char('-') => Action::Call(Command::SetVolume {
+                level: (self.status.volume - 0.05).max(0.0),
+            }),
+            KeyCode::Char('h') | KeyCode::Left => Action::Call(Command::Seek {
+                position_ms: self.status.position_ms.saturating_sub(10_000),
+            }),
+            KeyCode::Char('l') | KeyCode::Right => Action::Call(Command::Seek {
+                position_ms: self.status.position_ms.saturating_add(10_000),
+            }),
+            KeyCode::Char('L') => self.toggle_lyrics(),
             KeyCode::Char('j') | KeyCode::Down => {
+                self.queue_follow = false;
                 self.queue_selection =
                     (self.queue_selection + 1).min(self.queue.len().saturating_sub(1));
                 Action::None
             }
             KeyCode::Char('k') | KeyCode::Up => {
+                self.queue_follow = false;
                 self.queue_selection = self.queue_selection.saturating_sub(1);
                 Action::None
             }
             KeyCode::Char('g') => {
+                self.queue_follow = false;
                 self.queue_selection = 0;
                 Action::None
             }
             KeyCode::Char('G') => {
+                self.queue_follow = false;
                 self.queue_selection = self.queue.len().saturating_sub(1);
                 Action::None
             }
-            KeyCode::Char('x') => Action::Call(Command::QueueRemove {
-                index: self.queue_selection,
-            }),
+            KeyCode::Char('x') => {
+                self.queue_follow = false;
+                if self.queue.is_empty() {
+                    self.notify("queue is empty", true);
+                } else {
+                    self.queue_confirm = Some(self.queue_selection);
+                }
+                Action::None
+            }
             KeyCode::Char('J') => {
+                self.queue_follow = false;
                 if self.queue_selection + 1 < self.queue.len() {
                     let from = self.queue_selection;
                     self.queue_selection += 1;
@@ -556,6 +812,7 @@ impl App {
                 }
             }
             KeyCode::Char('K') => {
+                self.queue_follow = false;
                 if self.queue_selection > 0 {
                     let from = self.queue_selection;
                     self.queue_selection -= 1;
@@ -568,7 +825,7 @@ impl App {
                 }
             }
             KeyCode::Enter => {
-                self.mode = Mode::Normal;
+                self.queue_follow = true;
                 Action::Call(Command::Jump {
                     index: self.queue_selection,
                 })
@@ -579,6 +836,55 @@ impl App {
 
     fn handle_normal_key(&mut self, key: KeyEvent) -> Action {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        if self.window_prefix {
+            self.window_prefix = false;
+            self.pending_count = None;
+            return match key.code {
+                KeyCode::Char('1') => {
+                    self.focus = Focus::Sidebar;
+                    Action::None
+                }
+                KeyCode::Char('2') => {
+                    self.focus = Focus::Main;
+                    Action::None
+                }
+                KeyCode::Char('3') => {
+                    self.mode = Mode::Queue;
+                    self.queue_confirm = None;
+                    self.queue_follow = true;
+                    self.queue_selection = self.status.queue_index.unwrap_or(0);
+                    Action::Call(Command::Queue)
+                }
+                KeyCode::Char('4') => self.toggle_lyrics(),
+                _ => Action::None,
+            };
+        }
+        if ctrl && matches!(key.code, KeyCode::Char('w')) {
+            self.window_prefix = true;
+            self.pending_count = None;
+            return Action::None;
+        }
+        if let KeyCode::Char(character) = key.code
+            && !ctrl
+            && character.is_ascii_digit()
+        {
+            if character == '0' && self.pending_count.is_none() {
+                return Action::None;
+            }
+            let digit = character.to_digit(10).unwrap_or(0);
+            let next = self
+                .pending_count
+                .unwrap_or(0)
+                .saturating_mul(10)
+                .saturating_add(digit)
+                .min(9_999);
+            if next > 0 {
+                self.pending_count = Some(next);
+            }
+            return Action::None;
+        }
+        let count = self.pending_count.take();
+        let repeat = count.unwrap_or(1).min(10_000) as isize;
         match key.code {
             KeyCode::Char('o') if ctrl => {
                 self.go_back();
@@ -592,6 +898,7 @@ impl App {
             KeyCode::Char('q') => Action::Quit,
             KeyCode::Char('?') => {
                 self.mode = Mode::Help;
+                self.help_scroll = 0;
                 Action::None
             }
             KeyCode::Char('S') => {
@@ -602,11 +909,15 @@ impl App {
             KeyCode::Char('/') => {
                 self.mode = Mode::Search;
                 self.input.clear();
+                self.cursor = 0;
+                self.history_cursor = None;
                 Action::None
             }
             KeyCode::Char(':') => {
                 self.mode = Mode::Command;
                 self.input.clear();
+                self.cursor = 0;
+                self.history_cursor = None;
                 Action::None
             }
             KeyCode::Char('R') => Action::SpawnDaemon,
@@ -619,6 +930,8 @@ impl App {
             }
             KeyCode::Char('Q') => {
                 self.mode = Mode::Queue;
+                self.queue_confirm = None;
+                self.queue_follow = true;
                 self.queue_selection = self.status.queue_index.unwrap_or(0);
                 Action::Call(Command::Queue)
             }
@@ -681,19 +994,33 @@ impl App {
             KeyCode::Char('a') => self.enqueue_selected(false),
             KeyCode::Char('A') => self.enqueue_selected(true),
             KeyCode::Char('j') | KeyCode::Down => {
-                self.move_selection(1);
+                self.move_selection(repeat);
                 Action::None
             }
             KeyCode::Char('k') | KeyCode::Up => {
-                self.move_selection(-1);
+                self.move_selection(-repeat);
                 Action::None
             }
             KeyCode::Char('d') if ctrl => {
-                self.move_selection(10);
+                let height = if self.focus == Focus::Sidebar {
+                    self.sidebar_view_height
+                } else {
+                    self.main_view_height
+                };
+                let page = i64::from(height.max(2) / 2).max(1);
+                let delta = page.saturating_mul(i64::from(count.unwrap_or(1).min(1_000)));
+                self.move_selection(delta.min(1_000_000) as isize);
                 Action::None
             }
             KeyCode::Char('u') if ctrl => {
-                self.move_selection(-10);
+                let height = if self.focus == Focus::Sidebar {
+                    self.sidebar_view_height
+                } else {
+                    self.main_view_height
+                };
+                let page = i64::from(height.max(2) / 2).max(1);
+                let delta = page.saturating_mul(i64::from(count.unwrap_or(1).min(1_000)));
+                self.move_selection(-(delta.min(1_000_000) as isize));
                 Action::None
             }
             KeyCode::Char('d') => {
@@ -706,7 +1033,11 @@ impl App {
                 Action::None
             }
             KeyCode::Char('G') => {
-                self.set_selection(usize::MAX);
+                if let Some(line) = count.filter(|line| *line > 0) {
+                    self.set_selection(line.saturating_sub(1) as usize);
+                } else {
+                    self.set_selection(usize::MAX);
+                }
                 Action::None
             }
             KeyCode::Enter => self.open_selection(),
@@ -895,7 +1226,14 @@ impl App {
                 match reply {
                     Reply::Status { state } => {
                         let previous = self.status.track.as_ref().map(|track| track.id);
+                        let current_index = state.queue_index;
                         self.status = state;
+                        if self.mode == Mode::Queue
+                            && self.queue_follow
+                            && let Some(index) = current_index
+                        {
+                            self.queue_selection = index.min(self.queue.len().saturating_sub(1));
+                        }
                         let current = self.status.track.as_ref().map(|track| track.id);
                         if previous != current {
                             if self.lyrics_open {
@@ -931,8 +1269,14 @@ impl App {
                     Reply::Playlists { playlists } => {
                         self.playlists = playlists;
                     }
-                    Reply::Queue { tracks, .. } => {
+                    Reply::Queue { tracks, index } => {
                         self.queue = tracks;
+                        if self.mode == Mode::Queue
+                            && self.queue_follow
+                            && let Some(index) = index
+                        {
+                            self.queue_selection = index.min(self.queue.len().saturating_sub(1));
+                        }
                         self.queue_selection =
                             self.queue_selection.min(self.queue.len().saturating_sub(1));
                     }
@@ -972,7 +1316,7 @@ impl App {
                         {
                             self.status.liked = liked;
                         }
-                        self.notify(if liked { "♥ liked" } else { "♡ unliked" }, false);
+                        self.notify(if liked { "+ liked" } else { "- unliked" }, false);
                     }
                     Reply::Pong | Reply::Ack | Reply::Welcome { .. } | Reply::Subscribed { .. } => {
                     }
@@ -988,7 +1332,7 @@ impl App {
                 }
                 if error.is_not_running() {
                     self.daemon_down = true;
-                    self.notify("daemon not running — press R to start it", true);
+                    self.notify("daemon not running - press R to start it", true);
                 } else {
                     self.notify(error_message(&error), true);
                 }
@@ -1000,6 +1344,38 @@ impl App {
     pub fn clamp(&mut self) {
         self.clamp_selection();
     }
+}
+
+fn cycle_list(list: &[&str], current: &mut String, delta: isize) {
+    let index = list
+        .iter()
+        .position(|value| *value == current.as_str())
+        .unwrap_or(0) as isize;
+    let len = list.len() as isize;
+    let next = (index + delta).rem_euclid(len) as usize;
+    *current = list[next].to_owned();
+}
+
+fn prev_boundary(value: &str, index: usize) -> usize {
+    let mut index = index.min(value.len());
+    while index > 0 && !value.is_char_boundary(index) {
+        index -= 1;
+    }
+    value[..index]
+        .char_indices()
+        .next_back()
+        .map_or(0, |(index, _)| index)
+}
+
+fn next_boundary(value: &str, index: usize) -> usize {
+    let mut index = index.min(value.len());
+    while index < value.len() && !value.is_char_boundary(index) {
+        index += 1;
+    }
+    value[index..]
+        .char_indices()
+        .nth(1)
+        .map_or(value.len(), |(offset, _)| index + offset)
 }
 
 fn parse_sleep_minutes(spec: &str) -> Result<Option<u32>, String> {
@@ -1284,12 +1660,218 @@ mod tests {
         }
 
         app.queue_selection = 1;
-        match app.handle_key(key(KeyCode::Char('x'))) {
+        assert!(matches!(
+            app.handle_key(key(KeyCode::Char('x'))),
+            Action::None
+        ));
+        assert_eq!(app.queue_confirm, Some(1));
+        match app.handle_key(key(KeyCode::Char('y'))) {
             Action::Call(lekima_ipc::Command::QueueRemove { index }) => {
                 assert_eq!(index, 1);
             }
             other => panic!("unexpected {other:?}"),
         }
+        assert_eq!(app.queue_confirm, None);
+    }
+
+    #[test]
+    fn settings_translation_row_toggles_without_touching_density() {
+        let mut app = App::new();
+        app.handle_key(key(KeyCode::Char('S')));
+        for _ in 0..3 {
+            app.handle_key(key(KeyCode::Char('j')));
+        }
+        assert_eq!(app.settings_selection, 3);
+        let density = app.preferences.density.clone();
+        let action = app.handle_key(key(KeyCode::Char('l')));
+        assert!(matches!(action, Action::UiChanged));
+        assert!(app.preferences.lyrics_translation);
+        assert_eq!(app.preferences.density, density);
+    }
+
+    #[test]
+    fn prompt_editing_supports_midline_and_word_delete() {
+        let mut app = App::new();
+        app.handle_key(key(KeyCode::Char('/')));
+        for character in "mota".chars() {
+            app.handle_key(key(KeyCode::Char(character)));
+        }
+        app.handle_key(key(KeyCode::Home));
+        app.handle_key(key(KeyCode::Char('X')));
+        assert_eq!(app.input, "Xmota");
+        app.handle_key(key(KeyCode::End));
+        app.handle_key(key(KeyCode::Backspace));
+        assert_eq!(app.input, "Xmot");
+        app.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+        assert_eq!(app.input, "");
+        assert_eq!(app.cursor, 0);
+    }
+
+    #[test]
+    fn prompt_history_recalls_a_previous_search() {
+        let mut app = App::new();
+        app.handle_key(key(KeyCode::Char('/')));
+        for character in "mota".chars() {
+            app.handle_key(key(KeyCode::Char(character)));
+        }
+        app.handle_key(key(KeyCode::Enter));
+
+        app.handle_key(key(KeyCode::Char('/')));
+        app.handle_key(key(KeyCode::Up));
+        assert_eq!(app.input, "mota");
+        app.handle_key(key(KeyCode::Down));
+        assert_eq!(app.input, "");
+    }
+
+    #[test]
+    fn count_prefix_repeats_motion_and_jumps() {
+        let mut app = App::new();
+        app.tracks = (0..10).map(sample_track).collect();
+        app.handle_key(key(KeyCode::Char('3')));
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(app.main_selection, 3);
+        assert_eq!(app.pending_count, None);
+        app.handle_key(key(KeyCode::Char('2')));
+        app.handle_key(key(KeyCode::Char('G')));
+        assert_eq!(app.main_selection, 1);
+    }
+
+    #[test]
+    fn half_page_uses_the_visible_viewport() {
+        let mut app = App::new();
+        app.tracks = (0..40).map(sample_track).collect();
+        app.main_view_height = 20;
+        app.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL));
+        assert_eq!(app.main_selection, 10);
+    }
+
+    #[test]
+    fn queue_remove_can_be_cancelled() {
+        let mut app = App::new();
+        app.mode = Mode::Queue;
+        app.queue = vec![sample_track(1)];
+        app.handle_key(key(KeyCode::Char('x')));
+        assert_eq!(app.queue_confirm, Some(0));
+        app.handle_key(key(KeyCode::Char('n')));
+        assert_eq!(app.queue_confirm, None);
+        assert_eq!(app.queue.len(), 1);
+    }
+
+    #[test]
+    fn ctrl_w_pane_keys_do_not_steal_count_prefixes() {
+        let mut app = App::new();
+        app.tracks = (0..10).map(sample_track).collect();
+        app.status.track = Some(sample_track(1));
+
+        let ctrl_w = KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL);
+        app.handle_key(ctrl_w);
+        app.handle_key(key(KeyCode::Char('1')));
+        assert_eq!(app.focus, Focus::Sidebar);
+
+        app.handle_key(ctrl_w);
+        app.handle_key(key(KeyCode::Char('2')));
+        assert_eq!(app.focus, Focus::Main);
+
+        app.handle_key(ctrl_w);
+        let action = app.handle_key(key(KeyCode::Char('3')));
+        assert!(matches!(action, Action::Call(lekima_ipc::Command::Queue)));
+        assert_eq!(app.mode, Mode::Queue);
+        app.handle_key(key(KeyCode::Esc));
+
+        app.handle_key(ctrl_w);
+        app.handle_key(key(KeyCode::Char('4')));
+        assert!(app.lyrics_open);
+
+        app.handle_key(key(KeyCode::Char('5')));
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(app.main_selection, 5);
+    }
+
+    #[test]
+    fn queue_mode_keeps_playback_controls() {
+        let mut app = App::new();
+        app.mode = Mode::Queue;
+        app.queue = vec![sample_track(1), sample_track(2)];
+        assert!(matches!(
+            app.handle_key(key(KeyCode::Char(' '))),
+            Action::Call(lekima_ipc::Command::Toggle)
+        ));
+        assert!(matches!(
+            app.handle_key(key(KeyCode::Char('n'))),
+            Action::Call(lekima_ipc::Command::Next)
+        ));
+        assert!(matches!(
+            app.handle_key(key(KeyCode::Char('p'))),
+            Action::Call(lekima_ipc::Command::Prev)
+        ));
+        assert!(matches!(
+            app.handle_key(key(KeyCode::Char('r'))),
+            Action::Call(lekima_ipc::Command::CycleRepeat)
+        ));
+        assert!(matches!(
+            app.handle_key(key(KeyCode::Char('s'))),
+            Action::Call(lekima_ipc::Command::SetShuffle { .. })
+        ));
+        assert!(matches!(
+            app.handle_key(key(KeyCode::Char('l'))),
+            Action::Call(lekima_ipc::Command::Seek { .. })
+        ));
+        assert!(matches!(
+            app.handle_key(key(KeyCode::Char('+'))),
+            Action::Call(lekima_ipc::Command::SetVolume { .. })
+        ));
+    }
+
+    #[test]
+    fn queue_enter_keeps_the_queue_open() {
+        let mut app = App::new();
+        app.mode = Mode::Queue;
+        app.queue = vec![sample_track(1), sample_track(2)];
+        app.queue_selection = 1;
+        let action = app.handle_key(key(KeyCode::Enter));
+        assert!(matches!(
+            action,
+            Action::Call(lekima_ipc::Command::Jump { index: 1 })
+        ));
+        assert_eq!(app.mode, Mode::Queue);
+    }
+
+    #[test]
+    fn queue_follows_the_current_track_until_the_user_moves() {
+        let mut app = App::new();
+        app.mode = Mode::Queue;
+        app.queue = vec![sample_track(1), sample_track(2), sample_track(3)];
+        let mut state = app.status.clone();
+        state.queue_index = Some(1);
+        app.apply(Ok(lekima_ipc::Reply::Status { state }));
+        assert_eq!(app.queue_selection, 1);
+
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(app.queue_selection, 2);
+        assert!(!app.queue_follow);
+
+        let mut state = app.status.clone();
+        state.queue_index = Some(0);
+        app.apply(Ok(lekima_ipc::Reply::Status { state }));
+        assert_eq!(app.queue_selection, 2);
+    }
+
+    #[test]
+    fn queue_events_append_new_tracks_while_open() {
+        let mut app = App::new();
+        app.mode = Mode::Queue;
+        app.queue = vec![sample_track(1)];
+        app.apply(Ok(lekima_ipc::Reply::Queue {
+            tracks: vec![
+                sample_track(1),
+                sample_track(2),
+                sample_track(7),
+                sample_track(8),
+            ],
+            index: Some(1),
+        }));
+        assert_eq!(app.queue.len(), 4);
+        assert_eq!(app.queue_selection, 1);
     }
 
     #[test]

@@ -10,7 +10,7 @@
 use ratatui::style::Color;
 
 /// Canonical theme names, in settings-cycle order.
-pub const THEMES: [&str; 11] = [
+pub const THEMES: [&str; 12] = [
     "cyber",
     "amber",
     "mono",
@@ -22,11 +22,13 @@ pub const THEMES: [&str; 11] = [
     "solarized",
     "tokyonight",
     "catppuccin",
+    "light",
 ];
 
 /// Glyph set: block-drawing for modern terminals, ASCII for stripped-down ones.
 #[derive(Debug, Clone, Copy)]
 pub struct Glyphs {
+    pub ascii: bool,
     pub active: &'static str,
     pub playing: &'static str,
     pub paused: &'static str,
@@ -35,10 +37,15 @@ pub struct Glyphs {
     pub meter_empty: &'static str,
     pub rule: &'static str,
     pub divider: &'static str,
+    pub separator: &'static str,
+    pub hud_separator: &'static str,
     pub wave: [&'static str; 8],
     pub liked: &'static str,
     pub cursor: &'static str,
     pub loading: &'static str,
+    pub spinner: [&'static str; 4],
+    pub ellipsis: &'static str,
+    pub enter: &'static str,
     pub progress_full: &'static str,
     pub progress_empty: &'static str,
     pub progress_head: &'static str,
@@ -49,6 +56,7 @@ pub struct Glyphs {
 
 impl Glyphs {
     pub const UNICODE: Self = Self {
+        ascii: false,
         active: "▌",
         playing: "▶",
         paused: "‖",
@@ -57,10 +65,15 @@ impl Glyphs {
         meter_empty: "░",
         rule: "─",
         divider: "│",
+        separator: "·",
+        hud_separator: "┃",
         wave: ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"],
         liked: "♥",
         cursor: "▌",
         loading: "◌",
+        spinner: ["◐", "◓", "◑", "◒"],
+        ellipsis: "…",
+        enter: "⏎",
         progress_full: "━",
         progress_empty: "─",
         progress_head: "●",
@@ -70,6 +83,7 @@ impl Glyphs {
     };
 
     pub const ASCII: Self = Self {
+        ascii: true,
         active: ">",
         playing: ">",
         paused: "||",
@@ -78,10 +92,15 @@ impl Glyphs {
         meter_empty: "-",
         rule: "-",
         divider: "|",
+        separator: "|",
+        hud_separator: "|",
         wave: [" ", ".", ":", "-", "=", "+", "*", "#"],
         liked: "*",
         cursor: "_",
         loading: "~",
+        spinner: ["|", "/", "-", "\\"],
+        ellipsis: "...",
+        enter: "Enter",
         progress_full: "=",
         progress_empty: "-",
         progress_head: ">",
@@ -216,6 +235,30 @@ impl Theme {
             badge_fg: Color::Black,
             meter_full: Color::White,
             meter_empty: Color::DarkGray,
+            glyphs: Glyphs::UNICODE,
+            density: Density::Compact,
+        }
+    }
+
+    /// Light terminal: dark text and muted fills, for light backgrounds.
+    #[must_use]
+    pub const fn light() -> Self {
+        Self {
+            accent: Color::Rgb(0, 121, 107),
+            accent_alt: Color::Rgb(21, 101, 192),
+            hot: Color::Rgb(194, 24, 91),
+            warn: Color::Rgb(230, 81, 0),
+            text: Color::Rgb(26, 32, 39),
+            muted: Color::Rgb(82, 96, 109),
+            dim: Color::Rgb(138, 148, 160),
+            selection_bg: Color::Rgb(204, 232, 226),
+            selection_fg: Color::Rgb(11, 31, 27),
+            panel: Color::Rgb(0, 105, 92),
+            overlay: Color::Rgb(194, 24, 91),
+            badge_bg: Color::Rgb(0, 105, 92),
+            badge_fg: Color::Rgb(255, 255, 255),
+            meter_full: Color::Rgb(0, 121, 107),
+            meter_empty: Color::Rgb(215, 222, 229),
             glyphs: Glyphs::UNICODE,
             density: Density::Compact,
         }
@@ -415,13 +458,50 @@ impl Theme {
 
     /// Resolves the configured theme, glyph set and density.
     ///
-    /// `NO_COLOR` forces the mono palette but keeps the chosen glyphs.
+    /// Precedence: `NO_COLOR` (mono) > `LEKIMA_THEME` > the configured theme.
+    /// `LEKIMA_THEME=auto` picks the light palette when `COLORFGBG` reports a
+    /// light background and `cyber` otherwise.
     #[must_use]
     pub fn resolve(name: &str, glyphs: &str, density: &str) -> Self {
-        let mut theme = if std::env::var_os("NO_COLOR").is_some() {
+        let env = std::env::var("LEKIMA_THEME").ok();
+        let auto_light = std::env::var("COLORFGBG")
+            .ok()
+            .and_then(|value| value.rsplit(';').next()?.parse::<u8>().ok())
+            .is_some_and(|background| background >= 7);
+        Self::resolve_with(
+            name,
+            glyphs,
+            density,
+            env.as_deref(),
+            std::env::var_os("NO_COLOR").is_some(),
+            auto_light,
+        )
+    }
+
+    /// Pure resolver used by tests and by [`Self::resolve`].
+    #[must_use]
+    pub fn resolve_with(
+        name: &str,
+        glyphs: &str,
+        density: &str,
+        env_name: Option<&str>,
+        no_color: bool,
+        auto_light: bool,
+    ) -> Self {
+        let mut theme = if no_color {
             Self::mono()
         } else {
-            match name.trim().to_ascii_lowercase().as_str() {
+            let requested = env_name
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or(name)
+                .trim()
+                .to_ascii_lowercase();
+            match requested.as_str() {
+                "auto" | "default" if auto_light => Self::light(),
+                "auto" | "default" => Self::cyber(),
+                "light" | "light-terminal" => Self::light(),
+                "dark" | "dark-terminal" => Self::cyber(),
                 "amber" => Self::amber(),
                 "mono" | "none" | "monochrome" => Self::mono(),
                 "dracula" => Self::dracula(),
@@ -475,6 +555,19 @@ mod tests {
             Theme::resolve("cyber", "ascii", "comfortable").density,
             super::Density::Comfortable
         );
+    }
+
+    #[test]
+    fn environment_and_light_theme_resolve() {
+        let light = Theme::resolve_with("light", "unicode", "compact", None, false, true);
+        assert_eq!(light.accent, Theme::light().accent);
+        let auto = Theme::resolve_with("auto", "unicode", "compact", None, false, true);
+        assert_eq!(auto.text, Theme::light().text);
+        let env = Theme::resolve_with("cyber", "unicode", "compact", Some("light"), false, false);
+        assert_eq!(env.text, Theme::light().text);
+        let no_color =
+            Theme::resolve_with("light", "unicode", "compact", Some("light"), true, true);
+        assert!(no_color.is_mono());
     }
 
     #[test]

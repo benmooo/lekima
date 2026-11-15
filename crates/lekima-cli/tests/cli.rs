@@ -74,9 +74,10 @@ fn themes_are_listed_for_agents() {
     assert!(output.status.success());
     let json: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json");
     let themes = json["data"]["themes"].as_array().expect("themes");
-    assert_eq!(themes.len(), 11);
+    assert_eq!(themes.len(), 12);
     assert!(themes.iter().any(|theme| theme == "dracula"));
     assert!(themes.iter().any(|theme| theme == "catppuccin"));
+    assert!(themes.iter().any(|theme| theme == "light"));
 }
 
 #[test]
