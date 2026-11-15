@@ -7,6 +7,10 @@ All notable changes to lekima are documented here. The format follows
 
 ### Fixed
 
+- Gapless boundary sources now fire once per source. Previously the shared
+  boundary slot could be re-armed on every sample after the daemon consumed it,
+  resetting `position_ms` to zero roughly twice a second while a preloaded track
+  played — the progress and synced lyrics jumped back to the start.
 - Switching to a new track resets the playback position before the stream URL
   is resolved. An incomplete preview of A no longer makes B briefly report A's
   last position and then snap to zero.

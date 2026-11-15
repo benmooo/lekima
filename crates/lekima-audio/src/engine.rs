@@ -417,6 +417,7 @@ struct Boundary<S> {
     inner: S,
     track: TrackId,
     shared: Arc<Shared>,
+    fired: bool,
 }
 
 impl<S: rodio::Source> Iterator for Boundary<S> {
@@ -424,13 +425,13 @@ impl<S: rodio::Source> Iterator for Boundary<S> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let sample = self.inner.next()?;
-        let mut boundary = self
-            .shared
-            .boundary
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        if boundary.is_none() {
-            *boundary = Some(self.track);
+        if !self.fired {
+            self.fired = true;
+            *self
+                .shared
+                .boundary
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner()) = Some(self.track);
             self.shared.position_ms.store(0, Ordering::Relaxed);
         }
         Some(sample)
@@ -697,6 +698,7 @@ fn audio_thread(
                             inner: Metered::new(decoder, Arc::clone(&shared.wave)),
                             track,
                             shared: Arc::clone(&shared),
+                            fired: false,
                         };
                         player.append(source);
                         let _ = ack.send(Ok(()));
@@ -893,6 +895,7 @@ mod tests {
             inner: rodio::source::SineWave::new(440.0),
             track: lekima_domain::TrackId(7),
             shared: Arc::clone(&shared),
+            fired: false,
         };
         assert!(source.next().is_some());
         let boundary = shared
@@ -900,5 +903,18 @@ mod tests {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         assert_eq!(*boundary, Some(lekima_domain::TrackId(7)));
+        drop(boundary);
+        *shared
+            .boundary
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner()) = None;
+        assert!(source.next().is_some());
+        assert!(
+            shared
+                .boundary
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .is_none()
+        );
     }
 }
