@@ -52,6 +52,10 @@ $ lekima status --json
 
 ## Status
 
+`0.4.1` fixes gapless previews and track transitions: boundary sources fire
+once, a new track starts at zero, and stale status polls can no longer flip the
+track, progress or lyrics back to the previous song.
+
 `0.4.0` is a TUI and playback-reliability release: a width-aware HUD with
 buffered-range shading, a light palette and `LEKIMA_THEME`, count and pane keys,
 a searchable/editable prompt with history, queue transport controls and a

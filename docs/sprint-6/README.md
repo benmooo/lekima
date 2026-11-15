@@ -1,6 +1,6 @@
 # Sprint 6 — TUI correctness and accessibility
 
-Status: **Released in 0.4.0**
+Status: **Released in 0.4.1**
 
 The plan of record is [`../tui-backlog.md`](../tui-backlog.md). This sprint took
 every backlog item, including TUI-21 and the terminal-text hardening:
@@ -29,7 +29,7 @@ every backlog item, including TUI-21 and the terminal-text hardening:
   bidi and zero-width controls; the NCM mapping layer, TUI and human CLI output
   apply it.
 
-Evidence: `cargo test --workspace` (141 passed), `cargo clippy --workspace
+Evidence: `cargo test --workspace` (144 passed), `cargo clippy --workspace
 --all-targets -- -D warnings`, `cargo fmt --all --check`, and the
 `lekima-tui` preview example at 60×20, 80×24 and 100×30.
 
