@@ -10,8 +10,11 @@ use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, State, rejection::JsonRejection},
     http::{
-        HeaderMap, HeaderValue, StatusCode,
-        header::{AUTHORIZATION, WWW_AUTHENTICATE},
+        HeaderMap, HeaderName, HeaderValue, StatusCode,
+        header::{
+            AUTHORIZATION, CACHE_CONTROL, CONTENT_TYPE, REFERRER_POLICY, WWW_AUTHENTICATE,
+            X_CONTENT_TYPE_OPTIONS,
+        },
     },
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -27,13 +30,19 @@ const TOKEN_BYTES: usize = 32;
 /// A hand-supplied token shorter than this is rejected as guessable.
 const MIN_TOKEN_CHARS: usize = 16;
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
-const ENDPOINTS: [&str; 5] = [
+const ENDPOINTS: [&str; 6] = [
+    "GET /",
     "GET /v1/health",
     "GET /v1/capabilities",
     "GET /v1/status",
     "GET /v1/queue",
     "POST /v1/command",
 ];
+const REMOTE_HTML: &str = include_str!("../assets/remote.html");
+/// The page is self-contained, so only same-origin requests and inline code.
+const CONTENT_SECURITY_POLICY: &str = "default-src 'none'; style-src 'unsafe-inline'; \
+     script-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; \
+     form-action 'none'; frame-ancestors 'none'";
 /// Command tags accepted by `POST /v1/command`.
 const COMMAND_TYPES: [&str; 34] = [
     "status",
@@ -102,6 +111,8 @@ pub(crate) async fn http(
             true,
             Some(json!({
                 "bind": local.to_string(),
+                "page": format!("http://{local}/"),
+                "api": format!("http://{local}/v1"),
                 "token_file": paths.http_token_file(),
                 "endpoints": ENDPOINTS,
             })),
@@ -109,6 +120,7 @@ pub(crate) async fn http(
         );
     } else {
         crate::say!("lekima HTTP control listening on http://{local}/v1");
+        crate::say!("web remote: http://{local}/  (paste the token once)");
         crate::say!(
             "authorization: Bearer token from {}",
             paths.http_token_file().display()
@@ -156,6 +168,7 @@ fn generate_token() -> Result<String, Failure> {
 
 fn router(state: AppState) -> Router {
     Router::new()
+        .route("/", get(remote))
         .route("/v1/health", get(health))
         .route("/v1/capabilities", get(capabilities))
         .route("/v1/status", get(status))
@@ -163,6 +176,22 @@ fn router(state: AppState) -> Router {
         .route("/v1/command", post(command))
         .layer(DefaultBodyLimit::max(MAX_FRAME_BYTES))
         .with_state(state)
+}
+
+async fn remote() -> Response {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("text/html; charset=utf-8"),
+    );
+    headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    headers.insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+    headers.insert(REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
+    headers.insert(
+        HeaderName::from_static("content-security-policy"),
+        HeaderValue::from_static(CONTENT_SECURITY_POLICY),
+    );
+    (headers, REMOTE_HTML).into_response()
 }
 
 async fn health() -> Json<Value> {
@@ -175,6 +204,7 @@ async fn capabilities() -> Json<Value> {
         "data": {
             "version": env!("CARGO_PKG_VERSION"),
             "auth": "bearer",
+            "page": "/",
             "endpoints": ENDPOINTS,
             "commands": COMMAND_TYPES.as_slice(),
         }
@@ -370,7 +400,7 @@ mod tests {
 
     use axum::{
         body::{Body, to_bytes},
-        http::{Request, StatusCode},
+        http::{Request, StatusCode, header},
     };
     use serde_json::Value;
     use tower::ServiceExt;
@@ -390,6 +420,26 @@ mod tests {
         let status = response.status();
         let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         (status, serde_json::from_slice(&bytes).unwrap())
+    }
+
+    #[tokio::test]
+    async fn the_remote_page_is_public_and_hardened() {
+        let response = router(state())
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers()[header::CONTENT_TYPE],
+            "text/html; charset=utf-8"
+        );
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+        assert!(response.headers().contains_key("content-security-policy"));
+
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let page = String::from_utf8(bytes.to_vec()).unwrap();
+        assert!(page.contains("/v1/"));
+        assert!(page.contains("lekima.http.token"));
     }
 
     #[tokio::test]

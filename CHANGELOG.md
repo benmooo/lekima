@@ -10,6 +10,9 @@ All notable changes to lekima are documented here. The format follows
 - `lekima serve --http [--bind ADDR]` exposes the daemon over HTTP for phones
   and other machines: `GET /v1/status`, `GET /v1/queue`, `GET /v1/health`,
   `GET /v1/capabilities` and `POST /v1/command` with the IPC command shape.
+- A built-in mobile web remote at `/` with the TUI's neon console palette:
+  transport controls, seek rail, volume, repeat/shuffle and a jumpable queue.
+  It asks for the bearer token once and stores it in `localStorage`.
 - A bearer token in `<config>/http.token` (`0600`) is generated on first start;
   `LEKIMA_HTTP_TOKEN` overrides it. Requests use constant-time comparison.
 - The HTTP surface is default-deny: `login`, `logout`, `shutdown`, `hello` and

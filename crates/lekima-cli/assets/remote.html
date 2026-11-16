@@ -1,0 +1,469 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>lekima</title>
+<style>
+  :root {
+    --bg: #05080a;
+    --panel: #0a1210;
+    --dim: #2d3740;
+    --muted: #6e7d8c;
+    --text: #c8d6e5;
+    --accent: #00ff9c;
+    --accent-alt: #00e5ff;
+    --hot: #ff2e88;
+    --warn: #ffb000;
+    --panel-green: #007a64;
+    --sel-bg: #003e34;
+    --sel-fg: #d2fff0;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    -webkit-font-smoothing: antialiased;
+    padding: env(safe-area-inset-top) 14px calc(64px + env(safe-area-inset-bottom));
+  }
+  main { max-width: 720px; margin: 0 auto; }
+
+  /* HUD line: the same information order as the terminal. */
+  .hud {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+    padding: 12px 0 10px; font-size: 12px; letter-spacing: .04em;
+  }
+  .chip {
+    background: var(--accent); color: #000; font-weight: 700;
+    padding: 2px 8px; letter-spacing: .18em;
+  }
+  .glyph { color: var(--accent); font-size: 14px; }
+  .glyph.paused { color: var(--warn); }
+  .glyph.stopped { color: var(--muted); }
+  .state { color: var(--muted); text-transform: uppercase; letter-spacing: .14em; }
+  .hud-spacer { flex: 1; }
+  .badge { color: var(--muted); }
+  .badge.on { color: var(--accent-alt); }
+  .badge.one { color: var(--accent); }
+  .badge.hot { color: var(--hot); }
+  .hud-vol, .hud-q { color: var(--muted); }
+  .hud-vol b, .hud-q b { color: var(--text); font-weight: 400; }
+  .rule {
+    height: 1px; background: var(--dim);
+  }
+
+  .section {
+    color: var(--panel-green); font-size: 11px; letter-spacing: .18em;
+    text-transform: uppercase; margin: 26px 0 10px;
+  }
+  .section .count { color: var(--accent-alt); }
+  h1 {
+    font-size: clamp(22px, 6vw, 32px); line-height: 1.15; font-weight: 650;
+    margin: 0; letter-spacing: -.01em; color: var(--text);
+    overflow-wrap: anywhere;
+  }
+  .artist { color: var(--muted); margin-top: 4px; overflow-wrap: anywhere; }
+  .flags { margin-top: 6px; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--warn); min-height: 14px; }
+
+  .time {
+    display: flex; gap: 6px; margin: 16px 0 4px;
+    color: var(--accent-alt); font-variant-numeric: tabular-nums;
+  }
+  .time .total { color: var(--muted); }
+  .rail {
+    display: grid; grid-template-columns: repeat(24, 1fr);
+    font-size: 14px; line-height: 1; cursor: pointer;
+    user-select: none; padding: 6px 0;
+  }
+  .rail span { text-align: center; color: var(--dim); }
+  .rail span.on { color: var(--accent); }
+  .rail span.head { color: var(--accent-alt); }
+
+  .transport { display: flex; gap: 10px; margin: 10px 0 4px; }
+  .transport button {
+    flex: 1; min-height: 54px; border: 1px solid var(--dim);
+    background: var(--panel); color: var(--text); font: inherit; font-size: 20px;
+    border-radius: 0; letter-spacing: .08em;
+  }
+  .transport button:active { border-color: var(--accent); color: var(--accent); }
+  .transport .play {
+    flex: 1.6; background: var(--accent); border-color: var(--accent);
+    color: #001a12; font-weight: 700;
+  }
+  .transport .play.paused { background: var(--warn); border-color: var(--warn); }
+
+  .volume {
+    display: flex; align-items: center; gap: 10px; margin-top: 14px;
+    color: var(--muted); font-size: 12px; letter-spacing: .12em;
+  }
+  .volume input {
+    -webkit-appearance: none; appearance: none; flex: 1; height: 4px;
+    background: var(--dim); border: 0; outline: 0; border-radius: 0;
+  }
+  .volume input::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none; width: 10px; height: 20px;
+    background: var(--accent); border: 0; border-radius: 0;
+  }
+  .volume input::-moz-range-thumb {
+    width: 10px; height: 20px; background: var(--accent); border: 0; border-radius: 0;
+  }
+  .volume .meter { color: var(--accent); letter-spacing: 0; }
+  .volume .value { color: var(--text); font-variant-numeric: tabular-nums; }
+
+  #queue { list-style: none; margin: 0; padding: 0; }
+  #queue button {
+    width: 100%; display: grid; grid-template-columns: 3ch 1ch minmax(0, 1fr) auto;
+    gap: 8px; align-items: baseline; background: none; border: 0;
+    border-bottom: 1px solid #101a18; color: var(--text);
+    padding: 10px 8px; font: inherit; text-align: left; border-radius: 0;
+  }
+  #queue button.current { background: var(--sel-bg); color: var(--sel-fg); }
+  #queue .num { color: var(--muted); font-variant-numeric: tabular-nums; }
+  #queue .marker { color: var(--accent); }
+  #queue .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #queue .who {
+    color: var(--muted); font-size: 12px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; display: block;
+  }
+  #queue .dur { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+  #queue .empty { color: var(--muted); padding: 10px 8px; }
+
+  .bar {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+    background: var(--bg); border-top: 1px solid var(--dim);
+    font-size: 11px; color: var(--muted); letter-spacing: .06em;
+  }
+  .mode { background: var(--accent); color: #000; padding: 1px 6px; font-weight: 700; }
+  .bar button {
+    background: none; border: 0; color: var(--accent-alt);
+    font: inherit; padding: 4px 2px; letter-spacing: inherit;
+  }
+  .bar .hint { margin-left: auto; display: none; }
+  @media (min-width: 520px) { .bar .hint { display: inline; } }
+
+  #toast {
+    position: fixed; left: 50%; bottom: calc(58px + env(safe-area-inset-bottom));
+    transform: translateX(-50%); background: var(--bg); color: var(--warn);
+    border: 1px solid var(--warn); padding: 8px 14px; font-size: 12px;
+    letter-spacing: .04em; opacity: 0; transition: opacity .15s; pointer-events: none;
+    max-width: 90vw;
+  }
+  #toast.show { opacity: 1; }
+
+  dialog {
+    background: var(--bg); color: var(--text); border: 1px solid var(--accent-alt);
+    border-radius: 0; padding: 20px; width: min(92vw, 440px);
+  }
+  dialog::backdrop { background: #000c; }
+  dialog h2 {
+    margin: 0 0 4px; color: var(--accent); font-size: 13px;
+    letter-spacing: .18em; text-transform: uppercase;
+  }
+  dialog p { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
+  dialog code { color: var(--accent-alt); }
+  dialog input {
+    width: 100%; background: var(--panel); color: var(--text);
+    border: 1px solid var(--dim); border-radius: 0; padding: 11px;
+    font: inherit; letter-spacing: .02em;
+  }
+  dialog .actions { display: flex; gap: 8px; margin-top: 14px; }
+  dialog .actions button {
+    flex: 1; border: 1px solid var(--dim); background: none; color: var(--text);
+    padding: 11px; font: inherit; border-radius: 0;
+    letter-spacing: .08em; text-transform: uppercase; font-size: 12px;
+  }
+  dialog .actions .primary {
+    background: var(--accent); border-color: var(--accent); color: #001a12;
+    font-weight: 700;
+  }
+</style>
+</head>
+<body>
+<header class="hud">
+  <span class="chip">LEKIMA</span>
+  <span class="glyph stopped" id="glyph">■</span>
+  <span class="state" id="state">stopped</span>
+  <span class="hud-spacer"></span>
+  <span class="badge" id="repeat">R:OFF</span>
+  <span class="badge" id="shuffle">⇄</span>
+  <span class="hud-vol">VOL <b id="vol-cell">░░░░░</b></span>
+  <span class="hud-q">Q:<b id="queue-count">0</b></span>
+</header>
+<div class="rule"></div>
+
+<main>
+  <div class="section">// NOW PLAYING<span id="cache"></span></div>
+  <h1 id="title">Nothing playing</h1>
+  <div class="artist" id="artist">the queue is empty</div>
+  <div class="flags" id="flags"></div>
+
+  <div class="time"><span id="position">00:00</span><span class="total">/</span><span class="total" id="duration">00:00</span></div>
+  <div class="rail" id="rail" role="slider" aria-label="Seek" tabindex="0"></div>
+
+  <div class="transport">
+    <button type="button" id="prev" aria-label="Previous" title="previous">|◀</button>
+    <button type="button" class="play" id="toggle" aria-label="Play or pause" title="play/pause">▶</button>
+    <button type="button" id="next" aria-label="Next" title="next">▶|</button>
+  </div>
+
+  <label class="volume">
+    <span>VOL</span>
+    <input id="volume" type="range" min="0" max="100" step="1" aria-label="Volume">
+    <span class="value" id="volume-value">70</span>
+  </label>
+
+  <div class="section">// QUEUE · <span class="count" id="queue-total">0</span></div>
+  <ol id="queue"><li class="empty">// empty</li></ol>
+</main>
+
+<footer class="bar">
+  <span class="mode">WEB</span>
+  <button type="button" id="settings">token</button>
+  <span class="hint">space pause · n/p skip · m mute</span>
+</footer>
+
+<div id="toast" role="status"></div>
+
+<dialog id="auth">
+  <h2>// CONNECT</h2>
+  <p>Paste the token from <code>http.token</code> — its path is printed by <code>lekima serve --http</code>.</p>
+  <input id="token-input" type="password" autocomplete="off" spellcheck="false" placeholder="64-character token">
+  <div class="actions">
+    <button type="button" id="cancel-token">cancel</button>
+    <button type="button" class="primary" id="save-token">connect</button>
+  </div>
+</dialog>
+
+<script>
+(() => {
+  const TOKEN_KEY = "lekima.http.token";
+  const RAIL_CELLS = 24;
+  let token = "";
+  let state = null;
+  let queue = { tracks: [], index: null };
+  let dragging = false;
+  let tick = 0;
+
+  const $ = (id) => document.getElementById(id);
+  const auth = $("auth");
+  const toast = $("toast");
+  let toastTimer = null;
+
+  try { token = localStorage.getItem(TOKEN_KEY) || ""; } catch { token = ""; }
+  const fromHash = new URLSearchParams(location.hash.slice(1)).get("token");
+  if (!token && fromHash) {
+    token = fromHash;
+    try { localStorage.setItem(TOKEN_KEY, token); } catch {}
+    history.replaceState(null, "", location.pathname);
+  }
+
+  function notify(message) {
+    toast.textContent = message;
+    toast.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove("show"), 2600);
+  }
+
+  function askToken() {
+    auth.showModal();
+    $("token-input").value = token;
+    setTimeout(() => $("token-input").focus(), 30);
+  }
+
+  async function api(path, options = {}) {
+    if (!token) throw new Error("no token");
+    const response = await fetch(`/v1/${path}`, {
+      ...options,
+      headers: { ...(options.headers || {}), Authorization: `Bearer ${token}` },
+    });
+    if (response.status === 401) {
+      token = "";
+      try { localStorage.removeItem(TOKEN_KEY); } catch {}
+      askToken();
+      throw new Error("unauthorized");
+    }
+    let body = null;
+    try { body = await response.json(); } catch {}
+    if (!response.ok || !body || !body.ok) {
+      throw new Error((body && body.error && body.error.message) || `HTTP ${response.status}`);
+    }
+    return body.data;
+  }
+
+  async function send(command) {
+    try {
+      await api("command", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(command),
+      });
+      await refresh();
+    } catch (error) {
+      notify(error.message);
+    }
+  }
+
+  function clock(ms) {
+    if (!Number.isFinite(ms) || ms < 0) ms = 0;
+    const total = Math.floor(ms / 1000);
+    const minutes = String(Math.floor(total / 60)).padStart(2, "0");
+    const seconds = String(total % 60).padStart(2, "0");
+    return `${minutes}:${seconds}`;
+  }
+
+  function meter(fraction, cells) {
+    const filled = Math.round(Math.max(0, Math.min(1, fraction)) * cells);
+    return "█".repeat(filled) + "░".repeat(cells - filled);
+  }
+
+  function render(next) {
+    state = next;
+    const track = next.track;
+    $("title").textContent = track ? track.name : "Nothing playing";
+    $("artist").textContent = track
+      ? track.artists.map((artist) => artist.name).join(", ") + (track.album ? ` · ${track.album.name}` : "")
+      : "the queue is empty";
+
+    const loading = next.loading || next.buffering;
+    const label = next.loading ? "loading" : next.buffering ? "buffering" : next.status;
+    $("state").textContent = label;
+    const glyph = $("glyph");
+    glyph.textContent = next.status === "playing" ? "▶" : next.status === "paused" ? "‖" : "■";
+    glyph.className = "glyph " + (next.status === "playing" ? "" : next.status === "paused" ? "paused" : "stopped");
+    $("flags").textContent = loading ? label.toUpperCase() : "";
+    $("cache").textContent = next.cached ? " [CACHE]" : "";
+    $("repeat").textContent = `R:${next.repeat.toUpperCase()}`;
+    $("repeat").className = "badge" + (next.repeat === "off" ? "" : next.repeat === "one" ? " one" : " on");
+    $("shuffle").className = "badge" + (next.shuffle ? " hot" : "");
+    $("vol-cell").textContent = meter(next.volume, 5);
+    $("queue-count").textContent = String(next.queue_length);
+    $("toggle").textContent = next.status === "playing" ? "‖" : "▶";
+    $("toggle").classList.toggle("paused", next.status === "paused");
+
+    const total = track ? (next.stream_duration_ms || track.duration_ms || 0) : 0;
+    const ratio = total > 0 ? Math.min(1, next.position_ms / total) : 0;
+    $("position").textContent = clock(next.position_ms);
+    $("duration").textContent = clock(total);
+    if (!dragging) {
+      $("volume").value = String(Math.round(next.volume * 100));
+      $("volume-value").textContent = String(Math.round(next.volume * 100));
+    }
+    if (!dragging || !$("rail").dataset.held) drawRail(ratio);
+  }
+
+  function drawRail(ratio) {
+    const cell = Math.min(RAIL_CELLS - 1, Math.max(0, Math.floor(ratio * RAIL_CELLS)));
+    let html = "";
+    for (let index = 0; index < RAIL_CELLS; index += 1) {
+      if (index === cell) html += `<span class="head">●</span>`;
+      else if (index < cell) html += `<span class="on">━</span>`;
+      else html += "<span>─</span>";
+    }
+    $("rail").innerHTML = html;
+  }
+
+  function renderQueue(next) {
+    queue = next || { tracks: [], index: null };
+    $("queue-total").textContent = String(queue.tracks.length);
+    const list = $("queue");
+    list.replaceChildren();
+    if (!queue.tracks.length) {
+      const empty = document.createElement("li");
+      empty.className = "empty";
+      empty.textContent = "// empty";
+      list.append(empty);
+      return;
+    }
+    queue.tracks.forEach((track, index) => {
+      const item = document.createElement("li");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = index === queue.index ? "current" : "";
+      button.innerHTML =
+        `<span class="num">${String(index + 1).padStart(3, "0")}</span>` +
+        `<span class="marker">${index === queue.index ? "▌" : ""}</span>` +
+        `<span><span class="name"></span><span class="who"></span></span>` +
+        `<span class="dur"></span>`;
+      button.querySelector(".name").textContent = track.name;
+      button.querySelector(".who").textContent = track.artists.map((artist) => artist.name).join(", ");
+      button.querySelector(".dur").textContent = clock(track.duration_ms);
+      button.addEventListener("click", () => send({ type: "jump", index }));
+      item.append(button);
+      list.append(item);
+    });
+  }
+
+  async function refresh() {
+    try {
+      render(await api("status"));
+    } catch (error) {
+      if (error.message !== "unauthorized" && error.message !== "no token") notify(error.message);
+    }
+    if (tick % 3 === 0) {
+      try {
+        renderQueue(await api("queue"));
+      } catch (error) {
+        if (error.message !== "unauthorized" && error.message !== "no token") notify(error.message);
+      }
+    }
+    tick += 1;
+  }
+
+  $("toggle").addEventListener("click", () => send({ type: "toggle" }));
+  $("next").addEventListener("click", () => send({ type: "next" }));
+  $("prev").addEventListener("click", () => send({ type: "prev" }));
+
+  $("volume").addEventListener("pointerdown", () => { dragging = true; });
+  $("volume").addEventListener("input", (event) => {
+    $("volume-value").textContent = event.target.value;
+  });
+  $("volume").addEventListener("change", (event) => {
+    dragging = false;
+    send({ type: "set_volume", level: Number(event.target.value) / 100 });
+  });
+
+  $("rail").addEventListener("click", (event) => {
+    if (!state?.track) return;
+    const total = state.stream_duration_ms || state.track.duration_ms || 0;
+    if (!total) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+    drawRail(ratio);
+    send({ type: "seek", position_ms: Math.round(ratio * total) });
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.target instanceof HTMLInputElement) return;
+    if (event.code === "Space") { event.preventDefault(); send({ type: "toggle" }); }
+    else if (event.key === "n") send({ type: "next" });
+    else if (event.key === "p") send({ type: "prev" });
+    else if (event.key === "m") send({ type: "toggle_mute" });
+  });
+
+  $("settings").addEventListener("click", askToken);
+  $("cancel-token").addEventListener("click", () => auth.close());
+  $("save-token").addEventListener("click", () => {
+    const value = $("token-input").value.trim();
+    if (value.length < 16) return notify("token is too short");
+    token = value;
+    try { localStorage.setItem(TOKEN_KEY, token); } catch {}
+    auth.close();
+    refresh();
+  });
+  $("token-input").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") $("save-token").click();
+  });
+
+  if (!token) askToken();
+  drawRail(0);
+  refresh();
+  setInterval(refresh, 1000);
+})();
+</script>
+</body>
+</html>

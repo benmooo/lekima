@@ -89,8 +89,9 @@ personal FM, likes, charts, the music cloud, playback through a background
 daemon, a vim-driven TUI (responsive HUD, real spectrum, buffered shading,
 lyrics pane, history, UI settings, twelve themes), device selection, gapless
 playback, MPRIS/Now Playing, push events (`lekima watch`), an MCP stdio server
-(`lekima mcp`) and token-guarded HTTP control (`lekima serve --http`, see
-[docs/http.md](docs/http.md)). `ncmapi` 1.8 is published on crates.io.
+(`lekima mcp`) and token-guarded HTTP control with a built-in phone remote
+(`lekima serve --http`, see [docs/http.md](docs/http.md)). `ncmapi` 1.8 is
+published on crates.io.
 
 ```console
 $ lekima login --qr          # opens the web player in Chrome

@@ -10,6 +10,13 @@ $ lekima serve --http                          # 127.0.0.1:8787
 $ lekima serve --http --bind 0.0.0.0:8787      # reachable on the LAN
 ```
 
+Open `http://<host>:8787/` on a phone for the built-in web remote. It follows
+the TUI's console palette: a HUD line, `// NOW PLAYING`, a segmented seek rail,
+queue rows and a `[WEB]` status bar. The page is embedded in the binary (no
+external assets) and asks for the token once, storing it in `localStorage`.
+For quick pairing you can also open `http://<host>:8787/#token=<token>`; the URL
+fragment is never sent to the server and is removed from the address bar.
+
 ## Authentication
 
 The first start generates a 64-character bearer token in `<config>/http.token`
@@ -28,11 +35,17 @@ logged, and never returned by an endpoint.
 The default bind is loopback. Binding `0.0.0.0` exposes the API to your network;
 keep the token private and prefer a VPN or SSH tunnel for the internet. There is
 no CORS support yet, so a browser page on another origin cannot call the API.
+The built-in page is same-origin and works without CORS.
+
+The page is served with a strict Content-Security-Policy (no external scripts,
+no framing), `Cache-Control: no-store`, `nosniff` and `no-referrer`; it only
+stores the token in `localStorage`.
 
 ## Endpoints
 
 | Method | Path | Auth | Body / notes |
 | --- | --- | --- | --- |
+| `GET` | `/` | no | built-in web remote |
 | `GET` | `/v1/health` | no | liveness only |
 | `GET` | `/v1/capabilities` | no | version, auth scheme, endpoints, command tags |
 | `GET` | `/v1/status` | yes | same data as `lekima status --json` |
