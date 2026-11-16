@@ -56,6 +56,11 @@ $ lekima status --json
 
 ## Status
 
+`0.6.0` adds the assisted web login: `lekima login --qr` opens the web player
+in a dedicated Chrome profile, opens the login dialog, captures the session and
+closes the browser; `--no-browser` keeps the terminal QR. Provider requests
+reuse one device id and send browser-like headers through `ncmapi` 1.8.
+
 `0.5.2` fixes the first-run `lekima login --qr` failure on a fresh install by
 creating the state directories before the provider writes `session.cookies`.
 
