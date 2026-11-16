@@ -56,6 +56,10 @@ $ lekima status --json
 
 ## Status
 
+`0.8.0` redesigns the console surfaces: the comments pane becomes a wrapped
+feed with likes, dates and replies; notices and errors become bordered alert
+panels; and an empty library shows the `LEKIMA` wordmark with key hints.
+
 `0.7.0` adds token-guarded HTTP control: `lekima serve --http` exposes status,
 queue and the allowlisted command surface, plus a built-in neon web remote at
 `/` for phones.
