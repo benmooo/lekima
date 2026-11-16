@@ -56,6 +56,9 @@ $ lekima status --json
 
 ## Status
 
+`0.5.2` fixes the first-run `lekima login --qr` failure on a fresh install by
+creating the state directories before the provider writes `session.cookies`.
+
 `0.5.1` moves track comments onto `ncmapi` 1.7's public comments endpoint and
 drops the adapter's direct HTTP dependency.
 

@@ -3,6 +3,15 @@
 All notable changes to lekima are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## 0.5.2 — 2026-11-16
+
+### Fixed
+
+- A fresh install no longer fails `lekima login --qr` with "session storage
+  failed … No such file or directory". The CLI creates `<config>` and
+  `<config>/cache` on startup, so the provider can write `session.cookies`
+  before the daemon has ever run.
+
 ## 0.5.1 — 2026-11-16
 
 ### Changed

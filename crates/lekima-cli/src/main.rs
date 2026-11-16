@@ -52,6 +52,18 @@ async fn async_main() -> std::process::ExitCode {
         Ok(paths) => paths,
         Err(error) => return fail(&Failure::from(error), json),
     };
+    // The provider writes `session.cookies` during QR login before the daemon
+    // has had a chance to run `ensure`, so a fresh install must create the
+    // state root here rather than relying on a previous command.
+    if let Err(error) = paths.ensure() {
+        return fail(
+            &Failure::internal(format!(
+                "failed to create the state directory {}: {error}",
+                paths.root().display()
+            )),
+            json,
+        );
+    }
     let config = match paths.config() {
         Ok(config) => config,
         Err(error) => return fail(&Failure::from(error), json),

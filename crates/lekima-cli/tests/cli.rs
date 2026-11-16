@@ -46,6 +46,22 @@ fn capabilities_are_machine_readable() {
 }
 
 #[test]
+fn a_fresh_install_creates_the_state_directories() {
+    // The parent is deliberately missing so the test covers the first run
+    // after `brew install`, where the provider has not written anything yet.
+    let root = hermetic("fresh-install").join("nested/state");
+    let output = binary()
+        .env("LEKIMA_CONFIG_DIR", &root)
+        .args(["themes", "--json"])
+        .output()
+        .expect("run lekima");
+
+    assert!(output.status.success());
+    assert!(root.is_dir(), "state root was not created");
+    assert!(root.join("cache").is_dir(), "cache dir was not created");
+}
+
+#[test]
 fn status_without_a_daemon_exits_seven_with_a_daemon_error() {
     let dir = hermetic("status");
     fs::write(dir.join("config.toml"), "[daemon]\nautostart = false\n").expect("config");
