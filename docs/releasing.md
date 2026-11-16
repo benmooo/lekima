@@ -1,7 +1,7 @@
 # Releasing
 
-This machine uses the **USTC crates.io mirror** (`~/.cargo/config.toml` replaces
-`crates-io`). Two consequences:
+This machine uses the **rsproxy.cn crates.io mirror** (`~/.cargo/config.toml`
+replaces `crates-io`). Two consequences:
 
 1. **Write commands must name the real registry**: `cargo publish`, `cargo yank`,
    `cargo owner`, `cargo login` all take `--registry crates-io`. Without it they
@@ -63,7 +63,7 @@ $ cargo yank --version 1.2.0 --undo --registry crates-io   # unyank
 
 ## 5. Mirror lag (this machine only)
 
-After publishing, the USTC index can take minutes to list the new version.
+After publishing, the rsproxy index can lag a few minutes behind crates.io.
 Symptom: `cargo check` says *“candidate versions found which didn't match”* and
 names the older version.
 
@@ -72,7 +72,7 @@ Options:
 1. **Wait** and retry. This is the normal fix; nothing else is wrong.
 2. Verify the index directly:
    ```console
-   $ curl -s https://mirrors.ustc.edu.cn/crates.io-index/<first2>/<next2>/<crate> | tail -1
+   $ curl -s https://rsproxy.cn/index/<first2>/<next2>/<crate> | tail -1
    ```
    (for `ncmapi`: `nc/ma/ncmapi`). Compare with
    `https://crates.io/api/v1/crates/ncmapi`.
@@ -83,17 +83,16 @@ Options:
    $ cargo check -p <crate>
    $ mv ~/.cargo/config.toml.bak ~/.cargo/config.toml
    ```
-4. Point this workspace at a mirror that has already synced, via a
+4. Point this workspace at another mirror that has already synced, via a
    **gitignored** `.cargo/config.toml` (already ignored by the repo):
    ```toml
    [source.crates-io]
-   replace-with = "rsproxy"
+   replace-with = "ustc"
 
-   [source.rsproxy]
-   registry = "sparse+https://rsproxy.cn/index/"
+   [source.ustc]
+   registry = "sparse+https://mirrors.ustc.edu.cn/crates.io-index/"
    ```
-   `rsproxy.cn` usually syncs new crates within minutes; USTC and TUNA lag
-   longer. Check any mirror with
+   Check any mirror with
    `curl -s <index>/<first2>/<next2>/<crate> | tail -1`.
 
 Do not commit a `[patch.crates-io]` path entry to work around lag: it breaks

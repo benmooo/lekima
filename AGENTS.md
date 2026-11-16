@@ -28,8 +28,8 @@ Guidance for coding agents working in this repository.
 
 ## Releasing
 
-This machine mirrors crates.io through USTC. Every registry write must name the
-real registry:
+This machine mirrors crates.io through rsproxy (`rsproxy.cn`). Every registry
+write must name the real registry:
 
 ```bash
 cargo publish --dry-run --registry crates-io
