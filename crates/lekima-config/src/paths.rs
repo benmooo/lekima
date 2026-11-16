@@ -67,6 +67,12 @@ impl Paths {
         crate::playback::playback_path(&self.cache_dir())
     }
 
+    /// Bearer token for the HTTP control server.
+    #[must_use]
+    pub fn http_token_file(&self) -> PathBuf {
+        self.root.join("http.token")
+    }
+
     /// Dedicated browser profile used by the assisted web login.
     ///
     /// Kept apart from the user's normal browser data, and reused between

@@ -1,7 +1,7 @@
 //! Command line surface. This file is the contract with humans and agents:
 //! names, flags and help text are API.
 
-use std::path::PathBuf;
+use std::{net::SocketAddr, path::PathBuf};
 
 use clap::{Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
@@ -39,6 +39,17 @@ pub struct Cli {
 pub enum TopCommand {
     /// Open the interactive player.
     Tui,
+
+    /// Serve a control API for phones and other devices.
+    Serve {
+        /// Serve the HTTP API (the only transport).
+        #[arg(long)]
+        http: bool,
+
+        /// Address to bind; use `0.0.0.0:8787` to accept LAN connections.
+        #[arg(long, value_name = "ADDR", default_value = "127.0.0.1:8787")]
+        bind: SocketAddr,
+    },
 
     /// Play a search query, track ids, or a playlist.
     Play {

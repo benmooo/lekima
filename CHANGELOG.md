@@ -3,6 +3,18 @@
 All notable changes to lekima are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## Unreleased
+
+### Added
+
+- `lekima serve --http [--bind ADDR]` exposes the daemon over HTTP for phones
+  and other machines: `GET /v1/status`, `GET /v1/queue`, `GET /v1/health`,
+  `GET /v1/capabilities` and `POST /v1/command` with the IPC command shape.
+- A bearer token in `<config>/http.token` (`0600`) is generated on first start;
+  `LEKIMA_HTTP_TOKEN` overrides it. Requests use constant-time comparison.
+- The HTTP surface is default-deny: `login`, `logout`, `shutdown`, `hello` and
+  `subscribe` are not exposed, and command bodies are capped at 1 MiB.
+
 ## 0.6.0 — 2026-11-16
 
 ### Added

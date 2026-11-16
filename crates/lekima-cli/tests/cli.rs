@@ -186,6 +186,20 @@ fn mcp_speaks_initialize_and_tools_list() {
 }
 
 #[test]
+fn serve_requires_the_http_flag() {
+    let dir = hermetic("serve-usage");
+    let output = binary()
+        .env("LEKIMA_CONFIG_DIR", &dir)
+        .arg("serve")
+        .output()
+        .expect("run lekima");
+
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("--http"), "{stderr}");
+}
+
+#[test]
 fn doctor_always_returns_a_report() {
     let dir = hermetic("doctor");
     let output = binary()

@@ -8,6 +8,7 @@ mod commands;
 mod daemon;
 mod mcp;
 mod output;
+mod serve;
 
 use std::io::IsTerminal;
 

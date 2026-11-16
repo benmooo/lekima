@@ -108,8 +108,7 @@ A 256 MiB LRU stream cache with `lekima cache`, cached-playback fallback and a
 ### Later
 
 Desktop notifications, Last.fm scrobbling, multiple profiles, plugin hooks,
-`lekima serve --http` for LAN control, Windows native support, WASM/embedded
-agent tooling.
+Windows native support, WASM/embedded agent tooling.
 
 ### Explicit non-goals
 
@@ -252,6 +251,8 @@ lekima status [--json]
 lekima login [--qr [--no-browser] | --cookie-file PATH|-]
 lekima logout
 lekima whoami [--json]
+lekima serve --http [--bind ADDR]          HTTP control for phones/LAN
+
 lekima daemon start|stop|status|logs
 lekima doctor [--json]
 lekima capabilities [--json]
@@ -300,7 +301,9 @@ playing
 ```
 
 Roadmap: `lekima mcp` exposes `play`, `pause`, `next`, `search`, `status` as MCP
-tools for agents that prefer tool calls over shell.
+tools for agents that prefer tool calls over shell. `lekima serve --http` opens
+the same command surface to phones and other machines, guarded by a bearer
+token.
 
 ## 7. Success criteria (v0.1)
 

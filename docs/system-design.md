@@ -318,6 +318,27 @@ Security:
   restricts access.)
 - No authentication tokens on the wire; the session stays inside the daemon.
 
+### 7.1 HTTP control frontend
+
+`lekima serve --http` is a second transport over the same commands, implemented
+with `axum` in the CLI composition root. It owns no playback state and never
+reads the session file.
+
+- Bearer token in `<config>/http.token` (`0600`, 32 OS-random bytes as hex);
+  `LEKIMA_HTTP_TOKEN` overrides it for containers (minimum 16 characters).
+  Tokens are never accepted on argv, logged or echoed.
+- Comparison is constant-time; failures return `401` with `WWW-Authenticate`.
+- `GET /v1/health` and `/v1/capabilities` are public; everything else needs the
+  token. `POST /v1/command` takes one IPC `Command` and is capped at
+  `MAX_FRAME_BYTES`.
+- A default-deny allowlist exposes playback, queue, search, library, likes,
+  sleep and quality. `login`, `logout`, `shutdown`, `hello` and `subscribe` stay
+  internal to the CLI/socket.
+- Loopback is the default bind; LAN binding is explicit and prints a warning.
+  The server does not autostart the daemon: offline requests return `503`.
+
+Reference: [`http.md`](./http.md).
+
 ## 8. Provider adapter (`lekima-ncm`)
 
 - `NcmMusicService` implements `MusicService` using `ncmapi::NcmClient`.
@@ -503,6 +524,8 @@ account.
 | 008 | Strict config parsing | Typos surface immediately instead of silently defaulting |
 | 009 | Full-download playback in v0.1 | Fewest moving parts; streaming behind the same port in v0.2 |
 | 010 | Poll status in v0.1, push events in v0.2 | Correctness first; protocol already supports unsolicited frames |
+| 011 | HTTP control as a frontend, not a second daemon | Reuses the IPC contract; one writer, no state duplication |
+| 012 | Assisted login through the official web player | The web login carries Yidun/WebGL checks; driving a real browser avoids mimicking an anti-bot SDK |
 
 ## 17. Failure modes
 
@@ -547,7 +570,9 @@ Working end to end against the live provider:
 - OS media integration: MPRIS on Linux, Now Playing and media keys on macOS
 - daemon lifecycle (autostart, socket permissions, SIGTERM, log file, autostart
   race handling), CLI JSON contract and exit codes, `doctor`, `capabilities`,
-  completions, `login --qr`, `login --cookie-file -`, `logout`
+  completions, browser-assisted `login --qr`, `login --cookie-file -`, `logout`
+- HTTP control (`lekima serve --http`) with a bearer token, status/queue reads
+  and the allowlisted command surface
 - TUI: HUD, real spectrum, track table, sidebar, queue and lyrics panes, history,
   settings palette, twelve themes (including a light terminal palette), search
   prompt, `:` command line, help overlay, vim keys

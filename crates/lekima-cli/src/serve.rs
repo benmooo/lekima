@@ -1,0 +1,502 @@
+//! HTTP control surface for phones and remote scripts.
+//!
+//! The server is a thin frontend over the daemon's JSON protocol: it owns no
+//! playback state and never talks to the provider. Every request except
+//! discovery requires the bearer token stored in `<config>/http.token`.
+
+use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+
+use axum::{
+    Json, Router,
+    extract::{DefaultBodyLimit, State, rejection::JsonRejection},
+    http::{
+        HeaderMap, HeaderValue, StatusCode,
+        header::{AUTHORIZATION, WWW_AUTHENTICATE},
+    },
+    response::{IntoResponse, Response},
+    routing::{get, post},
+};
+use lekima_config::{HttpToken, Paths};
+use lekima_ipc::{ApiError, Command, ErrorCode, IpcError, MAX_FRAME_BYTES, call};
+use serde_json::{Value, json};
+
+use crate::output::{self, Failure};
+
+/// Generated tokens are 32 random bytes, so 64 hex characters.
+const TOKEN_BYTES: usize = 32;
+/// A hand-supplied token shorter than this is rejected as guessable.
+const MIN_TOKEN_CHARS: usize = 16;
+const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
+const ENDPOINTS: [&str; 5] = [
+    "GET /v1/health",
+    "GET /v1/capabilities",
+    "GET /v1/status",
+    "GET /v1/queue",
+    "POST /v1/command",
+];
+/// Command tags accepted by `POST /v1/command`.
+const COMMAND_TYPES: [&str; 34] = [
+    "status",
+    "play",
+    "jump",
+    "pause",
+    "resume",
+    "toggle",
+    "stop",
+    "next",
+    "prev",
+    "seek",
+    "set_volume",
+    "toggle_mute",
+    "cycle_repeat",
+    "set_repeat",
+    "set_shuffle",
+    "queue",
+    "queue_remove",
+    "queue_move",
+    "enqueue",
+    "clear_queue",
+    "daily",
+    "fm",
+    "toplists",
+    "cloud",
+    "like",
+    "comments",
+    "liked",
+    "sleep",
+    "set_quality",
+    "search",
+    "playlists",
+    "playlist_tracks",
+    "lyrics",
+    "whoami",
+];
+
+#[derive(Clone)]
+struct AppState {
+    socket: PathBuf,
+    token: Arc<str>,
+}
+
+/// Starts the HTTP server and blocks until `Ctrl-C`.
+///
+/// # Errors
+///
+/// Fails when the token cannot be read or the address cannot be bound.
+pub(crate) async fn http(
+    paths: &Paths,
+    socket: PathBuf,
+    bind: SocketAddr,
+    json: bool,
+) -> Result<(), Failure> {
+    let token = load_token(paths)?;
+    let listener = tokio::net::TcpListener::bind(bind)
+        .await
+        .map_err(|error| Failure::internal(format!("failed to bind {bind}: {error}")))?;
+    let local = listener
+        .local_addr()
+        .map_err(|error| Failure::internal(format!("failed to inspect the listener: {error}")))?;
+
+    if json {
+        output::emit_json(
+            true,
+            Some(json!({
+                "bind": local.to_string(),
+                "token_file": paths.http_token_file(),
+                "endpoints": ENDPOINTS,
+            })),
+            None,
+        );
+    } else {
+        crate::say!("lekima HTTP control listening on http://{local}/v1");
+        crate::say!(
+            "authorization: Bearer token from {}",
+            paths.http_token_file().display()
+        );
+        if !local.ip().is_loopback() {
+            crate::say!("warning: this is reachable from your network; keep the token private");
+        }
+        crate::say!("press ctrl-c to stop");
+    }
+    tracing::info!(address = %local, "http control listening");
+
+    let state = AppState { socket, token };
+    axum::serve(listener, router(state))
+        .with_graceful_shutdown(shutdown())
+        .await
+        .map_err(|error| Failure::internal(format!("HTTP server failed: {error}")))
+}
+
+fn load_token(paths: &Paths) -> Result<Arc<str>, Failure> {
+    if let Ok(value) = std::env::var("LEKIMA_HTTP_TOKEN") {
+        let token = value.trim();
+        if token.len() < MIN_TOKEN_CHARS {
+            return Err(Failure::usage(format!(
+                "LEKIMA_HTTP_TOKEN must be at least {MIN_TOKEN_CHARS} characters"
+            )));
+        }
+        return Ok(Arc::from(token));
+    }
+
+    let store = HttpToken::new(paths.http_token_file());
+    if let Some(token) = store.load()? {
+        return Ok(Arc::from(token));
+    }
+    let token = generate_token()?;
+    store.save(&token)?;
+    Ok(Arc::from(token))
+}
+
+fn generate_token() -> Result<String, Failure> {
+    let mut bytes = [0_u8; TOKEN_BYTES];
+    getrandom::fill(&mut bytes)
+        .map_err(|error| Failure::internal(format!("failed to generate a token: {error}")))?;
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+fn router(state: AppState) -> Router {
+    Router::new()
+        .route("/v1/health", get(health))
+        .route("/v1/capabilities", get(capabilities))
+        .route("/v1/status", get(status))
+        .route("/v1/queue", get(queue))
+        .route("/v1/command", post(command))
+        .layer(DefaultBodyLimit::max(MAX_FRAME_BYTES))
+        .with_state(state)
+}
+
+async fn health() -> Json<Value> {
+    Json(json!({"ok": true, "data": {"status": "ok"}}))
+}
+
+async fn capabilities() -> Json<Value> {
+    Json(json!({
+        "ok": true,
+        "data": {
+            "version": env!("CARGO_PKG_VERSION"),
+            "auth": "bearer",
+            "endpoints": ENDPOINTS,
+            "commands": COMMAND_TYPES.as_slice(),
+        }
+    }))
+}
+
+async fn status(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Some(response) = authorize(&headers, &state) {
+        return response;
+    }
+    forward(&state, Command::Status).await
+}
+
+async fn queue(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Some(response) = authorize(&headers, &state) {
+        return response;
+    }
+    forward(&state, Command::Queue).await
+}
+
+async fn command(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    payload: Result<Json<Command>, JsonRejection>,
+) -> Response {
+    if let Some(response) = authorize(&headers, &state) {
+        return response;
+    }
+    let Json(command) = match payload {
+        Ok(payload) => payload,
+        Err(rejection) => {
+            return error(
+                StatusCode::BAD_REQUEST,
+                ErrorCode::BadRequest,
+                rejection.body_text(),
+            );
+        }
+    };
+    if !permitted(&command) {
+        return error(
+            StatusCode::FORBIDDEN,
+            ErrorCode::Unsupported,
+            "that command is not exposed over HTTP".to_owned(),
+        );
+    }
+    forward(&state, command).await
+}
+
+async fn forward(state: &AppState, command: Command) -> Response {
+    match tokio::time::timeout(COMMAND_TIMEOUT, call(&state.socket, command)).await {
+        Ok(Ok(reply)) => (
+            StatusCode::OK,
+            Json(json!({"ok": true, "data": output::reply_data(&reply)})),
+        )
+            .into_response(),
+        Ok(Err(IpcError::Remote { code, message })) => error(status_for(code), code, message),
+        Ok(Err(IpcError::NotRunning { path })) => error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            ErrorCode::Daemon,
+            format!(
+                "the player daemon is not running at {}; start it with `lekima daemon start`",
+                path.display()
+            ),
+        ),
+        Ok(Err(IpcError::Timeout(duration))) => error(
+            StatusCode::GATEWAY_TIMEOUT,
+            ErrorCode::Daemon,
+            format!("the daemon did not answer within {duration:?}"),
+        ),
+        Ok(Err(IpcError::Protocol(message))) => {
+            error(StatusCode::BAD_GATEWAY, ErrorCode::Daemon, message)
+        }
+        Ok(Err(IpcError::Io(source))) => error(
+            StatusCode::BAD_GATEWAY,
+            ErrorCode::Daemon,
+            source.to_string(),
+        ),
+        Err(_) => error(
+            StatusCode::GATEWAY_TIMEOUT,
+            ErrorCode::Daemon,
+            "the daemon did not answer in time".to_owned(),
+        ),
+    }
+}
+
+/// Returns a response only when the request is not authorized.
+fn authorize(headers: &HeaderMap, state: &AppState) -> Option<Response> {
+    let presented = headers
+        .get(AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "));
+    if presented.is_some_and(|token| constant_time_eq(token.as_bytes(), state.token.as_bytes())) {
+        return None;
+    }
+    Some(
+        (
+            StatusCode::UNAUTHORIZED,
+            [(WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"))],
+            Json(json!({
+                "ok": false,
+                "error": ApiError::new(
+                    ErrorCode::Unauthorized,
+                    "missing or invalid bearer token",
+                ),
+            })),
+        )
+            .into_response(),
+    )
+}
+
+fn error(status: StatusCode, code: ErrorCode, message: String) -> Response {
+    (
+        status,
+        Json(json!({"ok": false, "error": ApiError::new(code, message)})),
+    )
+        .into_response()
+}
+
+fn status_for(code: ErrorCode) -> StatusCode {
+    match code {
+        ErrorCode::BadRequest => StatusCode::BAD_REQUEST,
+        ErrorCode::Unauthorized => StatusCode::UNAUTHORIZED,
+        ErrorCode::NotFound => StatusCode::NOT_FOUND,
+        ErrorCode::Unsupported => StatusCode::NOT_IMPLEMENTED,
+        ErrorCode::Backend => StatusCode::BAD_GATEWAY,
+        ErrorCode::Playback => StatusCode::CONFLICT,
+        ErrorCode::Daemon => StatusCode::SERVICE_UNAVAILABLE,
+        ErrorCode::Internal => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+/// Default-deny allowlist: commands added later stay private until listed.
+fn permitted(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::Status
+            | Command::Play { .. }
+            | Command::Jump { .. }
+            | Command::Pause
+            | Command::Resume
+            | Command::Toggle
+            | Command::Stop
+            | Command::Next
+            | Command::Prev
+            | Command::Seek { .. }
+            | Command::SetVolume { .. }
+            | Command::ToggleMute
+            | Command::CycleRepeat
+            | Command::SetRepeat { .. }
+            | Command::SetShuffle { .. }
+            | Command::Queue
+            | Command::QueueRemove { .. }
+            | Command::QueueMove { .. }
+            | Command::Enqueue { .. }
+            | Command::ClearQueue
+            | Command::Daily { .. }
+            | Command::Fm { .. }
+            | Command::Toplists
+            | Command::Cloud { .. }
+            | Command::Like { .. }
+            | Command::Comments { .. }
+            | Command::Liked { .. }
+            | Command::Sleep { .. }
+            | Command::SetQuality { .. }
+            | Command::Search { .. }
+            | Command::Playlists
+            | Command::PlaylistTracks { .. }
+            | Command::Lyrics { .. }
+            | Command::Whoami
+    )
+}
+
+fn constant_time_eq(presented: &[u8], expected: &[u8]) -> bool {
+    if presented.len() != expected.len() {
+        return false;
+    }
+    presented
+        .iter()
+        .zip(expected)
+        .fold(0_u8, |difference, (left, right)| {
+            difference | (left ^ right)
+        })
+        == 0
+}
+
+async fn shutdown() {
+    let _ = tokio::signal::ctrl_c().await;
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{path::PathBuf, sync::Arc};
+
+    use axum::{
+        body::{Body, to_bytes},
+        http::{Request, StatusCode},
+    };
+    use serde_json::Value;
+    use tower::ServiceExt;
+
+    use super::{AppState, constant_time_eq, permitted, router};
+    use lekima_ipc::Command;
+
+    fn state() -> AppState {
+        AppState {
+            socket: PathBuf::from("/nonexistent/lekima-test.sock"),
+            token: Arc::from("test-token-0123456789"),
+        }
+    }
+
+    async fn call(request: Request<Body>) -> (StatusCode, Value) {
+        let response = router(state()).oneshot(request).await.unwrap();
+        let status = response.status();
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        (status, serde_json::from_slice(&bytes).unwrap())
+    }
+
+    #[tokio::test]
+    async fn health_is_public() {
+        let (status, body) = call(
+            Request::builder()
+                .uri("/v1/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["ok"], true);
+    }
+
+    #[tokio::test]
+    async fn capabilities_describe_the_auth_scheme() {
+        let (status, body) = call(
+            Request::builder()
+                .uri("/v1/capabilities")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["data"]["auth"], "bearer");
+        assert!(body["data"]["commands"].as_array().unwrap().len() >= 20);
+    }
+
+    #[tokio::test]
+    async fn status_requires_a_bearer_token() {
+        let (status, body) = call(
+            Request::builder()
+                .uri("/v1/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(body["error"]["code"], "unauthorized");
+    }
+
+    #[tokio::test]
+    async fn a_valid_token_reaches_the_daemon_error_path() {
+        let (status, body) = call(
+            Request::builder()
+                .uri("/v1/status")
+                .header("authorization", "Bearer test-token-0123456789")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["error"]["code"], "daemon");
+    }
+
+    #[tokio::test]
+    async fn shutdown_is_not_exposed() {
+        let (status, body) = call(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/command")
+                .header("authorization", "Bearer test-token-0123456789")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"type":"shutdown"}"#))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(body["error"]["code"], "unsupported");
+    }
+
+    #[tokio::test]
+    async fn malformed_commands_are_rejected_before_the_daemon() {
+        let (status, body) = call(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/command")
+                .header("authorization", "Bearer test-token-0123456789")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"type":"not_a_command"}"#))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error"]["code"], "bad_request");
+    }
+
+    #[test]
+    fn allowlist_opens_playback_but_not_shutdown_or_login() {
+        assert!(permitted(&Command::Pause));
+        assert!(permitted(&Command::Play {
+            target: lekima_ipc::PlayTarget::Query {
+                query: "mota".to_owned()
+            }
+        }));
+        assert!(!permitted(&Command::Shutdown));
+        assert!(!permitted(&Command::Login {
+            cookie: "MUSIC_U=secret".to_owned()
+        }));
+        assert!(!permitted(&Command::Logout));
+    }
+
+    #[test]
+    fn token_comparison_is_length_safe() {
+        assert!(constant_time_eq(b"same", b"same"));
+        assert!(!constant_time_eq(b"same", b"diff"));
+        assert!(!constant_time_eq(b"short", b"longer"));
+    }
+}

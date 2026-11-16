@@ -54,6 +54,15 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
             Ok(())
         }
 
+        TopCommand::Serve { http, bind } => {
+            if !http {
+                return Err(Failure::usage(
+                    "run `lekima serve --http` to start the HTTP control API",
+                ));
+            }
+            crate::serve::http(&paths, socket, bind, json).await
+        }
+
         TopCommand::Play {
             query,
             ids,

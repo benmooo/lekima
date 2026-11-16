@@ -48,6 +48,24 @@ JSON-RPC over stdio. Tools: `player_status`, `search`, `play`, `pause`,
 `queue_remove`, `queue_move`, `sleep`, `set_quality`, `lyrics`, `comments`,
 `daily`, `fm`.
 
+## HTTP control
+
+For agents that cannot reach the Unix socket, `lekima serve --http` exposes the
+same commands over HTTP:
+
+```bash
+lekima serve --http --bind 0.0.0.0:8787
+TOKEN=$(cat "$LEKIMA_CONFIG_DIR/http.token")   # path is printed at startup
+curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8787/v1/status
+curl -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"type":"play","target":{"type":"query","query":"mota"}}' \
+  http://127.0.0.1:8787/v1/command
+```
+
+`GET /v1/health` and `GET /v1/capabilities` are public; everything else needs
+the token. `login`, `logout`, `shutdown` and event subscription are not exposed.
+See [http.md](http.md).
+
 ## Cache
 
 ```bash

@@ -23,8 +23,10 @@ lekima-platform.workspace = true
 lekima-tui.workspace = true
 
 anyhow.workspace = true
+axum.workspace = true
 qrcode.workspace = true
 clap.workspace = true
+getrandom.workspace = true
 clap_complete = "4"
 futures-util = "0.3"
 reqwest.workspace = true
@@ -40,3 +42,4 @@ tracing-subscriber.workspace = true
 assert_cmd = "2"
 serde_json.workspace = true
 tempfile.workspace = true
+tower = { version = "0.5", features = ["util"] }

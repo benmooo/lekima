@@ -84,12 +84,13 @@ integration, streaming, the agent surface and the first public packages.
 `0.1.1` was the first public release: crates.io, GitHub release binaries and a
 Homebrew tap. See [install](docs/install.md) and [first run](docs/first-run.md).
 
-Working: search, playlists, timed lyrics, QR/cookie login, daily mix, personal
-FM, likes, charts, the music cloud, playback through a background daemon, a
-vim-driven TUI (responsive HUD, real spectrum, buffered shading, lyrics pane,
-history, UI settings, twelve themes), device selection, gapless playback,
-MPRIS/Now Playing, push events (`lekima watch`) and an MCP stdio server
-(`lekima mcp`). `ncmapi` 1.8 is published on crates.io.
+Working: search, playlists, timed lyrics, browser-assisted login, daily mix,
+personal FM, likes, charts, the music cloud, playback through a background
+daemon, a vim-driven TUI (responsive HUD, real spectrum, buffered shading,
+lyrics pane, history, UI settings, twelve themes), device selection, gapless
+playback, MPRIS/Now Playing, push events (`lekima watch`), an MCP stdio server
+(`lekima mcp`) and token-guarded HTTP control (`lekima serve --http`, see
+[docs/http.md](docs/http.md)). `ncmapi` 1.8 is published on crates.io.
 
 ```console
 $ lekima login --qr          # opens the web player in Chrome

@@ -3,11 +3,12 @@
 use std::{
     fs,
     io::Write,
-    os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
 };
 
 use lekima_domain::{CredentialsStore, DomainError, Result};
+
+use crate::private::open_private;
 
 /// A single-line cookie header stored with `0600` permissions.
 #[derive(Debug, Clone)]
@@ -41,14 +42,7 @@ impl CredentialsStore for FileCredentials {
     }
 
     fn save(&self, cookie: &str) -> Result<()> {
-        if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent).map_err(|error| {
-                DomainError::Unavailable(format!("failed to create {}: {error}", parent.display()))
-            })?;
-        }
-        let mut options = fs::OpenOptions::new();
-        options.write(true).create(true).truncate(true).mode(0o600);
-        let mut file = options.open(&self.path).map_err(|error| {
+        let mut file = open_private(&self.path).map_err(|error| {
             DomainError::Unavailable(format!("failed to open {}: {error}", self.path.display()))
         })?;
         file.write_all(cookie.trim().as_bytes()).map_err(|error| {
