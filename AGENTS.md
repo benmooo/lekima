@@ -28,7 +28,7 @@ Guidance for coding agents working in this repository.
 
 ## Releasing
 
-This machine mirrors crates.io through USTC. Every registry write must name the
+This machine mirrors crates.io through rsproxy. Every registry write must name the
 real registry:
 
 ```bash

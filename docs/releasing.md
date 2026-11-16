@@ -1,13 +1,13 @@
 # Releasing
 
-This machine uses the **USTC crates.io mirror** (`~/.cargo/config.toml` replaces
-`crates-io`). Two consequences:
+This machine uses the **rsproxy crates.io mirror** (`~/.cargo/config.toml`
+replaces `crates-io` with the sparse index). Two consequences:
 
 1. **Write commands must name the real registry**: `cargo publish`, `cargo yank`,
    `cargo owner`, `cargo login` all take `--registry crates-io`. Without it they
    operate on (or look for credentials for) the mirror, which is read-only.
-2. **Newly published versions may lag** in the mirror index. Reads can fail for a
-   short window even though crates.io has the crate. See §5.
+2. **Newly published versions may lag briefly** in the mirror index. Reads can
+   fail for a short window even though crates.io has the crate. See §5.
 
 ## 0. One-time auth
 
@@ -63,16 +63,16 @@ $ cargo yank --version 1.2.0 --undo --registry crates-io   # unyank
 
 ## 5. Mirror lag (this machine only)
 
-After publishing, the USTC index can take minutes to list the new version.
-Symptom: `cargo check` says *“candidate versions found which didn't match”* and
-names the older version.
+After publishing, the rsproxy index can take a short while to list the new
+version. Symptom: `cargo check` says *“candidate versions found which didn't
+match”* and names the older version.
 
 Options:
 
 1. **Wait** and retry. This is the normal fix; nothing else is wrong.
 2. Verify the index directly:
    ```console
-   $ curl -s https://mirrors.ustc.edu.cn/crates.io-index/<first2>/<next2>/<crate> | tail -1
+   $ curl -s https://rsproxy.cn/index/<first2>/<next2>/<crate> | tail -1
    ```
    (for `ncmapi`: `nc/ma/ncmapi`). Compare with
    `https://crates.io/api/v1/crates/ncmapi`.
@@ -83,17 +83,17 @@ Options:
    $ cargo check -p <crate>
    $ mv ~/.cargo/config.toml.bak ~/.cargo/config.toml
    ```
-4. Point this workspace at a mirror that has already synced, via a
-   **gitignored** `.cargo/config.toml` (already ignored by the repo):
+4. If rsproxy is the lagging one, point this workspace at another mirror that
+   has already synced, via a **gitignored** `.cargo/config.toml` (already
+   ignored by the repo):
    ```toml
    [source.crates-io]
-   replace-with = "rsproxy"
+   replace-with = "ustc"
 
-   [source.rsproxy]
-   registry = "sparse+https://rsproxy.cn/index/"
+   [source.ustc]
+   registry = "sparse+https://mirrors.ustc.edu.cn/crates.io-index/"
    ```
-   `rsproxy.cn` usually syncs new crates within minutes; USTC and TUNA lag
-   longer. Check any mirror with
+   Check any mirror with
    `curl -s <index>/<first2>/<next2>/<crate> | tail -1`.
 
 Do not commit a `[patch.crates-io]` path entry to work around lag: it breaks

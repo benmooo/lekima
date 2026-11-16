@@ -50,7 +50,7 @@ $ lekima status --json
 - [`docs/sprint-8/`](docs/sprint-8/) — **Offline cache and comments** (0.5.0):
   256 MiB stream cache, `lekima cache`, comments CLI/MCP/TUI.
 - [`docs/releasing.md`](docs/releasing.md) — release flow, including
-  `--registry crates-io` on this USTC-mirrored machine.
+  `--registry crates-io` on this mirrored machine.
 - [`docs/sessions/`](docs/sessions/) — archived OpenCode sessions (this rewrite,
   in full) and the exporter script.
 
