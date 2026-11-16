@@ -3,9 +3,11 @@
 //! Run with `cargo run -p lekima-tui --example preview` to review the layout
 //! without a terminal, a daemon or an account.
 
-use lekima_domain::{Artist, PlaybackStatus, Playlist, RepeatMode, Track};
+use lekima_domain::{
+    Artist, Comment, CommentReply, Comments, PlaybackStatus, Playlist, RepeatMode, Track,
+};
 use lekima_tui::Theme;
-use lekima_tui::app::{App, LyricsState};
+use lekima_tui::app::{App, CommentsState, LyricsState};
 use lekima_tui::ui::draw;
 use ratatui::{Terminal, backend::TestBackend};
 
@@ -119,11 +121,20 @@ fn main() {
                     end_ms: 90_000,
                 }];
             }
+            "--empty" => {
+                app.tracks.clear();
+                app.source = "library".to_owned();
+            }
+            "--no-lyrics" => app.lyrics_open = false,
+            "--toast-error" => {
+                app.notify("provider rejected the session; run `lekima login`", true);
+            }
             "--help" | "-h" => {
                 println!(
                     "usage: preview [--width N] [--height N] [--theme NAME] \
                      [--glyphs unicode|ascii] [--density compact|comfortable] \
-                     [--mode normal|queue|help|settings] [--long-title] [--buffered]"
+                     [--mode normal|queue|help|settings|comments] [--long-title] \
+                     [--buffered] [--empty] [--no-lyrics] [--toast-error]"
                 );
                 return;
             }
@@ -131,9 +142,52 @@ fn main() {
         }
     }
 
+    if mode == "comments" {
+        app.comments_state = CommentsState::Ready {
+            track: 1.into(),
+            comments: Comments {
+                total: 20_535,
+                has_more: true,
+                hot: vec![Comment {
+                    id: 1,
+                    author: "NIGHTDRIVER".to_owned(),
+                    avatar_url: None,
+                    content: "The bassline at 01:12 is pure night-city fuel. Played this on repeat through Shibuya at 2am.".to_owned(),
+                    timestamp_ms: 1_700_000_000_000,
+                    liked_count: 44_054,
+                    replies: vec![CommentReply {
+                        author: "aka".to_owned(),
+                        content: "the synth pad underneath is the real hook".to_owned(),
+                    }],
+                }],
+                comments: vec![
+                    Comment {
+                        id: 2,
+                        author: "程cheng艾影".to_owned(),
+                        avatar_url: None,
+                        content: "庐山牛逼，这是一条足够长的评论，用来确认它会按宽度换行而不是被截断。耳机里全是细节。".to_owned(),
+                        timestamp_ms: 1_699_000_000_000,
+                        liked_count: 1_238,
+                        replies: Vec::new(),
+                    },
+                    Comment {
+                        id: 3,
+                        author: String::new(),
+                        avatar_url: None,
+                        content: String::new(),
+                        timestamp_ms: 0,
+                        liked_count: 0,
+                        replies: Vec::new(),
+                    },
+                ],
+            },
+        };
+    }
+
     app.mode = match mode.as_str() {
         "queue" => lekima_tui::app::Mode::Queue,
         "help" => lekima_tui::app::Mode::Help,
+        "comments" => lekima_tui::app::Mode::Comments,
         "settings" => {
             app.settings_selection = 3;
             lekima_tui::app::Mode::Settings

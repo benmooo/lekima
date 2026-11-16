@@ -140,7 +140,10 @@ terminals; the title is clipped first only when the terminal is very small.
 - Row: dim index, marker column (only the playing track has one), title `text`,
   artist `muted`, duration `dim`.
 - Selection: `▌` symbol in accent + `selection_bg`/`selection_fg`, bold.
-- Empty state: one muted line, never a centred illustration.
+- Empty state: a compact, left-aligned `LEKIMA` block wordmark with a
+  `NETEASE CLOUD MUSIC // CONSOLE` subtitle and `▶` key hints (`/`, `Tab`,
+  `:`, `?`). Below 44×12 it collapses to one actionable line
+  (`// NOTHING LOADED · / search · Tab library`). No centred banner.
 
 ### Lyrics pane
 
@@ -158,12 +161,20 @@ terminals; the title is clipped first only when the terminal is very small.
 
 ### Comments pane
 
-- `C` opens a full-width comments view (`// COMMENTS · n · track`) with `HOT`
-  and `ALL` sections, like counts, authors and quoted replies.
+- `C` opens the comments takeover: a header (`// COMMENTS · 20.5k · track`,
+  with `↓ MORE` when another page exists), a thin rule, then `HOT` and `ALL`
+  sections.
+- Sections carry counts and a right-aligned annotation (`MOST LIKED`,
+  `N LOADED`). Each entry leads with the author in `accent_alt` and
+  right-aligns `♥ likes · YYYY-MM-DD` metadata in `dim`.
+- Comment bodies wrap to the pane width instead of truncating; replies hang
+  under a `↳` connector in `muted`; deleted content renders as `[deleted]`.
 - `j/k` and `Ctrl-d/u` scroll, `g` returns to the top, `r` refetches, `C`/`Esc`
-  closes. Loading, empty and error states are explicit.
+  closes. Loading, empty and error states are explicit; errors add `r retry`
+  and `C close` hints.
 - Comments follow track changes while the pane is open.
-- Provider text is sanitized before rendering; long lines truncate with `…`.
+- Provider text is sanitized before rendering; timestamps are rendered as UTC
+  dates without a clock dependency.
 
 ### Settings palette
 
@@ -226,14 +237,18 @@ terminals; the title is clipped first only when the terminal is very small.
 
 ### Toasts
 
-- Application messages appear as a toast in the **bottom-right**, above the
-  command bar — never inline in the search/prompt line.
-- Double border: `hot` for errors and offline, `panel` for notices.
-- Title: ` ! ERROR `, ` + NOTICE `, ` ! OFFLINE `.
-- 54 columns max, 4 rows, wrapped text, `Clear` behind.
+- Application messages appear as a console alert in the **bottom-right**, above
+  the command bar — never inline in the search/prompt line.
+- Double border in the severity colour with a title bar: `═ ! ERROR` (`hot`),
+  `═ + NOTICE` (`accent`), `═ ! OFFLINE` (`warn`); ASCII glyph mode uses a
+  plain border and `-` prefix.
+- Body text stays in `text` rather than reversed colour; the first line is
+  prefixed `!` or `+`. Notices are one line, errors wrap to two; overflow ends
+  with `…`.
+- 60 columns max, `Clear` behind, wrapped and offset left of the lyrics pane.
 - Auto-dismiss after 4 seconds (80 ticks at 50 ms). The daemon-offline toast
   persists until the daemon answers again.
-- Hidden below 40 columns or 10 rows; the CLI still reports failures there.
+- Hidden below 30 columns or 6 rows; the CLI still reports failures there.
 
 ### Overlays
 
@@ -268,7 +283,7 @@ terminals; the title is clipped first only when the terminal is very small.
 | Outer borders on every pane | the archived app’s look; wastes 2 rows/cols each |
 | Rounded corners | reads as a web dashboard, not a console |
 | Emoji icons | inconsistent width, breaks alignment |
-| Banner/logo art | wasted space; brand is one chip |
+| Banner/logo art | the empty-state wordmark is compact and only appears when there is nothing to list |
 | More than two neon hues per screen | noise; hot is reserved for danger |
 | Centred empty states | slower to scan than a left-aligned hint |
 
@@ -298,3 +313,8 @@ terminals; the title is clipped first only when the terminal is very small.
 - [x] Messages are bottom-right toasts, not command-bar text.
 - [x] Liked `♥` marker, cloud/chart/daily sections, lyrics pane in the same
       grammar (labels `//`, double-border overlay only for transient panels).
+- [x] Empty library shows the compact wordmark and key hints; small panes fall
+      back to one actionable line.
+- [x] Comments render section counts, wrapped bodies, replies, deleted markers
+      and UTC dates.
+- [x] Alerts are double-bordered console panels with severity-coloured titles.

@@ -14,7 +14,7 @@ use ratatui::{
     text::{Line, Span, Text},
     widgets::{
         Block, BorderType, Clear, List, ListItem, ListState, Padding, Paragraph, Row, Table,
-        TableState, Wrap,
+        TableState,
     },
 };
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
@@ -34,6 +34,17 @@ const HUD_SPECTRUM_BARS: usize = 12;
 const HUD_PROGRESS_CELLS: usize = 12;
 const CURSOR_BLINK_FRAMES: u64 = 10;
 const HELP_TWO_COLUMN_WIDTH: u16 = 80;
+const TOAST_MAX_WIDTH: u16 = 60;
+const EMPTY_ART_MIN_WIDTH: u16 = 44;
+const EMPTY_ART_MIN_HEIGHT: u16 = 12;
+const COMMENT_INDENT: usize = 2;
+
+/// Compact empty-state wordmark: `LEK` and `IMA` are tinted separately.
+const WORDMARK: [[&str; 2]; 3] = [
+    ["█   █▀▀ █ █ ", "█ █▄ ▄█ ▄▀▄"],
+    ["█   █▀  █▀  ", "█ █ ▀ █ █▀█"],
+    ["█▄▄ █▄▄ █ █ ", "█ █   █ █ █"],
+];
 
 /// Where the lyrics pane ended up, so the toast can avoid it.
 #[derive(Debug, Clone, Copy)]
@@ -585,13 +596,7 @@ fn draw_tracks(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     frame.render_widget(Paragraph::new(Line::from(title)), label);
 
     if app.tracks.is_empty() {
-        frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                "nothing here - press / to search or Tab for the library",
-                Style::new().fg(theme.muted),
-            ))),
-            content,
-        );
+        draw_empty_tracks(frame, theme, content);
         return;
     }
 
@@ -640,6 +645,90 @@ fn draw_tracks(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     };
     let mut state = TableState::default().with_selected(Some(visual_selection));
     frame.render_stateful_widget(table, content, &mut state);
+}
+
+/// The empty library is the one place with brand art: a compact, left-aligned
+/// wordmark instead of a blank pane. Small terminals fall back to one hint line.
+fn draw_empty_tracks(frame: &mut Frame, theme: &Theme, area: Rect) {
+    if area.width < EMPTY_ART_MIN_WIDTH || area.height < EMPTY_ART_MIN_HEIGHT {
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled("// ", Style::new().fg(theme.panel)),
+                Span::styled("NOTHING LOADED", Style::new().fg(theme.muted)),
+                Span::styled(
+                    format!(
+                        "  {} search {} Tab library",
+                        theme.glyphs.separator, theme.glyphs.separator
+                    ),
+                    Style::new().fg(theme.muted),
+                ),
+            ])),
+            area,
+        );
+        return;
+    }
+
+    let mut lines: Vec<Line<'static>> = vec![Line::from("")];
+    if theme.glyphs.ascii {
+        lines.push(Line::from(vec![
+            Span::styled("  ", Style::new()),
+            Span::styled(
+                "L E K I M A",
+                Style::new().fg(theme.accent).add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("  ", Style::new()),
+            Span::styled(theme.glyphs.rule.repeat(11), Style::new().fg(theme.dim)),
+        ]));
+    } else {
+        for row in WORDMARK {
+            lines.push(Line::from(vec![
+                Span::styled("  ", Style::new()),
+                Span::styled(row[0], Style::new().fg(theme.accent)),
+                Span::styled(row[1], Style::new().fg(theme.accent_alt)),
+            ]));
+        }
+    }
+    lines.extend([
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  ", Style::new()),
+            Span::styled(
+                "NETEASE CLOUD MUSIC // CONSOLE",
+                Style::new().fg(theme.muted),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("  ", Style::new()),
+            Span::styled("// ", Style::new().fg(theme.panel)),
+            Span::styled(
+                "NOTHING LOADED",
+                Style::new().fg(theme.panel).add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(""),
+        empty_hint("/", "search the catalogue", theme),
+        empty_hint("Tab", "browse the library", theme),
+        empty_hint(":", "command line", theme),
+        empty_hint("?", "key reference", theme),
+    ]);
+    if usize::from(area.height) < lines.len() + 2 {
+        lines.truncate(usize::from(area.height));
+    }
+    frame.render_widget(Paragraph::new(Text::from(lines)), area);
+}
+
+fn empty_hint<'a>(key: &str, description: &'a str, theme: &Theme) -> Line<'a> {
+    Line::from(vec![
+        Span::styled("  ", Style::new()),
+        Span::styled(
+            format!("{} ", theme.glyphs.playing),
+            Style::new().fg(theme.accent),
+        ),
+        Span::styled(pad_right(key, 4), Style::new().fg(theme.accent_alt)),
+        Span::styled(description, Style::new().fg(theme.muted)),
+    ])
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1171,6 +1260,98 @@ fn truncate_to_width(value: &str, width: usize, ellipsis: &str) -> String {
     truncated
 }
 
+/// Greedy width-aware wrap: prefers spaces, hard-breaks long words and CJK.
+fn wrap_to_width(value: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return Vec::new();
+    }
+    let mut lines = Vec::new();
+    let mut current: Vec<char> = Vec::new();
+    let mut used = 0usize;
+
+    for character in value.chars() {
+        let character_width = character.width().unwrap_or(0);
+        if used + character_width > width && !current.is_empty() {
+            if let Some(position) = current.iter().rposition(|c| *c == ' ') {
+                let rest: String = current[position + 1..].iter().collect();
+                let mut line: String = current[..position].iter().collect();
+                while line.ends_with(' ') {
+                    line.pop();
+                }
+                lines.push(line);
+                current = rest.chars().collect();
+                used = display_width(&rest);
+            } else {
+                lines.push(current.iter().collect());
+                current.clear();
+                used = 0;
+            }
+        }
+        current.push(character);
+        used += character_width;
+    }
+
+    if !current.is_empty() || lines.is_empty() {
+        let mut line: String = current.iter().collect();
+        while line.ends_with(' ') {
+            line.pop();
+        }
+        lines.push(line);
+    }
+    lines
+}
+
+/// `1 234` becomes `1.2k`, `44 054` becomes `44k`, and so on.
+fn compact_count(count: u64) -> String {
+    if count < 1_000 {
+        return count.to_string();
+    }
+    if count < 1_000_000 {
+        let whole = count / 1_000;
+        let decimal = (count % 1_000) / 100;
+        return if decimal == 0 {
+            format!("{whole}k")
+        } else {
+            format!("{whole}.{decimal}k")
+        };
+    }
+    let whole = count / 1_000_000;
+    let decimal = (count % 1_000_000) / 100_000;
+    if decimal == 0 {
+        format!("{whole}m")
+    } else {
+        format!("{whole}.{decimal}m")
+    }
+}
+
+fn comment_date(timestamp_ms: u64) -> Option<String> {
+    if timestamp_ms == 0 {
+        return None;
+    }
+    let days = i64::try_from(timestamp_ms / 86_400_000).ok()?;
+    let (year, month, day) = civil_from_days(days);
+    Some(format!("{year:04}-{month:02}-{day:02}"))
+}
+
+/// Howard Hinnant's `civil_from_days`: days since 1970-01-01 to a Gregorian date.
+fn civil_from_days(days_since_epoch: i64) -> (i64, u32, u32) {
+    let z = days_since_epoch + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let year = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = if month <= 2 { year + 1 } else { year };
+    (
+        year,
+        u32::try_from(month).unwrap_or(1),
+        u32::try_from(day).unwrap_or(1),
+    )
+}
+
 fn pad_right(value: &str, width: usize) -> String {
     let mut padded = value.to_owned();
     let missing = width.saturating_sub(display_width(value));
@@ -1318,72 +1499,168 @@ fn queue_remaining(
 }
 
 fn draw_comments(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
-    let [label, content] =
-        Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(area);
+    let [label, rule, content] = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Min(1),
+    ])
+    .areas(area);
+
     let track_name = app
         .status
         .track
         .as_ref()
         .map_or_else(String::new, |track| sanitize_line(&track.name));
-    let total = app
+    let snapshot = app
         .comments_state
         .ready()
-        .map_or(0, |comments| comments.hot.len() + comments.comments.len());
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled("// ", Style::new().fg(theme.panel)),
-            Span::styled("COMMENTS", Style::new().fg(theme.muted)),
-            Span::styled(
-                format!(" {} {total}", theme.glyphs.separator),
-                Style::new().fg(theme.accent_alt),
-            ),
-            Span::styled(
-                format!(" {} {track_name}", theme.glyphs.separator),
-                Style::new().fg(theme.dim),
-            ),
-            Span::styled(
-                format!(" {}", theme.glyphs.active),
-                Style::new().fg(theme.accent),
-            ),
-        ])),
-        label,
-    );
+        .map(|comments| (comments.total, comments.has_more));
+    let (total, has_more) = snapshot.unwrap_or((0, false));
 
-    let width = usize::from(content.width).saturating_sub(1);
+    let mut right: Vec<Span<'static>> = Vec::new();
+    if has_more {
+        right.push(Span::styled(
+            format!("{} MORE ", theme.glyphs.more),
+            Style::new().fg(theme.warn),
+        ));
+    }
+    let right_width: usize = right.iter().map(|span| display_width(&span.content)).sum();
+
+    let mut header = vec![
+        Span::styled("// ", Style::new().fg(theme.panel)),
+        Span::styled("COMMENTS", Style::new().fg(theme.muted)),
+        Span::styled(
+            format!(" {} {}", theme.glyphs.separator, compact_count(total)),
+            Style::new().fg(theme.accent_alt),
+        ),
+    ];
+    let fixed_width: usize = header.iter().map(|span| display_width(&span.content)).sum();
+    let header_width = usize::from(label.width).saturating_sub(1);
+    let room = header_width.saturating_sub(fixed_width + right_width + 1);
+    if room >= 6 {
+        let separator = format!(" {} ", theme.glyphs.separator);
+        header.push(Span::styled(separator.clone(), Style::new().fg(theme.dim)));
+        header.push(Span::styled(
+            truncate_to_width(
+                &track_name,
+                room.saturating_sub(display_width(&separator)),
+                theme.glyphs.ellipsis,
+            ),
+            Style::new().fg(theme.dim),
+        ));
+    }
+    let left_width: usize = header.iter().map(|span| display_width(&span.content)).sum();
+    let gap = header_width.saturating_sub(left_width + right_width);
+    if right_width > 0 && left_width + right_width <= header_width {
+        header.push(Span::styled(" ".repeat(gap), Style::new()));
+        header.extend(right);
+    }
+    frame.render_widget(Paragraph::new(Line::from(header)), label);
+    draw_thin_rule(frame, theme, rule);
+
+    let width = usize::from(content.width).saturating_sub(1).max(1);
     let mut lines: Vec<Line> = Vec::new();
     match &app.comments_state {
         CommentsState::Idle | CommentsState::Loading { .. } => {
-            let dots = match (app.frame / 5) % 4 {
-                0 => "",
-                1 => ".",
-                2 => "..",
-                _ => "...",
-            };
-            lines.push(Line::from(Span::styled(
-                format!("loading comments{dots}"),
-                Style::new().fg(theme.muted),
-            )));
+            let spinner = theme.glyphs.spinner[(app.frame % 4) as usize];
+            lines.push(Line::from(vec![
+                Span::styled(format!("{spinner} "), Style::new().fg(theme.accent)),
+                Span::styled(
+                    "LOADING COMMENTS",
+                    Style::new().fg(theme.muted).add_modifier(Modifier::BOLD),
+                ),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("  ", Style::new()),
+                Span::styled(
+                    truncate_to_width(
+                        &format!("fetching {track_name}"),
+                        width.saturating_sub(2),
+                        theme.glyphs.ellipsis,
+                    ),
+                    Style::new().fg(theme.dim),
+                ),
+            ]));
         }
         CommentsState::Empty { .. } => {
-            lines.push(Line::from(Span::styled(
-                "no comments for this track",
-                Style::new().fg(theme.muted),
-            )));
+            lines.push(Line::from(vec![
+                Span::styled("// ", Style::new().fg(theme.panel)),
+                Span::styled(
+                    "NO COMMENTS",
+                    Style::new().fg(theme.muted).add_modifier(Modifier::BOLD),
+                ),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("  ", Style::new()),
+                Span::styled(
+                    "nobody has commented on this track yet",
+                    Style::new().fg(theme.dim),
+                ),
+            ]));
         }
         CommentsState::Error { message, .. } => {
-            lines.push(Line::from(Span::styled(
-                format!("! {}", sanitize_line(message)),
-                Style::new().fg(theme.hot),
-            )));
+            lines.push(Line::from(vec![
+                Span::styled(
+                    "! ",
+                    Style::new().fg(theme.hot).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "COMMENTS UNAVAILABLE",
+                    Style::new().fg(theme.hot).add_modifier(Modifier::BOLD),
+                ),
+            ]));
+            for chunk in wrap_to_width(&sanitize_line(message), width.saturating_sub(2)) {
+                lines.push(Line::from(vec![
+                    Span::styled("  ", Style::new()),
+                    Span::styled(chunk, Style::new().fg(theme.text)),
+                ]));
+            }
+            lines.push(Line::from(vec![
+                Span::styled("  r ", Style::new().fg(theme.accent)),
+                Span::styled("retry", Style::new().fg(theme.dim)),
+                Span::styled("   C ", Style::new().fg(theme.accent)),
+                Span::styled("close", Style::new().fg(theme.dim)),
+            ]));
         }
         CommentsState::Ready { comments, .. } => {
-            append_comment_section(&mut lines, "HOT", &comments.hot, width, theme);
-            append_comment_section(&mut lines, "ALL", &comments.comments, width, theme);
+            append_comment_section(
+                &mut lines,
+                "HOT",
+                u64::try_from(comments.hot.len()).unwrap_or(u64::MAX),
+                "MOST LIKED",
+                &comments.hot,
+                width,
+                theme,
+            );
+            append_comment_section(
+                &mut lines,
+                "ALL",
+                comments
+                    .total
+                    .max(u64::try_from(comments.comments.len()).unwrap_or(0)),
+                &format!("{} LOADED", comments.comments.len()),
+                &comments.comments,
+                width,
+                theme,
+            );
             if comments.has_more {
-                lines.push(Line::from(Span::styled(
-                    "more comments available",
-                    Style::new().fg(theme.dim),
-                )));
+                if !lines.is_empty() {
+                    lines.push(Line::from(""));
+                }
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("{} ", theme.glyphs.more),
+                        Style::new().fg(theme.warn),
+                    ),
+                    Span::styled(
+                        "MORE COMMENTS",
+                        Style::new().fg(theme.warn).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!(" {} n loads the next page", theme.glyphs.separator),
+                        Style::new().fg(theme.dim),
+                    ),
+                ]));
             }
         }
     }
@@ -1402,6 +1679,8 @@ fn draw_comments(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
 fn append_comment_section(
     lines: &mut Vec<Line<'static>>,
     title: &str,
+    count: u64,
+    note: &str,
     comments: &[lekima_domain::Comment],
     width: usize,
     theme: &Theme,
@@ -1412,46 +1691,159 @@ fn append_comment_section(
     if !lines.is_empty() {
         lines.push(Line::from(""));
     }
-    lines.push(Line::from(Span::styled(
-        format!("// {title} {} {}", theme.glyphs.separator, comments.len()),
+    let left = format!(
+        "// {title} {} {}",
+        theme.glyphs.separator,
+        compact_count(count)
+    );
+    let mut spans = vec![Span::styled(
+        left,
         Style::new().fg(theme.panel).add_modifier(Modifier::BOLD),
-    )));
-    for comment in comments {
-        let author = if comment.author.is_empty() {
-            "anonymous"
-        } else {
-            comment.author.as_str()
-        };
-        let content = truncate_to_width(
-            &format!(
-                "{:>5} {} {}: {}",
-                comment.liked_count,
-                theme.glyphs.liked,
-                sanitize_line(author),
-                sanitize_line(&comment.content)
+    )];
+    let pad = width.saturating_sub(display_width(&spans[0].content) + display_width(note));
+    if !note.is_empty() && pad > 0 {
+        spans.push(Span::styled(" ".repeat(pad), Style::new()));
+        spans.push(Span::styled(note.to_owned(), Style::new().fg(theme.muted)));
+    }
+    lines.push(Line::from(spans));
+
+    for (index, comment) in comments.iter().enumerate() {
+        if index > 0 {
+            lines.push(Line::from(""));
+        }
+        append_comment(lines, comment, width, theme);
+    }
+}
+
+fn append_comment(
+    lines: &mut Vec<Line<'static>>,
+    comment: &lekima_domain::Comment,
+    width: usize,
+    theme: &Theme,
+) {
+    let author = if comment.author.is_empty() {
+        "anonymous".to_owned()
+    } else {
+        sanitize_line(&comment.author)
+    };
+    let deleted = comment.content.trim().is_empty();
+    if comment.author.trim().is_empty() && deleted {
+        lines.push(Line::from(vec![
+            Span::styled(" ".repeat(COMMENT_INDENT), Style::new()),
+            Span::styled(
+                "[deleted]",
+                Style::new().fg(theme.dim).add_modifier(Modifier::ITALIC),
             ),
-            width,
-            theme.glyphs.ellipsis,
-        );
-        lines.push(Line::from(Span::styled(
-            content,
-            Style::new().fg(theme.text),
-        )));
-        for reply in &comment.replies {
-            let reply = truncate_to_width(
-                &format!(
-                    "       {} {}: {}",
-                    theme.glyphs.enter,
-                    sanitize_line(&reply.author),
-                    sanitize_line(&reply.content)
+        ]));
+        return;
+    }
+    let likes = (comment.liked_count > 0).then(|| {
+        format!(
+            "{} {}",
+            theme.glyphs.liked,
+            compact_count(comment.liked_count)
+        )
+    });
+    let date = comment_date(comment.timestamp_ms);
+    let has_likes = likes.is_some();
+    let has_date = date.is_some();
+    let separator = format!(" {} ", theme.glyphs.separator);
+    let meta_width = likes.as_ref().map_or(0, |value| display_width(value))
+        + date.as_ref().map_or(0, |value| display_width(value))
+        + if has_likes && has_date {
+            display_width(&separator)
+        } else {
+            0
+        };
+    let author_width = width
+        .saturating_sub(COMMENT_INDENT + if meta_width == 0 { 0 } else { meta_width + 2 })
+        .max(4);
+    let author = truncate_to_width(&author, author_width, theme.glyphs.ellipsis);
+
+    let mut header = vec![
+        Span::styled(" ".repeat(COMMENT_INDENT), Style::new()),
+        Span::styled(
+            author,
+            Style::new()
+                .fg(theme.accent_alt)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ];
+    if meta_width > 0 {
+        let used = COMMENT_INDENT + display_width(&header[1].content);
+        let pad = width.saturating_sub(used + meta_width).max(1);
+        header.push(Span::styled(" ".repeat(pad), Style::new()));
+        if let Some(likes) = likes {
+            header.push(Span::styled(
+                likes,
+                Style::new().fg(theme.hot).add_modifier(Modifier::BOLD),
+            ));
+        }
+        if has_likes && has_date {
+            header.push(Span::styled(separator, Style::new().fg(theme.dim)));
+        }
+        if let Some(date) = date {
+            header.push(Span::styled(date, Style::new().fg(theme.muted)));
+        }
+    }
+    lines.push(Line::from(header));
+
+    let content_width = width.saturating_sub(COMMENT_INDENT).max(1);
+    let content = if deleted {
+        "[deleted]".to_owned()
+    } else {
+        sanitize_line(&comment.content)
+    };
+    let style = if deleted {
+        Style::new().fg(theme.dim).add_modifier(Modifier::ITALIC)
+    } else {
+        Style::new().fg(theme.text)
+    };
+    for chunk in wrap_to_width(&content, content_width) {
+        lines.push(Line::from(vec![
+            Span::styled(" ".repeat(COMMENT_INDENT), Style::new()),
+            Span::styled(chunk, style),
+        ]));
+    }
+
+    for reply in &comment.replies {
+        let author = if reply.author.is_empty() {
+            "anonymous".to_owned()
+        } else {
+            sanitize_line(&reply.author)
+        };
+        let deleted = reply.content.trim().is_empty();
+        let content = if deleted {
+            "[deleted]".to_owned()
+        } else {
+            sanitize_line(&reply.content)
+        };
+        let body = if reply.author.trim().is_empty() && deleted {
+            "[deleted]".to_owned()
+        } else {
+            format!("{author}: {content}")
+        };
+        let connector = format!(" {} ", theme.glyphs.reply);
+        let reply_width = width
+            .saturating_sub(COMMENT_INDENT + display_width(&connector))
+            .max(1);
+        for (index, chunk) in wrap_to_width(&body, reply_width).into_iter().enumerate() {
+            let prefix = if index == 0 {
+                format!("{}{connector}", " ".repeat(COMMENT_INDENT))
+            } else {
+                " ".repeat(COMMENT_INDENT + display_width(&connector))
+            };
+            lines.push(Line::from(vec![
+                Span::styled(prefix, Style::new().fg(theme.dim)),
+                Span::styled(
+                    chunk,
+                    Style::new().fg(theme.muted).add_modifier(if deleted {
+                        Modifier::ITALIC
+                    } else {
+                        Modifier::empty()
+                    }),
                 ),
-                width,
-                theme.glyphs.ellipsis,
-            );
-            lines.push(Line::from(Span::styled(
-                reply,
-                Style::new().fg(theme.muted),
-            )));
+            ]));
         }
     }
 }
@@ -1594,7 +1986,11 @@ fn prompt_spans<'a>(app: &App, theme: &Theme) -> Vec<Span<'a>> {
     spans
 }
 
-/// Notification chip: bottom-right, above the command bar, auto-dismissed.
+/// Console alert: a bordered panel in the bottom-right, above the command bar.
+///
+/// Severity is carried by the border and title (`! ERROR`, `+ NOTICE`,
+/// `! OFFLINE`); the message itself stays in readable `text`, not reversed
+/// colour. Notices are one line, errors up to two.
 fn draw_toast(
     frame: &mut Frame,
     app: &App,
@@ -1617,7 +2013,7 @@ fn draw_toast(
     } else {
         match message {
             Some(message) if message.error => (message.text.clone(), true, "! ERROR", theme.hot),
-            Some(message) => (message.text.clone(), false, "+ NOTICE", theme.panel),
+            Some(message) => (message.text.clone(), false, "+ NOTICE", theme.accent),
             None => return,
         }
     };
@@ -1626,8 +2022,24 @@ fn draw_toast(
         return;
     }
 
-    let width = 56.min(area.width.saturating_sub(2));
-    let height = if is_error { 2 } else { 1 };
+    let width = TOAST_MAX_WIDTH.min(area.width.saturating_sub(2));
+    let inner = usize::from(width.saturating_sub(4));
+    let cleaned = clean(&text);
+    let mut body = wrap_to_width(&cleaned, inner);
+    let max_lines = if is_error { 2 } else { 1 };
+    if body.len() > max_lines {
+        body.truncate(max_lines);
+        if let Some(last) = body.last_mut() {
+            let head = truncate_to_width(
+                last,
+                inner.saturating_sub(display_width(theme.glyphs.ellipsis)),
+                "",
+            );
+            *last = format!("{head}{}", theme.glyphs.ellipsis);
+        }
+    }
+    let height = u16::try_from(body.len()).unwrap_or(1).saturating_add(2);
+
     let mut x = area.width.saturating_sub(width + 1);
     let mut y = area.height.saturating_sub(height + 2).max(1);
     match lyrics {
@@ -1646,34 +2058,32 @@ fn draw_toast(
         height,
     };
 
-    let fg = theme.badge_fg;
-    let bg = colour;
-    let padding = 2;
-    let available = usize::from(width).saturating_sub(padding);
-    let cleaned = clean(&text);
-    let text = if is_error {
-        cleaned.into_owned()
-    } else {
-        truncate_to_width(&cleaned, available, theme.glyphs.ellipsis)
-    };
-    let line = Line::from(vec![
-        Span::styled(
-            format!("{title} "),
-            Style::new().fg(fg).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(text, Style::new().fg(fg)),
-    ]);
+    let lines: Vec<Line> = body
+        .into_iter()
+        .enumerate()
+        .map(|(index, chunk)| {
+            let prefix = if index == 0 {
+                format!("{} ", theme.glyphs.active)
+            } else {
+                "  ".to_owned()
+            };
+            Line::from(vec![
+                Span::styled(prefix, Style::new().fg(colour).add_modifier(Modifier::BOLD)),
+                Span::styled(chunk, Style::new().fg(theme.text)),
+            ])
+        })
+        .collect();
+    let block = Block::bordered()
+        .border_type(overlay_border(theme))
+        .border_style(Style::new().fg(colour))
+        .title(Line::from(Span::styled(
+            format!("{}{title} ", if theme.glyphs.ascii { "- " } else { "═ " }),
+            Style::new().fg(colour).add_modifier(Modifier::BOLD),
+        )))
+        .padding(Padding::horizontal(1));
 
     frame.render_widget(Clear, toast);
-    let body = Paragraph::new(line)
-        .wrap(Wrap { trim: true })
-        .block(
-            Block::new()
-                .padding(Padding::horizontal(1))
-                .style(Style::new().bg(bg)),
-        )
-        .style(Style::new().fg(fg).bg(bg));
-    frame.render_widget(body, toast);
+    frame.render_widget(Paragraph::new(Text::from(lines)).block(block), toast);
 }
 
 fn wave_spans<'a>(app: &App, theme: &Theme) -> Vec<Span<'a>> {
@@ -2051,7 +2461,9 @@ mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::{Terminal, backend::TestBackend};
 
-    use super::{display_width, draw, truncate_to_width};
+    use super::{
+        comment_date, compact_count, display_width, draw, truncate_to_width, wrap_to_width,
+    };
     use crate::app::{App, Focus, Mode};
     use crate::theme::Theme;
 
@@ -2090,7 +2502,33 @@ mod tests {
         let mut app = App::new();
         let screen = render(&mut app, 90, 24);
         assert!(screen.contains("LEKIMA"));
-        assert!(screen.contains("nothing here"));
+        assert!(screen.contains("NETEASE CLOUD MUSIC"));
+        assert!(screen.contains("NOTHING LOADED"));
+        assert!(screen.contains("search the catalogue"));
+        assert!(screen.contains("browse the library"));
+        assert!(screen.contains("█"));
+    }
+
+    #[test]
+    fn tiny_empty_state_falls_back_to_one_hint_line() {
+        let mut app = App::new();
+        let screen = render(&mut app, 40, 8);
+        assert!(screen.contains("NOTHING LOADED"));
+        assert!(screen.contains("search"));
+        assert!(!screen.contains("NETEASE CLOUD MUSIC"));
+    }
+
+    #[test]
+    fn ascii_empty_state_uses_a_text_wordmark() {
+        let mut app = App::new();
+        let screen = render_with(
+            &mut app,
+            90,
+            24,
+            Theme::resolve("cyber", "ascii", "compact"),
+        );
+        assert!(screen.contains("L E K I M A"), "{screen}");
+        assert!(screen.contains("NOTHING LOADED"), "{screen}");
     }
 
     #[test]
@@ -2173,8 +2611,9 @@ mod tests {
         app.frame = 10;
         app.notify("queued 3 tracks", false);
         let screen = render(&mut app, 90, 24);
-        assert!(screen.contains("NOTICE"));
-        assert!(screen.contains("queued 3 tracks"));
+        assert!(screen.contains("+ NOTICE"), "{screen}");
+        assert!(screen.contains("queued 3 tracks"), "{screen}");
+        assert!(screen.contains('╔'), "{screen}");
 
         app.frame = 200;
         let screen = render(&mut app, 90, 24);
@@ -2186,8 +2625,20 @@ mod tests {
         let mut app = App::new();
         app.notify("provider rejected the request", true);
         let screen = render(&mut app, 90, 24);
-        assert!(screen.contains("ERROR"));
-        assert!(screen.contains("provider rejected"));
+        assert!(screen.contains("! ERROR"), "{screen}");
+        assert!(screen.contains("provider rejected"), "{screen}");
+    }
+
+    #[test]
+    fn long_error_toasts_wrap_and_truncate_without_panicking() {
+        let mut app = App::new();
+        app.notify(
+            "the provider returned an unexpectedly long diagnostic that cannot fit in two lines and must be clipped",
+            true,
+        );
+        let screen = render(&mut app, 60, 20);
+        assert!(screen.contains("! ERROR"), "{screen}");
+        assert!(screen.contains('…'), "{screen}");
     }
 
     #[test]
@@ -2406,7 +2857,8 @@ mod tests {
     fn empty_states_are_actionable() {
         let mut app = App::new();
         let screen = render(&mut app, 100, 24);
-        assert!(screen.contains("press / to search"));
+        assert!(screen.contains("search the catalogue"));
+        assert!(screen.contains("browse the library"));
         app.mode = Mode::Queue;
         let screen = render(&mut app, 100, 24);
         assert!(screen.contains("nothing queued"));
@@ -2533,9 +2985,65 @@ mod tests {
         let screen = render(&mut app, 100, 30);
         assert!(screen.contains("COMMENTS"), "{screen}");
         assert!(screen.contains("HOT"), "{screen}");
+        assert!(screen.contains("MOST LIKED"), "{screen}");
         assert!(screen.contains("hot take"), "{screen}");
         assert!(screen.contains("regular"), "{screen}");
-        assert!(screen.contains("more comments available"), "{screen}");
+        assert!(screen.contains("MORE COMMENTS"), "{screen}");
+        assert!(screen.contains("n loads the next page"), "{screen}");
+    }
+
+    #[test]
+    fn comments_render_metadata_replies_and_wrapped_content() {
+        use crate::app::CommentsState;
+
+        let mut app = App::new();
+        app.mode = Mode::Comments;
+        app.status.track = Some(track("Mota"));
+        app.comments_state = CommentsState::Ready {
+            track: 1.into(),
+            comments: lekima_domain::Comments {
+                total: 20_535,
+                has_more: false,
+                hot: Vec::new(),
+                comments: vec![lekima_domain::Comment {
+                    id: 9,
+                    author: "程cheng艾影".to_owned(),
+                    avatar_url: None,
+                    content: "庐山牛逼，这是一条足够长的评论，用来确认它会按宽度换行而不是被截断。"
+                        .to_owned(),
+                    timestamp_ms: 1_700_000_000_000,
+                    liked_count: 44_054,
+                    replies: vec![lekima_domain::CommentReply {
+                        author: "aka".to_owned(),
+                        content: "agree".to_owned(),
+                    }],
+                }],
+            },
+        };
+        let screen = render(&mut app, 80, 30);
+        assert!(screen.contains("20.5k"), "{screen}");
+        assert!(screen.contains("44k"), "{screen}");
+        assert!(screen.contains("2023-11-14"), "{screen}");
+        assert!(screen.contains("↳ aka: agree"), "{screen}");
+        assert!(screen.contains('换'), "{screen}");
+        assert!(screen.contains('行'), "{screen}");
+    }
+
+    #[test]
+    fn comments_error_state_shows_retry_hint() {
+        use crate::app::CommentsState;
+
+        let mut app = App::new();
+        app.mode = Mode::Comments;
+        app.status.track = Some(track("Mota"));
+        app.comments_state = CommentsState::Error {
+            track: 1.into(),
+            message: "provider timed out".to_owned(),
+        };
+        let screen = render(&mut app, 90, 24);
+        assert!(screen.contains("COMMENTS UNAVAILABLE"), "{screen}");
+        assert!(screen.contains("provider timed out"), "{screen}");
+        assert!(screen.contains("retry"), "{screen}");
     }
 
     #[test]
@@ -2559,5 +3067,35 @@ mod tests {
         let screen = render_with(&mut app, 100, 24, theme);
         assert!(screen.contains("LEKIMA"));
         assert!(screen.contains("Mota"));
+    }
+
+    #[test]
+    fn compact_counts_use_k_and_m_suffixes() {
+        assert_eq!(compact_count(0), "0");
+        assert_eq!(compact_count(999), "999");
+        assert_eq!(compact_count(1_000), "1k");
+        assert_eq!(compact_count(1_250), "1.2k");
+        assert_eq!(compact_count(44_054), "44k");
+        assert_eq!(compact_count(1_250_000), "1.2m");
+    }
+
+    #[test]
+    fn comment_dates_are_utc_and_skip_missing_timestamps() {
+        assert_eq!(comment_date(0), None);
+        assert_eq!(comment_date(1_000).as_deref(), Some("1970-01-01"));
+        assert_eq!(
+            comment_date(1_700_000_000_000).as_deref(),
+            Some("2023-11-14")
+        );
+    }
+
+    #[test]
+    fn wrapping_prefers_spaces_and_breaks_long_words() {
+        assert_eq!(
+            wrap_to_width("alpha beta gamma", 11),
+            vec!["alpha beta", "gamma"]
+        );
+        assert_eq!(wrap_to_width("abcdefghij", 4), vec!["abcd", "efgh", "ij"]);
+        assert_eq!(wrap_to_width("", 10), vec![""]);
     }
 }
