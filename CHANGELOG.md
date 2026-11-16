@@ -3,6 +3,15 @@
 All notable changes to lekima are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## 0.7.1 — 2026-11-16
+
+### Fixed
+
+- Track comments no longer fail with `provider protocol error: JSON
+  serialization or deserialization failed` when the provider returns `null`
+  for deleted replies or accounts. Requires `ncmapi 1.8.1`, which tolerates
+  null comment fields.
+
 ## 0.7.0 — 2026-11-16
 
 ### Added
