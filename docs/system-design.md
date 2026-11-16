@@ -1,6 +1,6 @@
 # lekima — System Design
 
-Status: **Living document** — up to date through 0.6.0 · Companion to
+Status: **Living document** — up to date through 0.7.0 · Companion to
 [`product-design.md`](./product-design.md)
 
 ---
@@ -571,8 +571,8 @@ Working end to end against the live provider:
 - daemon lifecycle (autostart, socket permissions, SIGTERM, log file, autostart
   race handling), CLI JSON contract and exit codes, `doctor`, `capabilities`,
   completions, browser-assisted `login --qr`, `login --cookie-file -`, `logout`
-- HTTP control (`lekima serve --http`) with a bearer token, status/queue reads
-  and the allowlisted command surface
+- HTTP control (`lekima serve --http`) with a bearer token, status/queue reads,
+  the allowlisted command surface and an embedded neon web remote at `/`
 - TUI: HUD, real spectrum, track table, sidebar, queue and lyrics panes, history,
   settings palette, twelve themes (including a light terminal palette), search
   prompt, `:` command line, help overlay, vim keys

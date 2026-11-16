@@ -56,6 +56,10 @@ $ lekima status --json
 
 ## Status
 
+`0.7.0` adds token-guarded HTTP control: `lekima serve --http` exposes status,
+queue and the allowlisted command surface, plus a built-in neon web remote at
+`/` for phones.
+
 `0.6.0` adds the assisted web login: `lekima login --qr` opens the web player
 in a dedicated Chrome profile, opens the login dialog, captures the session and
 closes the browser; `--no-browser` keeps the terminal QR. Provider requests
