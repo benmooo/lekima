@@ -341,7 +341,8 @@ transport's request-hash cache cannot replay stale answers.
 
 | Endpoint | Route | Used by |
 | --- | --- | --- |
-| QR login start/poll | `/eapi/login/qrcode/unikey`, `/eapi/login/qrcode/client/login` (`type: 3`) | `lekima login --qr` — **done in 1.3** |
+| QR login start/poll | `/eapi/login/qrcode/unikey`, `/eapi/login/qrcode/client/login` (`type: 3`) | `lekima login --qr --no-browser` (terminal fallback) — **done in 1.3** |
+| Assisted web login | Chrome DevTools `Network.getAllCookies` over a dedicated profile | `lekima login --qr` — **done in 0.6** |
 | Playlist detail with tracks | `/api/v6/playlist/detail` + `/api/v3/song/detail` | `playlist show`, sidebar — **done in 1.1** |
 | Lyrics | `/api/song/lyric` | `lekima lyrics` — **done in 1.1** |
 | Public comments | `/api/v1/resource/comments/R_SO_4_{id}` | `lekima comments`, TUI `C` — **done in 1.7** |

@@ -50,6 +50,12 @@ impl Paths {
         self.root.join("session.cookies")
     }
 
+    /// Stable anonymous device identity sent to the provider.
+    #[must_use]
+    pub fn device_file(&self) -> PathBuf {
+        self.root.join("device.id")
+    }
+
     #[must_use]
     pub fn cache_dir(&self) -> PathBuf {
         self.root.join("cache")
@@ -59,6 +65,15 @@ impl Paths {
     #[must_use]
     pub fn playback_file(&self) -> PathBuf {
         crate::playback::playback_path(&self.cache_dir())
+    }
+
+    /// Dedicated browser profile used by the assisted web login.
+    ///
+    /// Kept apart from the user's normal browser data, and reused between
+    /// attempts so the web client presents the same device fingerprint.
+    #[must_use]
+    pub fn web_login_dir(&self) -> PathBuf {
+        self.root.join("web-login")
     }
 
     #[must_use]

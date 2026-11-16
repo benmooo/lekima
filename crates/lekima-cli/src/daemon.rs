@@ -49,9 +49,10 @@ pub async fn run(paths: &Paths, config: &Config, socket: &Path, _detached: bool)
     tracing::info!(socket = %socket.display(), "daemon listening");
 
     let music = Arc::new(NcmMusicService::new(NcmOptions {
-        cookie_path: paths.session_file(),
+        device_id_path: paths.device_file(),
         cache: config.provider.cache,
         cache_ttl: Duration::from_secs(config.provider.cache_ttl_secs),
+        ..NcmOptions::new(paths.session_file())
     })?);
     let audio = Arc::new(
         lekima_audio::RodioAudioEngine::open(

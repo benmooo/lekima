@@ -15,6 +15,7 @@ use lekima_ipc::{
 use lekima_ncm::{NcmMusicService, NcmOptions};
 
 use crate::{
+    browser_login,
     cli::{
         CacheCommand, Cli, DaemonCommand, FmCommand, PlaylistCommand, QueueCommand, TopCommand,
         ToplistCommand,
@@ -384,9 +385,11 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
             Ok(())
         }
 
-        TopCommand::Login { cookie_file, qr } => {
-            login(&paths, &socket, &config, cookie_file, qr, json).await
-        }
+        TopCommand::Login {
+            cookie_file,
+            qr,
+            no_browser,
+        } => login(&paths, &socket, &config, cookie_file, qr, no_browser, json).await,
 
         TopCommand::Logout => logout(&paths, &socket, json).await,
 
@@ -673,9 +676,10 @@ where
 
 fn service(paths: &Paths, config: &Config) -> Result<NcmMusicService, Failure> {
     NcmMusicService::new(NcmOptions {
-        cookie_path: paths.session_file(),
+        device_id_path: paths.device_file(),
         cache: config.provider.cache,
         cache_ttl: Duration::from_secs(config.provider.cache_ttl_secs),
+        ..NcmOptions::new(paths.session_file())
     })
     .map_err(Into::into)
 }
@@ -729,10 +733,11 @@ async fn login(
     config: &Config,
     cookie_file: Option<PathBuf>,
     qr: bool,
+    no_browser: bool,
     json: bool,
 ) -> Result<(), Failure> {
     if qr {
-        return login_with_qr(paths, socket, config, json).await;
+        return login_with_qr(paths, socket, config, no_browser, json).await;
     }
 
     let cookie = match cookie_file {
@@ -771,9 +776,51 @@ async fn login_with_qr(
     paths: &Paths,
     socket: &Path,
     config: &Config,
+    no_browser: bool,
     json: bool,
 ) -> Result<(), Failure> {
     use lekima_domain::QrStatus;
+
+    if !no_browser {
+        match browser_login::sign_in(&paths.session_file(), &paths.web_login_dir()).await {
+            Ok(crate::browser_login::SignIn::SignedIn) => {
+                let nickname = match service(paths, config) {
+                    Ok(service) => bounded(service.current_user())
+                        .await
+                        .ok()
+                        .flatten()
+                        .map(|user| user.nickname),
+                    Err(_) => None,
+                };
+                restart_daemon(socket).await;
+                if json {
+                    output::emit_json(
+                        true,
+                        Some(serde_json::json!({
+                            "signed_in": true,
+                            "via": "browser",
+                            "nickname": nickname,
+                        })),
+                        None,
+                    );
+                } else {
+                    let label = nickname.map_or_else(String::new, |name| format!(" as {name}"));
+                    crate::say!("signed in{label} via the web player");
+                }
+                return Ok(());
+            }
+            Ok(crate::browser_login::SignIn::NoBrowser) => {}
+            Err(error) => {
+                if json {
+                    eprintln!(
+                        "browser sign-in did not finish ({error}); falling back to the terminal QR"
+                    );
+                } else {
+                    crate::say!("browser sign-in did not finish ({error}); using the terminal QR");
+                }
+            }
+        }
+    }
 
     let service = service(paths, config)?;
     let started = bounded(service.qr_start()).await?;
@@ -842,6 +889,8 @@ fn render_qr(url: &str) -> Result<String, Failure> {
 
 async fn logout(paths: &Paths, socket: &Path, json: bool) -> Result<(), Failure> {
     FileCredentials::new(paths.session_file()).clear()?;
+    // The assisted login keeps a browser session; signing out must drop it too.
+    let _ = std::fs::remove_dir_all(paths.web_login_dir());
     restart_daemon(socket).await;
     if json {
         output::emit_json(true, Some(serde_json::json!({ "saved": false })), None);

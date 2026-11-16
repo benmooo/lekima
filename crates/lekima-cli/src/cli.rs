@@ -209,9 +209,17 @@ pub enum TopCommand {
         #[arg(long, value_name = "PATH")]
         cookie_file: Option<PathBuf>,
 
-        /// Start the QR flow in the terminal.
+        /// Sign in with a QR code.
+        ///
+        /// Opens the web player in a dedicated browser profile and captures the
+        /// session automatically; falls back to a terminal QR code when no
+        /// browser is installed or the browser flow is skipped.
         #[arg(long)]
         qr: bool,
+
+        /// Skip the browser and print the QR code in the terminal.
+        #[arg(long, requires = "qr")]
+        no_browser: bool,
     },
 
     /// Remove the stored session.

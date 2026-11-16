@@ -9,7 +9,7 @@ when you close the UI — and a code agent can drive it with one command.
 
 ```bash
 brew install benmooo/tap/lekima      # or: cargo install lekima
-lekima login --qr                    # or: pbpaste | lekima login --cookie-file -
+lekima login --qr                    # opens the web player, then saves the session
 lekima tui
 ```
 
@@ -84,10 +84,10 @@ FM, likes, charts, the music cloud, playback through a background daemon, a
 vim-driven TUI (responsive HUD, real spectrum, buffered shading, lyrics pane,
 history, UI settings, twelve themes), device selection, gapless playback,
 MPRIS/Now Playing, push events (`lekima watch`) and an MCP stdio server
-(`lekima mcp`). `ncmapi` 1.7 is published on crates.io.
+(`lekima mcp`). `ncmapi` 1.8 is published on crates.io.
 
 ```console
-$ lekima login --qr          # scan with the NetEase app
+$ lekima login --qr          # opens the web player in Chrome
 $ lekima playlist list
 $ lekima playlist show 3778678 | head
 $ lekima tui

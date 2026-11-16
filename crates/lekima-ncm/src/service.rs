@@ -19,6 +19,10 @@ use crate::map;
 pub struct NcmOptions {
     /// Where the session cookie header is read from and written to.
     pub cookie_path: PathBuf,
+    /// Stable anonymous device id, reused across processes.
+    pub device_id_path: PathBuf,
+    /// `User-Agent` sent with provider requests.
+    pub user_agent: String,
     /// Enables the SDK's short-lived response cache.
     pub cache: bool,
     pub cache_ttl: Duration,
@@ -27,13 +31,31 @@ pub struct NcmOptions {
 impl NcmOptions {
     #[must_use]
     pub fn new(cookie_path: impl Into<PathBuf>) -> Self {
+        let cookie_path = cookie_path.into();
+        let device_id_path = cookie_path
+            .parent()
+            .map_or_else(|| PathBuf::from("device.id"), |dir| dir.join("device.id"));
         Self {
-            cookie_path: cookie_path.into(),
+            cookie_path,
+            device_id_path,
+            user_agent: BROWSER_USER_AGENT.to_owned(),
             cache: true,
             cache_ttl: Duration::from_secs(180),
         }
     }
 }
+
+/// Device ids and user agents are provider-facing client identity.
+///
+/// A real browser string is a closer match than the SDK default, and it is
+/// paired with a device id that survives restarts instead of looking like a
+/// new device on every command.
+#[cfg(target_os = "macos")]
+const BROWSER_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) \
+     AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36";
+#[cfg(not(target_os = "macos"))]
+const BROWSER_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) \
+     AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36";
 
 /// NetEase-backed catalogue and account service.
 pub struct NcmMusicService {
@@ -52,6 +74,8 @@ impl NcmMusicService {
             .cache(options.cache)
             .cache_ttl(options.cache_ttl)
             .cookie_path(options.cookie_path)
+            .device_id_path(options.device_id_path)
+            .user_agent(options.user_agent)
             .build()
             .map_err(provider_error)?;
         Ok(Self { client })
@@ -438,12 +462,11 @@ mod tests {
     use super::{NcmMusicService, NcmOptions};
 
     fn service() -> NcmMusicService {
-        NcmMusicService::new(NcmOptions {
-            cookie_path: std::env::temp_dir().join("lekima-test-cookies"),
-            cache: false,
-            cache_ttl: Duration::from_secs(1),
-        })
-        .expect("client construction must not touch the network")
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut options = NcmOptions::new(dir.path().join("session.cookies"));
+        options.cache = false;
+        options.cache_ttl = Duration::from_secs(1);
+        NcmMusicService::new(options).expect("client construction must not touch the network")
     }
 
     #[tokio::test]

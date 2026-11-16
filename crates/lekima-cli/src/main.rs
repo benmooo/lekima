@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+mod browser_login;
 mod cli;
 mod commands;
 mod daemon;

@@ -3,6 +3,28 @@
 All notable changes to lekima are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## Unreleased
+
+### Added
+
+- `lekima login --qr` opens the official web player in Chrome, Chromium, Brave
+  or Edge with a dedicated profile (`<config>/web-login`), waits for the user to
+  sign in, captures the session cookies over the DevTools protocol and closes
+  the browser. `--no-browser` keeps the terminal QR flow.
+- A stable anonymous device id in `<config>/device.id`, reused across commands
+  instead of generating a new device per process.
+
+### Changed
+
+- Provider requests send a browser `User-Agent`, `Origin` and `Accept-Language`,
+  matching a normal web client more closely (`ncmapi` 1.8).
+- `lekima logout` also removes the dedicated browser profile.
+
+### Fixed
+
+- `ncmapi` 1.8 creates `session.cookies` and `device.id` with `0600`
+  permissions and creates missing parent directories.
+
 ## 0.5.2 — 2026-11-16
 
 ### Fixed

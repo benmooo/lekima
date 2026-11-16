@@ -74,7 +74,7 @@ provider, done well, with a UI that never gets in the way.
 
 | Area | Included |
 | --- | --- |
-| Session | QR login (`lekima login --qr`) or a pasted browser cookie (`--cookie-file -`), `whoami`, `logout` |
+| Session | Assisted web login (`lekima login --qr`, falls back to a terminal QR) or a pasted browser cookie (`--cookie-file -`), `whoami`, `logout` |
 | Catalogue | Search tracks, playlists and artists; track metadata; playlist listing and full playlist paging; lyrics |
 | Playback | Play/pause/resume/stop, next/previous, seek, volume, mute, repeat off/all/one, autoplay next |
 | Queue | View, enqueue (append or “play next”), clear, jump |
@@ -249,7 +249,7 @@ lekima cloud [--limit N] [--play] | liked [--play] | like [--id] [--unlike]
 lekima watch [--events status,queue,like] [--since SEQ]
 lekima mcp                                  MCP server over stdio
 lekima status [--json]
-lekima login [--qr | --cookie-file PATH|-]
+lekima login [--qr [--no-browser] | --cookie-file PATH|-]
 lekima logout
 lekima whoami [--json]
 lekima daemon start|stop|status|logs
