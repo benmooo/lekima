@@ -28,12 +28,22 @@ const STARTUP_TIMEOUT: Duration = Duration::from_secs(20);
 const LOGIN_URL: &str = "https://music.163.com/";
 const BROWSER_ENV: &str = "LEKIMA_BROWSER";
 
-/// Outcome of an assisted web login attempt.
-pub(crate) enum SignIn {
-    SignedIn,
-    /// No Chrome-family browser was found, so the caller should fall back.
-    NoBrowser,
-}
+/// Opens the web player's login dialog unless it is already on screen.
+///
+/// The site only renders the dialog after its own login link is activated, so
+/// clicking it here saves the user from hunting for the button. The check for
+/// `#dawn-login-node` also prevents a second click from closing the dialog.
+const OPEN_LOGIN_DIALOG_JS: &str = r#"
+(() => {
+  if (document.querySelector('#dawn-login-node')) return 'open';
+  const link = document.querySelector('a[data-action="login"]');
+  if (link) { link.click(); return 'clicked'; }
+  const byText = [...document.querySelectorAll('a, button')]
+    .find((element) => (element.textContent || '').trim() === '登录');
+  if (byText) { byText.click(); return 'clicked-text'; }
+  return 'missing';
+})()
+"#;
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum BrowserError {
@@ -53,13 +63,13 @@ pub(crate) enum BrowserError {
 
 /// Opens the web player, waits for a confirmed session and stores its cookies.
 ///
-/// Returns [`SignIn::NoBrowser`] when nothing launchable is installed; every
-/// other failure is reported so the caller can explain and fall back.
-pub(crate) async fn sign_in(session_file: &Path, profile: &Path) -> Result<SignIn, BrowserError> {
-    let Some(browser) = discover_browser() else {
-        return Ok(SignIn::NoBrowser);
-    };
-
+/// The caller picks the browser with [`discover_browser`] so it can print a
+/// progress line before this potentially long wait starts.
+pub(crate) async fn sign_in(
+    browser: &Path,
+    session_file: &Path,
+    profile: &Path,
+) -> Result<(), BrowserError> {
     fs::create_dir_all(profile).map_err(BrowserError::Spawn)?;
     #[cfg(unix)]
     {
@@ -69,7 +79,7 @@ pub(crate) async fn sign_in(session_file: &Path, profile: &Path) -> Result<SignI
     // A stale port file from a killed browser would point at nothing.
     let _ = fs::remove_file(profile.join("DevToolsActivePort"));
 
-    let mut child = BrowserChild::spawn(&browser, profile)?;
+    let mut child = BrowserChild::spawn(browser, profile)?;
     let port = wait_for_port(profile, &mut child).await?;
     let websocket = wait_for_login_page(port, &mut child).await?;
     // The outer timeout also covers a DevTools socket that stops answering.
@@ -80,7 +90,7 @@ pub(crate) async fn sign_in(session_file: &Path, profile: &Path) -> Result<SignI
     FileCredentials::new(session_file)
         .save(&cookies)
         .map_err(BrowserError::Save)?;
-    Ok(SignIn::SignedIn)
+    Ok(())
 }
 
 /// Kills the child on every exit path, including errors and cancellation.
@@ -220,6 +230,9 @@ fn login_target(target: &Value) -> Option<String> {
         .flatten()
 }
 
+type CdpSocket =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
 async fn wait_for_session(
     websocket: &str,
     child: &mut BrowserChild,
@@ -229,6 +242,7 @@ async fn wait_for_session(
         .map_err(|error| BrowserError::Protocol(error.to_string()))?;
     let deadline = Instant::now() + LOGIN_TIMEOUT;
     let mut id = 0_u64;
+    let mut dialog_open = false;
 
     loop {
         if child.exited() {
@@ -239,25 +253,52 @@ async fn wait_for_session(
         }
 
         id += 1;
-        let request = json!({"id": id, "method": "Network.getAllCookies"});
-        socket
-            .send(Message::Text(request.to_string().into()))
-            .await
-            .map_err(|error| BrowserError::Protocol(error.to_string()))?;
         let cookies = read_cookies(&mut socket, id).await?;
         if let Some(header) = cookie_header(&cookies) {
             return Ok(header);
+        }
+
+        if !dialog_open {
+            id += 1;
+            dialog_open = evaluate(&mut socket, id, OPEN_LOGIN_DIALOG_JS).await?
+                == Value::String("open".to_owned());
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }
 
-async fn read_cookies(
-    socket: &mut tokio_tungstenite::WebSocketStream<
-        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-    >,
+async fn read_cookies(socket: &mut CdpSocket, id: u64) -> Result<Vec<Value>, BrowserError> {
+    let result = call(socket, id, "Network.getAllCookies", json!({})).await?;
+    Ok(result["cookies"].as_array().cloned().unwrap_or_default())
+}
+
+async fn evaluate(
+    socket: &mut CdpSocket,
     id: u64,
-) -> Result<Vec<Value>, BrowserError> {
+    expression: &str,
+) -> Result<Value, BrowserError> {
+    let result = call(
+        socket,
+        id,
+        "Runtime.evaluate",
+        json!({"expression": expression, "returnByValue": true}),
+    )
+    .await?;
+    Ok(result["result"]["value"].clone())
+}
+
+async fn call(
+    socket: &mut CdpSocket,
+    id: u64,
+    method: &str,
+    params: Value,
+) -> Result<Value, BrowserError> {
+    let request = json!({"id": id, "method": method, "params": params});
+    socket
+        .send(Message::Text(request.to_string().into()))
+        .await
+        .map_err(|error| BrowserError::Protocol(error.to_string()))?;
+
     while let Some(message) = socket.next().await {
         let message = message.map_err(|error| BrowserError::Protocol(error.to_string()))?;
         let Message::Text(text) = message else {
@@ -271,10 +312,7 @@ async fn read_cookies(
         if let Some(error) = value.get("error") {
             return Err(BrowserError::Protocol(error.to_string()));
         }
-        return Ok(value["result"]["cookies"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default());
+        return Ok(value["result"].clone());
     }
     Err(BrowserError::Closed)
 }

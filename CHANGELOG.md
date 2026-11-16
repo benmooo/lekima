@@ -8,9 +8,10 @@ All notable changes to lekima are documented here. The format follows
 ### Added
 
 - `lekima login --qr` opens the official web player in Chrome, Chromium, Brave
-  or Edge with a dedicated profile (`<config>/web-login`), waits for the user to
-  sign in, captures the session cookies over the DevTools protocol and closes
-  the browser. `--no-browser` keeps the terminal QR flow.
+  or Edge with a dedicated profile (`<config>/web-login`), opens the login
+  dialog automatically, waits for the user to sign in, captures the session
+  cookies over the DevTools protocol and closes the browser. `--no-browser`
+  keeps the terminal QR flow.
 - A stable anonymous device id in `<config>/device.id`, reused across commands
   instead of generating a new device per process.
 

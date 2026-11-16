@@ -781,9 +781,23 @@ async fn login_with_qr(
 ) -> Result<(), Failure> {
     use lekima_domain::QrStatus;
 
-    if !no_browser {
-        match browser_login::sign_in(&paths.session_file(), &paths.web_login_dir()).await {
-            Ok(crate::browser_login::SignIn::SignedIn) => {
+    if !no_browser && let Some(browser) = browser_login::discover_browser() {
+        let label = browser
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("the browser");
+        if json {
+            eprintln!(
+                "opening {label}: sign in in the window; it closes when the session is saved"
+            );
+        } else {
+            crate::say!(
+                "opening {label}: sign in in the window; it closes when the session is saved"
+            );
+        }
+        match browser_login::sign_in(&browser, &paths.session_file(), &paths.web_login_dir()).await
+        {
+            Ok(()) => {
                 let nickname = match service(paths, config) {
                     Ok(service) => bounded(service.current_user())
                         .await
@@ -809,7 +823,6 @@ async fn login_with_qr(
                 }
                 return Ok(());
             }
-            Ok(crate::browser_login::SignIn::NoBrowser) => {}
             Err(error) => {
                 if json {
                     eprintln!(
