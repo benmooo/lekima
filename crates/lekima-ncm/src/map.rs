@@ -11,11 +11,7 @@ pub(crate) fn track(track: provider::Track) -> domain::Track {
     let album = if track.album.id == 0 && track.album.name.is_empty() {
         None
     } else {
-        Some(domain::Album {
-            id: domain::AlbumId(track.album.id),
-            name: text(track.album.name),
-            cover_url: (!track.album.pic_url.is_empty()).then_some(track.album.pic_url),
-        })
+        Some(album(track.album))
     };
 
     domain::Track {
@@ -34,6 +30,82 @@ pub(crate) fn track(track: provider::Track) -> domain::Track {
     }
 }
 
+/// Album metadata. `artist` and `description` are filled in only where the
+/// provider supplies them; album detail derives the artist from its tracks.
+pub(crate) fn album(album: provider::Album) -> domain::Album {
+    domain::Album {
+        id: domain::AlbumId(album.id),
+        name: text(album.name),
+        cover_url: non_empty(album.pic_url),
+        artist: None,
+        year: year_from_timestamp(album.publish_time),
+        track_count: (album.size > 0).then_some(album.size),
+        description: String::new(),
+    }
+}
+
+/// A millisecond (or second) timestamp reduced to its Gregorian year.
+fn year_from_timestamp(timestamp: u64) -> Option<u16> {
+    if timestamp == 0 {
+        return None;
+    }
+    // Newer payloads use milliseconds; older ones occasionally use seconds.
+    let milliseconds = if timestamp < 100_000_000_000 {
+        timestamp.saturating_mul(1_000)
+    } else {
+        timestamp
+    };
+    let mut days = i64::try_from(milliseconds / 86_400_000).ok()?;
+    let mut year = 1970i64;
+    loop {
+        let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+        let length = if leap { 366 } else { 365 };
+        if days < length {
+            break;
+        }
+        days -= length;
+        year += 1;
+    }
+    u16::try_from(year).ok()
+}
+
+pub(crate) fn artist_detail(artist: provider::ArtistDetail) -> domain::ArtistDetail {
+    domain::ArtistDetail {
+        id: domain::ArtistId(artist.id),
+        name: text(artist.name),
+        avatar_url: non_empty(artist.avatar_url),
+        cover_url: non_empty(artist.cover_url),
+        album_count: artist.album_size,
+        track_count: artist.music_size,
+        description: text(artist.brief_desc),
+        aliases: artist
+            .aliases
+            .into_iter()
+            .map(text)
+            .filter(|alias| !alias.is_empty())
+            .collect(),
+    }
+}
+
+pub(crate) fn artist_albums(body: provider::ArtistAlbumsBody) -> domain::ArtistAlbums {
+    domain::ArtistAlbums {
+        albums: body.hot_albums.into_iter().map(album).collect(),
+        has_more: body.more,
+    }
+}
+
+pub(crate) fn album_detail(body: provider::AlbumDetailBody) -> domain::AlbumDetail {
+    let tracks: Vec<domain::Track> = body.songs.into_iter().map(track).collect();
+    let mut album = album(body.album);
+    // The album endpoint does not repeat the artist: take it from the tracks.
+    if album.artist.is_none() {
+        album.artist = tracks
+            .iter()
+            .find_map(|track| track.artists.first().cloned());
+    }
+    domain::AlbumDetail { album, tracks }
+}
+
 pub(crate) fn search_results(body: provider::SearchBody) -> domain::SearchResults {
     let tracks: Vec<_> = body.result.songs.into_iter().map(track).collect();
     let playlists: Vec<_> = body.result.playlists.into_iter().map(playlist).collect();
@@ -43,15 +115,26 @@ pub(crate) fn search_results(body: provider::SearchBody) -> domain::SearchResult
         .into_iter()
         .map(|artist| domain::Artist {
             id: domain::ArtistId(artist.id),
-            name: artist.name,
+            name: text(artist.name),
         })
         .collect();
-    let total = tracks.len() + playlists.len() + artists.len();
+    let albums: Vec<_> = body.result.albums.into_iter().map(album).collect();
+
+    let count = |len: usize| u64::try_from(len).unwrap_or(u64::MAX);
+    let totals = domain::SearchTotals {
+        tracks: count(tracks.len()),
+        // The album search reports matches, not just the decoded page.
+        albums: body.result.album_count.max(count(albums.len())),
+        artists: count(artists.len()),
+        playlists: count(playlists.len()),
+    };
     domain::SearchResults {
-        total: u64::try_from(total).unwrap_or(u64::MAX),
+        total: totals.total(),
         tracks,
         playlists,
         artists,
+        albums,
+        totals,
     }
 }
 
@@ -107,6 +190,10 @@ pub(crate) fn cloud_track(entry: provider::CloudTrack) -> Option<domain::Track> 
             id: domain::AlbumId(0),
             name: text(entry.album),
             cover_url: None,
+            artist: None,
+            year: None,
+            track_count: None,
+            description: String::new(),
         }),
         duration_ms: 0,
     })
@@ -239,6 +326,123 @@ mod tests {
         let results = search_results(response.body);
         assert_eq!(results.tracks.len(), 1);
         assert_eq!(results.total, 1);
+    }
+
+    #[test]
+    fn maps_album_search_results_and_counts() {
+        let raw = serde_json::json!({
+            "code": 200,
+            "result": {
+                "songs": [],
+                "albums": [{
+                    "id": 7,
+                    "name": "Mota",
+                    "picUrl": "https://img/7.jpg",
+                    "publishTime": 1_704_067_200_000u64,
+                    "size": 1
+                }],
+                "albumCount": 48,
+                "artists": [],
+                "playlists": []
+            }
+        });
+        let response: provider::ApiResponse<provider::SearchBody> =
+            serde_json::from_value(raw).unwrap();
+        let results = search_results(response.body);
+        assert_eq!(results.albums.len(), 1);
+        assert_eq!(results.albums[0].name, "Mota");
+        assert_eq!(results.albums[0].year, Some(2024));
+        assert_eq!(results.albums[0].track_count, Some(1));
+        // The provider reports matches, not just the decoded page.
+        assert_eq!(results.totals.albums, 48);
+        assert_eq!(results.total, 48);
+    }
+
+    #[test]
+    fn maps_artist_profiles_with_null_fields() {
+        let raw = serde_json::json!({
+            "code": 200,
+            "data": {"artist": {
+                "id": 6452,
+                "name": "周杰伦",
+                "avatar": "https://img/a",
+                "cover": null,
+                "albumSize": 49,
+                "musicSize": 592,
+                "briefDesc": "bio",
+                "alias": ["Jay Chou", "周董"],
+                "identities": null
+            }}
+        });
+        let response: provider::ApiResponse<provider::ArtistDetailBody> =
+            serde_json::from_value(raw).unwrap();
+        let detail = artist_detail(response.body.data.artist);
+        assert_eq!(detail.id, domain::ArtistId(6452));
+        assert_eq!(detail.avatar_url.as_deref(), Some("https://img/a"));
+        assert_eq!(detail.cover_url, None);
+        assert_eq!(detail.album_count, 49);
+        assert_eq!(detail.track_count, 592);
+        assert_eq!(detail.description, "bio");
+        assert_eq!(detail.aliases, ["Jay Chou", "周董"]);
+    }
+
+    #[test]
+    fn maps_artist_album_pages_and_tolerates_nulls() {
+        let raw = serde_json::json!({
+            "code": 200,
+            "artist": {"id": 1, "name": "Aash"},
+            "hotAlbums": [{"id": 9, "name": "Mota", "size": 2}],
+            "more": true
+        });
+        let response: provider::ApiResponse<provider::ArtistAlbumsBody> =
+            serde_json::from_value(raw).unwrap();
+        let page = artist_albums(response.body);
+        assert_eq!(page.albums.len(), 1);
+        assert!(page.has_more);
+
+        let raw = serde_json::json!({"code": 200, "hotAlbums": null, "more": null});
+        let response: provider::ApiResponse<provider::ArtistAlbumsBody> =
+            serde_json::from_value(raw).unwrap();
+        let page = artist_albums(response.body);
+        assert!(page.albums.is_empty());
+        assert!(!page.has_more);
+    }
+
+    #[test]
+    fn maps_album_detail_and_derives_the_artist_from_tracks() {
+        let raw = serde_json::json!({
+            "code": 200,
+            "album": {"id": 9, "name": "Mota", "picUrl": "", "size": 1},
+            "songs": [{
+                "id": 1,
+                "name": "Mota",
+                "ar": [{"id": 2, "name": "Aash"}],
+                "al": {"id": 9, "name": "Mota"},
+                "dt": 120_000
+            }]
+        });
+        let response: provider::ApiResponse<provider::AlbumDetailBody> =
+            serde_json::from_value(raw).unwrap();
+        let detail = album_detail(response.body);
+        assert_eq!(detail.album.id, domain::AlbumId(9));
+        assert_eq!(detail.tracks.len(), 1);
+        assert_eq!(detail.tracks[0].duration_ms, 120_000);
+        assert_eq!(
+            detail
+                .album
+                .artist
+                .as_ref()
+                .map(|artist| artist.name.as_str()),
+            Some("Aash")
+        );
+    }
+
+    #[test]
+    fn timestamps_reduce_to_a_gregorian_year() {
+        assert_eq!(year_from_timestamp(0), None);
+        assert_eq!(year_from_timestamp(1_704_067_200), Some(2024));
+        assert_eq!(year_from_timestamp(1_704_067_200_000), Some(2024));
+        assert_eq!(year_from_timestamp(1_609_459_200_000), Some(2021));
     }
 
     #[test]

@@ -53,6 +53,35 @@ pub trait MusicService: Send + Sync {
     /// return [`crate::DomainError::Unsupported`].
     async fn playlist_tracks(&self, id: crate::model::PlaylistId) -> Result<Vec<Track>>;
 
+    /// A full artist profile.
+    async fn artist(&self, id: crate::model::ArtistId) -> Result<crate::model::ArtistDetail> {
+        let _ = id;
+        Err(crate::DomainError::Unsupported(
+            "artist pages are not supported by this provider".to_owned(),
+        ))
+    }
+
+    /// One page of an artist's albums.
+    async fn artist_albums(
+        &self,
+        id: crate::model::ArtistId,
+        limit: u32,
+        offset: u32,
+    ) -> Result<crate::model::ArtistAlbums> {
+        let _ = (id, limit, offset);
+        Err(crate::DomainError::Unsupported(
+            "artist albums are not supported by this provider".to_owned(),
+        ))
+    }
+
+    /// An album with its ordered track list.
+    async fn album(&self, id: crate::model::AlbumId) -> Result<crate::model::AlbumDetail> {
+        let _ = id;
+        Err(crate::DomainError::Unsupported(
+            "album pages are not supported by this provider".to_owned(),
+        ))
+    }
+
     /// The account currently authenticated against the provider, if any.
     async fn current_user(&self) -> Result<Option<crate::model::UserProfile>>;
 

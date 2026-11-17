@@ -70,6 +70,62 @@ pub struct Album {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cover_url: Option<String>,
+    /// Primary artist, when the provider attaches one to the album.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artist: Option<Artist>,
+    /// Release year. Provider payloads carry a timestamp; only the year is kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub year: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track_count: Option<u32>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+}
+
+impl Album {
+    /// Artist label for tables, or an empty string when the provider omitted it.
+    #[must_use]
+    pub fn artist_name(&self) -> &str {
+        self.artist
+            .as_ref()
+            .map_or("", |artist| artist.name.as_str())
+    }
+}
+
+/// A full artist profile page.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtistDetail {
+    pub id: ArtistId,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cover_url: Option<String>,
+    #[serde(default)]
+    pub album_count: u64,
+    #[serde(default)]
+    pub track_count: u64,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
+}
+
+/// One page of an artist's albums.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtistAlbums {
+    #[serde(default)]
+    pub albums: Vec<Album>,
+    #[serde(default)]
+    pub has_more: bool,
+}
+
+/// An album with its ordered track list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AlbumDetail {
+    pub album: Album,
+    #[serde(default)]
+    pub tracks: Vec<Track>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -160,9 +216,12 @@ pub struct UserProfile {
 }
 
 /// What a search query may target.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SearchKind {
+    /// Every catalogue kind, merged by the adapter.
+    #[default]
+    All,
     Track,
     Album,
     Artist,
@@ -173,11 +232,32 @@ impl SearchKind {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::All => "all",
             Self::Track => "track",
             Self::Album => "album",
             Self::Artist => "artist",
             Self::Playlist => "playlist",
         }
+    }
+}
+
+/// Number of matches per catalogue kind.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SearchTotals {
+    #[serde(default)]
+    pub tracks: u64,
+    #[serde(default)]
+    pub albums: u64,
+    #[serde(default)]
+    pub artists: u64,
+    #[serde(default)]
+    pub playlists: u64,
+}
+
+impl SearchTotals {
+    #[must_use]
+    pub const fn total(self) -> u64 {
+        self.tracks + self.albums + self.artists + self.playlists
     }
 }
 
@@ -190,7 +270,23 @@ pub struct SearchResults {
     #[serde(default)]
     pub artists: Vec<Artist>,
     #[serde(default)]
+    pub albums: Vec<Album>,
+    #[serde(default)]
+    pub totals: SearchTotals,
+    /// Sum of [`SearchTotals`], kept for clients written before per-kind counts.
+    #[serde(default)]
     pub total: u64,
+}
+
+impl SearchResults {
+    /// True when every kind came back empty.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.tracks.is_empty()
+            && self.playlists.is_empty()
+            && self.artists.is_empty()
+            && self.albums.is_empty()
+    }
 }
 
 /// A started QR login: `key` is polled, `url` is encoded as a QR code.
@@ -280,7 +376,10 @@ pub struct Comments {
 
 #[cfg(test)]
 mod tests {
-    use super::{Track, format_duration_ms};
+    use super::{
+        Album, AlbumDetail, ArtistDetail, SearchKind, SearchResults, SearchTotals, Track,
+        format_duration_ms,
+    };
 
     #[test]
     fn duration_formatting_handles_unknown_and_hours() {
@@ -300,5 +399,89 @@ mod tests {
             duration_ms: 0,
         };
         assert_eq!(track.artist_names(), "Unknown artist");
+    }
+
+    #[test]
+    fn search_kind_all_is_lowercase_on_the_wire() {
+        assert_eq!(SearchKind::All.as_str(), "all");
+        assert_eq!(serde_json::to_string(&SearchKind::All).unwrap(), "\"all\"");
+        assert_eq!(
+            serde_json::from_str::<SearchKind>("\"all\"").unwrap(),
+            SearchKind::All
+        );
+    }
+
+    #[test]
+    fn search_totals_sum_every_kind() {
+        let totals = SearchTotals {
+            tracks: 8,
+            albums: 4,
+            artists: 2,
+            playlists: 3,
+        };
+        assert_eq!(totals.total(), 17);
+        let results = SearchResults {
+            totals,
+            total: totals.total(),
+            ..SearchResults::default()
+        };
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn old_search_payloads_decode_with_empty_new_fields() {
+        let results: SearchResults =
+            serde_json::from_str(r#"{"tracks":[],"playlists":[],"artists":[],"total":0}"#).unwrap();
+        assert!(results.albums.is_empty());
+        assert_eq!(results.totals, SearchTotals::default());
+    }
+
+    #[test]
+    fn album_catalogue_models_round_trip() {
+        let album = Album {
+            id: 9.into(),
+            name: "Mota".to_owned(),
+            cover_url: Some("https://img/9.jpg".to_owned()),
+            artist: Some(super::Artist {
+                id: 2.into(),
+                name: "Aash".to_owned(),
+            }),
+            year: Some(2024),
+            track_count: Some(1),
+            description: "debut".to_owned(),
+        };
+        assert_eq!(album.artist_name(), "Aash");
+
+        let detail = AlbumDetail {
+            album,
+            tracks: Vec::new(),
+        };
+        let encoded = serde_json::to_string(&detail).unwrap();
+        let decoded: AlbumDetail = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, detail);
+
+        let artist = ArtistDetail {
+            id: 6452.into(),
+            name: "周杰伦".to_owned(),
+            avatar_url: None,
+            cover_url: None,
+            album_count: 49,
+            track_count: 592,
+            description: "bio".to_owned(),
+            aliases: vec!["Jay Chou".to_owned()],
+        };
+        let decoded: ArtistDetail =
+            serde_json::from_str(&serde_json::to_string(&artist).unwrap()).unwrap();
+        assert_eq!(decoded, artist);
+    }
+
+    #[test]
+    fn old_album_payloads_still_decode() {
+        let album: Album = serde_json::from_str(r#"{"id":1,"name":"x"}"#).unwrap();
+        assert!(album.artist.is_none());
+        assert!(album.year.is_none());
+        assert!(album.track_count.is_none());
+        assert!(album.description.is_empty());
+        assert_eq!(album.artist_name(), "");
     }
 }

@@ -80,6 +80,49 @@ impl NcmMusicService {
             .map_err(provider_error)?;
         Ok(Self { client })
     }
+
+    async fn run_search(&self, query: SearchQuery) -> domain::Result<domain::SearchResults> {
+        let response = self
+            .client
+            .discovery()
+            .search(query)
+            .await
+            .map_err(provider_error)?;
+        let response = ensure_success(response)?;
+        Ok(map::search_results(response.body))
+    }
+
+    /// `SearchKind::All` fans out to the four provider kinds and merges them.
+    async fn search_all(
+        &self,
+        query: &str,
+        limit: u32,
+        offset: u32,
+    ) -> domain::Result<domain::SearchResults> {
+        let (limit, offset) = map_page(limit.clamp(1, ALL_PER_KIND), offset)?;
+        let queries = [
+            search_query(query, SearchKind::Track, limit, offset)?,
+            search_query(query, SearchKind::Album, limit, offset)?,
+            search_query(query, SearchKind::Artist, limit, offset)?,
+            search_query(query, SearchKind::Playlist, limit, offset)?,
+        ];
+        // Sequential on purpose: the adapter has no async-combinator
+        // dependency and the SDK cache absorbs repeated fan-outs.
+        let mut merged = domain::SearchResults::default();
+        for query in queries {
+            let page = self.run_search(query).await?;
+            merged.tracks.extend(page.tracks);
+            merged.albums.extend(page.albums);
+            merged.artists.extend(page.artists);
+            merged.playlists.extend(page.playlists);
+            merged.totals.tracks += page.totals.tracks;
+            merged.totals.albums += page.totals.albums;
+            merged.totals.artists += page.totals.artists;
+            merged.totals.playlists += page.totals.playlists;
+        }
+        merged.total = merged.totals.total();
+        Ok(merged)
+    }
 }
 
 fn ensure_success<T>(response: ApiResponse<T>) -> domain::Result<ApiResponse<T>> {
@@ -116,12 +159,29 @@ fn provider_error(error: ncmapi::Error) -> DomainError {
 
 fn provider_kind(kind: SearchKind) -> ProviderSearchKind {
     match kind {
-        SearchKind::Track => ProviderSearchKind::Song,
+        // `All` is an adapter fan-out (ADR-001), never a provider kind.
+        SearchKind::All | SearchKind::Track => ProviderSearchKind::Song,
         SearchKind::Album => ProviderSearchKind::Album,
         SearchKind::Artist => ProviderSearchKind::Artist,
         SearchKind::Playlist => ProviderSearchKind::Playlist,
     }
 }
+
+fn search_query(
+    query: &str,
+    kind: SearchKind,
+    limit: u16,
+    offset: u32,
+) -> domain::Result<SearchQuery> {
+    SearchQuery::new(query)
+        .map_err(provider_error)?
+        .kind(provider_kind(kind))
+        .page(limit, offset)
+        .map_err(provider_error)
+}
+
+/// Per-kind result cap for a merged `All` search.
+const ALL_PER_KIND: u32 = 10;
 
 fn map_page(limit: u32, offset: u32) -> domain::Result<(u16, u32)> {
     if limit == 0 {
@@ -143,21 +203,12 @@ impl MusicService for NcmMusicService {
         limit: u32,
         offset: u32,
     ) -> domain::Result<domain::SearchResults> {
+        if kind == SearchKind::All {
+            return self.search_all(query, limit, offset).await;
+        }
         let (limit, offset) = map_page(limit, offset)?;
-        let query = SearchQuery::new(query)
-            .map_err(provider_error)?
-            .kind(provider_kind(kind))
-            .page(limit, offset)
-            .map_err(provider_error)?;
-
-        let response = self
-            .client
-            .discovery()
-            .search(query)
-            .await
-            .map_err(provider_error)?;
-        let response = ensure_success(response)?;
-        Ok(map::search_results(response.body))
+        let query = search_query(query, kind, limit, offset)?;
+        self.run_search(query).await
     }
 
     async fn tracks(&self, ids: &[TrackId]) -> domain::Result<Vec<domain::Track>> {
@@ -251,6 +302,68 @@ impl MusicService for NcmMusicService {
             )));
         }
         Ok(tracks)
+    }
+
+    async fn artist(&self, id: domain::ArtistId) -> domain::Result<domain::ArtistDetail> {
+        if id.0 == 0 {
+            return Err(DomainError::InvalidInput(
+                "artist id must be greater than zero".to_owned(),
+            ));
+        }
+        let response = self
+            .client
+            .discovery()
+            .artist(id.0)
+            .await
+            .map_err(provider_error)?;
+        let response = ensure_success(response)?;
+        let detail = map::artist_detail(response.body.data.artist);
+        if detail.id.0 == 0 && detail.name.is_empty() {
+            return Err(DomainError::NotFound(format!("artist {id}")));
+        }
+        Ok(detail)
+    }
+
+    async fn artist_albums(
+        &self,
+        id: domain::ArtistId,
+        limit: u32,
+        offset: u32,
+    ) -> domain::Result<domain::ArtistAlbums> {
+        if id.0 == 0 {
+            return Err(DomainError::InvalidInput(
+                "artist id must be greater than zero".to_owned(),
+            ));
+        }
+        let (limit, offset) = map_page(limit, offset)?;
+        let response = self
+            .client
+            .discovery()
+            .artist_albums(id.0, limit, offset)
+            .await
+            .map_err(provider_error)?;
+        let response = ensure_success(response)?;
+        Ok(map::artist_albums(response.body))
+    }
+
+    async fn album(&self, id: domain::AlbumId) -> domain::Result<domain::AlbumDetail> {
+        if id.0 == 0 {
+            return Err(DomainError::InvalidInput(
+                "album id must be greater than zero".to_owned(),
+            ));
+        }
+        let response = self
+            .client
+            .discovery()
+            .album(id.0)
+            .await
+            .map_err(provider_error)?;
+        let response = ensure_success(response)?;
+        let detail = map::album_detail(response.body);
+        if detail.album.id.0 == 0 && detail.album.name.is_empty() {
+            return Err(DomainError::NotFound(format!("album {id}")));
+        }
+        Ok(detail)
     }
 
     async fn current_user(&self) -> domain::Result<Option<UserProfile>> {

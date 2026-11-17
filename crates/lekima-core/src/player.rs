@@ -714,6 +714,44 @@ impl Player {
         .await
     }
 
+    /// Plays a whole album, replacing the queue.
+    ///
+    /// The provider call happens in the daemon so every frontend shares one
+    /// resolution and one error mapping instead of fetching tracks itself.
+    pub async fn play_album(&self, id: lekima_domain::AlbumId) -> Result<PlaybackState> {
+        let tracks = self.album_tracks(id).await?;
+        self.play(PlayRequest::Tracks {
+            tracks,
+            kind: QueueKind::Album,
+        })
+        .await
+    }
+
+    /// Appends every track of an album, optionally directly after the current
+    /// track. Returns the number of tracks added.
+    pub async fn queue_album(&self, id: lekima_domain::AlbumId, next: bool) -> Result<usize> {
+        let tracks = self.album_tracks(id).await?;
+        let added = tracks.len();
+        self.enqueue(tracks, next).await?;
+        Ok(added)
+    }
+
+    async fn album_tracks(&self, id: lekima_domain::AlbumId) -> Result<Vec<Track>> {
+        let detail = self.music.album(id).await?;
+        if detail.tracks.is_empty() {
+            return Err(DomainError::NotFound(format!("album {id} has no tracks")));
+        }
+        Ok(detail.tracks)
+    }
+
+    /// Appends every track of a playlist. Returns the number of tracks added.
+    pub async fn queue_playlist(&self, id: lekima_domain::PlaylistId, next: bool) -> Result<usize> {
+        let tracks = self.music.playlist_tracks(id).await?;
+        let added = tracks.len();
+        self.enqueue(tracks, next).await?;
+        Ok(added)
+    }
+
     /// Starts personal FM.
     pub async fn fm_start(&self) -> Result<PlaybackState> {
         let tracks = self.music.fm_batch().await?;
@@ -860,8 +898,9 @@ mod tests {
 
     use async_trait::async_trait;
     use lekima_domain::{
-        Album, Artist, AudioEngine, MusicService, PlaybackStatus, Playlist, PlaylistId, Quality,
-        RepeatMode, Result, SearchKind, SearchResults, Track, TrackId, UserId, UserProfile,
+        Album, Artist, AudioEngine, DomainError, MusicService, PlaybackStatus, Playlist,
+        PlaylistId, Quality, RepeatMode, Result, SearchKind, SearchResults, Track, TrackId, UserId,
+        UserProfile,
     };
 
     use super::{PlayRequest, Player};
@@ -879,6 +918,10 @@ mod tests {
                 id: 1.into(),
                 name: "album".to_owned(),
                 cover_url: None,
+                artist: None,
+                year: None,
+                track_count: None,
+                description: String::new(),
             }),
             duration_ms: 1_000,
         }
@@ -934,6 +977,29 @@ mod tests {
 
         async fn cloud(&self, _: u32, _: u32) -> Result<Vec<Track>> {
             Ok(vec![track(11)])
+        }
+
+        async fn album(&self, id: lekima_domain::AlbumId) -> Result<lekima_domain::AlbumDetail> {
+            let album = Album {
+                id,
+                name: format!("album-{id}"),
+                cover_url: None,
+                artist: None,
+                year: None,
+                track_count: None,
+                description: String::new(),
+            };
+            match id.0 {
+                1 => Ok(lekima_domain::AlbumDetail {
+                    album,
+                    tracks: vec![track(1), track(2)],
+                }),
+                2 => Ok(lekima_domain::AlbumDetail {
+                    album,
+                    tracks: Vec::new(),
+                }),
+                _ => Err(lekima_domain::DomainError::NotFound(format!("album {id}"))),
+            }
         }
     }
 
@@ -1458,5 +1524,73 @@ mod tests {
         assert_eq!(player.cycle_repeat().await.as_str(), "all");
         assert_eq!(player.cycle_repeat().await.as_str(), "one");
         assert_eq!(player.cycle_repeat().await.as_str(), "off");
+    }
+
+    #[tokio::test]
+    async fn playing_an_album_replaces_the_queue() {
+        let (player, _) = player();
+        player
+            .play(PlayRequest::Tracks {
+                tracks: vec![track(9)],
+                kind: QueueKind::Manual,
+            })
+            .await
+            .unwrap();
+
+        let state = player.play_album(lekima_domain::AlbumId(1)).await.unwrap();
+        assert_eq!(state.queue_length, 2);
+        assert_eq!(state.queue_kind, QueueKind::Album);
+        let (tracks, index) = player.queue().await;
+        assert_eq!(
+            tracks.iter().map(|track| track.id).collect::<Vec<_>>(),
+            vec![TrackId(1), TrackId(2)]
+        );
+        assert_eq!(index, Some(0));
+    }
+
+    #[tokio::test]
+    async fn queueing_an_album_appends_or_plays_next() {
+        let (player, _) = player();
+        player
+            .play(PlayRequest::Tracks {
+                tracks: vec![track(9)],
+                kind: QueueKind::Manual,
+            })
+            .await
+            .unwrap();
+
+        let added = player
+            .queue_album(lekima_domain::AlbumId(1), false)
+            .await
+            .unwrap();
+        assert_eq!(added, 2);
+        let (tracks, _) = player.queue().await;
+        assert_eq!(tracks.len(), 3);
+
+        player
+            .queue_album(lekima_domain::AlbumId(1), true)
+            .await
+            .unwrap();
+        let (tracks, index) = player.queue().await;
+        assert_eq!(tracks.len(), 5);
+        assert_eq!(index, Some(0));
+        // Play-next inserts ahead of the previously appended album.
+        assert_eq!(tracks[1].id, TrackId(1));
+        assert_eq!(tracks[2].id, TrackId(2));
+    }
+
+    #[tokio::test]
+    async fn an_unknown_or_empty_album_is_not_found() {
+        let (player, _) = player();
+        for id in [2, 99] {
+            let error = player
+                .play_album(lekima_domain::AlbumId(id))
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(error, DomainError::NotFound(_)),
+                "album {id}: {error:?}"
+            );
+        }
     }
 }

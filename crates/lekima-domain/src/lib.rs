@@ -22,9 +22,9 @@ pub mod sanitize;
 pub use error::{DomainError, Result};
 pub use lyrics::{LyricLine, Lyrics, parse_lrc, parse_lrc_with_translation};
 pub use model::{
-    Album, AlbumId, Artist, ArtistId, Comment, CommentReply, Comments, Playlist, PlaylistId,
-    QrLogin, QrStatus, Quality, SearchKind, SearchResults, Toplist, Track, TrackId, UserId,
-    UserProfile, format_duration_ms,
+    Album, AlbumDetail, AlbumId, Artist, ArtistAlbums, ArtistDetail, ArtistId, Comment,
+    CommentReply, Comments, Playlist, PlaylistId, QrLogin, QrStatus, Quality, SearchKind,
+    SearchResults, SearchTotals, Toplist, Track, TrackId, UserId, UserProfile, format_duration_ms,
 };
 pub use playback::{BufferedRange, PlaybackState, PlaybackStatus, Queue, QueueKind, RepeatMode};
 pub use ports::{AudioEngine, CredentialsStore, MusicService};

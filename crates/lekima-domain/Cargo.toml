@@ -12,3 +12,6 @@ authors.workspace = true
 async-trait.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

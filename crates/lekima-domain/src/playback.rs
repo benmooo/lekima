@@ -39,6 +39,7 @@ pub enum QueueKind {
     Cloud,
     Liked,
     Playlist,
+    Album,
 }
 
 impl QueueKind {
@@ -52,6 +53,7 @@ impl QueueKind {
             Self::Cloud => "cloud",
             Self::Liked => "liked",
             Self::Playlist => "playlist",
+            Self::Album => "album",
         }
     }
 }
