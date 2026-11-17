@@ -21,7 +21,7 @@ Make discovery work without the web player:
 
 | Slice | Contents | Exit criteria |
 | --- | --- | --- |
-| A. Provider | `ncmapi 1.9.0`: album search results, artist detail/albums, album detail/tracks | Fixture tests, live smoke against the public endpoints, additive release |
+| A. Provider | `ncmapi 1.9.1`: album search results, artist detail/albums, album detail/tracks | Fixture tests, live smoke against the public endpoints, additive release |
 | B. Domain + IPC | Album/artist models, `MusicService` methods, `SearchKind::All`, IPC commands/replies, `PlayTarget::Album` | Round-trip protocol tests; fake-port core tests |
 | C. CLI + agent | `lekima search --kind`, `lekima artist`, `lekima album`, MCP tools, HTTP read-only routes | Contract tests for JSON fields and exit codes |
 | D. TUI | Search filters, grouped results, artist and album views, history, queue actions | Render/navigation tests at 80×24 and 120×30 |

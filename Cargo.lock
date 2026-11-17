@@ -1635,7 +1635,7 @@ dependencies = [
 
 [[package]]
 name = "lekima"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1668,7 +1668,7 @@ dependencies = [
 
 [[package]]
 name = "lekima-audio"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "async-trait",
  "lekima-domain",
@@ -1683,7 +1683,7 @@ dependencies = [
 
 [[package]]
 name = "lekima-config"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "directories",
  "lekima-domain",
@@ -1696,7 +1696,7 @@ dependencies = [
 
 [[package]]
 name = "lekima-core"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "async-trait",
  "lekima-domain",
@@ -1707,7 +1707,7 @@ dependencies = [
 
 [[package]]
 name = "lekima-domain"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "async-trait",
  "serde",
@@ -1717,7 +1717,7 @@ dependencies = [
 
 [[package]]
 name = "lekima-ipc"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "lekima-domain",
  "serde",
@@ -1728,7 +1728,7 @@ dependencies = [
 
 [[package]]
 name = "lekima-ncm"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "async-trait",
  "lekima-domain",
@@ -1741,7 +1741,7 @@ dependencies = [
 
 [[package]]
 name = "lekima-platform"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "block2",
  "mpris-server",
@@ -1757,7 +1757,7 @@ dependencies = [
 
 [[package]]
 name = "lekima-tui"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "crossterm",
  "lekima-domain",
@@ -1980,9 +1980,9 @@ checksum = "743fb55ba31b18fb1ecef6bdc9aa2743314978ac084044301a7eee33fb99a20d"
 
 [[package]]
 name = "ncmapi"
-version = "1.9.0"
+version = "1.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c740e097842c31a48d97d0b274d0e46eb589387852e2690d68c9c433a7c38e2a"
+checksum = "dad53096388b235a0b665464ec73d2b1837c463bbfae51e4d0db453904ad9b62"
 dependencies = [
  "aes",
  "async-trait",

@@ -177,7 +177,7 @@ $ lekima album play 242091487 --json
 - Every new TUI action has a CLI equivalent and a contract test.
 - No playback regressions: the existing transition, cache and queue tests stay
   green.
-- `ncmapi` 1.9.0 is released and pinned; `lekima` does not reintroduce a path
+- `ncmapi` 1.9.1 is released and pinned; `lekima` does not reintroduce a path
   patch.
 - Provider text (names, biography, album descriptions) is sanitized before it
   reaches the terminal; hostile-input fixtures cover the new fields.

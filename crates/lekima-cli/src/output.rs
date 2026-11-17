@@ -108,7 +108,7 @@ pub fn print_reply(reply: &Reply, json: bool) {
     match reply {
         Reply::Status { state } => print_status(state),
         Reply::Tracks { tracks } => print_tracks(tracks),
-        Reply::Search { results } => print_search(results),
+        Reply::Search { results, .. } => print_search(results),
         Reply::Artist { artist } => print_artist(artist),
         Reply::ArtistAlbums { page } => print_artist_albums(page),
         Reply::Album { detail } => print_album(detail),

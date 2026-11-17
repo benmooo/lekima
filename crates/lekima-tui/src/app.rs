@@ -149,6 +149,9 @@ impl SearchEntry {
 pub struct SearchState {
     pub query: String,
     pub filter: SearchFilter,
+    /// Filter used for the results currently on screen.
+    pub applied_filter: SearchFilter,
+    pub loading: bool,
     pub results: Option<SearchResults>,
     pub entries: Vec<SearchEntry>,
     pub error: Option<String>,
@@ -459,7 +462,7 @@ impl App {
         }
     }
 
-    fn restore_history(&mut self, entry: HistoryEntry) {
+    fn restore_history(&mut self, entry: HistoryEntry) -> Action {
         self.view = entry.view;
         self.tracks = entry.tracks;
         self.toplists = entry.toplists;
@@ -469,6 +472,49 @@ impl App {
         self.source = entry.source;
         self.main_selection = entry.selection;
         self.focus = Focus::Main;
+
+        // A page that left the screen mid-request has no data in the snapshot.
+        // Re-issue the request instead of restoring a permanent spinner.
+        match self.view {
+            View::Artist => match self.artist.id {
+                Some(id)
+                    if self.artist.detail.is_none()
+                        || (self.artist.loading && self.artist.albums.is_empty()) =>
+                {
+                    self.artist.loading = true;
+                    self.artist.paging = false;
+                    self.artist.error = None;
+                    return Action::Call(Command::Artist { id });
+                }
+                _ => {
+                    self.artist.loading = false;
+                    self.artist.paging = false;
+                }
+            },
+            View::Album => match self.album.id {
+                Some(id) if self.album.detail.is_none() || self.album.loading => {
+                    self.album.loading = true;
+                    self.album.error = None;
+                    return Action::Call(Command::Album { id });
+                }
+                _ => self.album.loading = false,
+            },
+            View::Search
+                if self.search.loading
+                    || (self.search.entries.is_empty() && !self.search.query.is_empty()) =>
+            {
+                self.search.loading = true;
+                self.search.error = None;
+                return Action::Call(Command::Search {
+                    query: self.search.query.clone(),
+                    kind: self.search.applied_filter.kind(),
+                    limit: 40,
+                    offset: 0,
+                });
+            }
+            _ => {}
+        }
+        Action::None
     }
 
     /// Records the current middle-pane state before navigating away.
@@ -488,23 +534,29 @@ impl App {
         self.history_back.push(current);
     }
 
-    fn go_back(&mut self) {
+    fn go_back(&mut self) -> Action {
         match self.history_back.pop() {
             Some(entry) => {
                 self.history_forward.push(self.history_snapshot());
-                self.restore_history(entry);
+                self.restore_history(entry)
             }
-            None => self.notify("oldest view", false),
+            None => {
+                self.notify("oldest view", false);
+                Action::None
+            }
         }
     }
 
-    fn go_forward(&mut self) {
+    fn go_forward(&mut self) -> Action {
         match self.history_forward.pop() {
             Some(entry) => {
                 self.history_back.push(self.history_snapshot());
-                self.restore_history(entry);
+                self.restore_history(entry)
             }
-            None => self.notify("newest view", false),
+            None => {
+                self.notify("newest view", false);
+                Action::None
+            }
         }
     }
 
@@ -688,6 +740,9 @@ impl App {
         }
         match key.code {
             KeyCode::Esc => {
+                if self.mode == Mode::Search {
+                    self.search.filter = self.search.applied_filter;
+                }
                 self.mode = Mode::Normal;
                 self.input.clear();
                 self.cursor = 0;
@@ -709,7 +764,11 @@ impl App {
                         let query = input.trim().to_owned();
                         self.remember();
                         self.search.query.clone_from(&query);
+                        self.search.applied_filter = self.search.filter;
+                        self.search.loading = true;
                         self.search.error = None;
+                        self.search.results = None;
+                        self.search.entries.clear();
                         self.view = View::Search;
                         self.main_selection = 0;
                         self.source = format!("search: {query}");
@@ -890,12 +949,25 @@ impl App {
                     query: rest.trim().to_owned(),
                 },
             }),
-            "search" if !rest.trim().is_empty() => Action::Call(Command::Search {
-                query: rest.trim().to_owned(),
-                kind: lekima_domain::SearchKind::Track,
-                limit: 40,
-                offset: 0,
-            }),
+            "search" if !rest.trim().is_empty() => {
+                let query = rest.trim().to_owned();
+                self.remember();
+                self.search.query.clone_from(&query);
+                self.search.applied_filter = self.search.filter;
+                self.search.loading = true;
+                self.search.error = None;
+                self.search.results = None;
+                self.search.entries.clear();
+                self.view = View::Search;
+                self.main_selection = 0;
+                self.source = format!("search: {query}");
+                Action::Call(Command::Search {
+                    query,
+                    kind: self.search.applied_filter.kind(),
+                    limit: 40,
+                    offset: 0,
+                })
+            }
             "vol" | "volume" => match rest.trim().parse::<f32>() {
                 Ok(level) => Action::Call(Command::SetVolume {
                     level: (level / 100.0).clamp(0.0, 1.0),
@@ -1217,14 +1289,8 @@ impl App {
         let count = self.pending_count.take();
         let repeat = count.unwrap_or(1).min(10_000) as isize;
         match key.code {
-            KeyCode::Char('o') if ctrl => {
-                self.go_back();
-                Action::None
-            }
-            KeyCode::Char('i') if ctrl => {
-                self.go_forward();
-                Action::None
-            }
+            KeyCode::Char('o') if ctrl => self.go_back(),
+            KeyCode::Char('i') if ctrl => self.go_forward(),
             KeyCode::Char('c') if ctrl => Action::Quit,
             KeyCode::Char('q') => Action::Quit,
             KeyCode::Char('?') => {
@@ -1311,8 +1377,7 @@ impl App {
             KeyCode::Char('p') => Action::Call(Command::Prev),
             KeyCode::Char('m') => Action::Call(Command::ToggleMute),
             KeyCode::Esc if matches!(self.view, View::Search | View::Artist | View::Album) => {
-                self.go_back();
-                Action::None
+                self.go_back()
             }
             KeyCode::Char('r') if self.view == View::Search => self.retry_search(),
             KeyCode::Char('r') if matches!(self.view, View::Artist | View::Album) => {
@@ -1907,9 +1972,21 @@ impl App {
                         self.main_selection = 0;
                         self.focus = Focus::Main;
                     }
-                    Reply::Search { results } => {
-                        let entries = SearchEntry::flatten(&results, self.search.filter);
+                    Reply::Search {
+                        query,
+                        kind,
+                        results,
+                    } => {
+                        if !self.search.loading
+                            || self.view != View::Search
+                            || query != self.search.query
+                            || kind != self.search.applied_filter.kind()
+                        {
+                            return Action::None;
+                        }
+                        let entries = SearchEntry::flatten(&results, self.search.applied_filter);
                         let empty = entries.is_empty();
+                        self.search.loading = false;
                         self.search.error = None;
                         self.search.results = Some(results);
                         self.search.entries = entries;
@@ -2065,7 +2142,8 @@ impl App {
                     self.album.loading = false;
                     self.album.error = Some(error_message(&error));
                 }
-                if self.view == View::Search {
+                if self.view == View::Search && self.search.loading {
+                    self.search.loading = false;
                     self.search.error = Some(error_message(&error));
                 }
                 if let LyricsState::Loading { track } = self.lyrics_state {
@@ -2815,7 +2893,11 @@ mod tests {
 
     fn open_search_results(app: &mut App) {
         app.search.query = "mota".to_owned();
+        app.search.loading = true;
+        app.view = View::Search;
         app.apply(Ok(lekima_ipc::Reply::Search {
+            query: "mota".to_owned(),
+            kind: lekima_domain::SearchKind::All,
             results: catalogue_results(),
         }));
     }
@@ -2872,6 +2954,32 @@ mod tests {
             other => panic!("unexpected {other:?}"),
         }
         assert_eq!(app.view, View::Search);
+    }
+
+    #[test]
+    fn escaping_search_restores_the_applied_filter() {
+        let mut app = App::new();
+        app.handle_key(key(KeyCode::Char('/')));
+        app.handle_key(KeyEvent::new(KeyCode::Char('4'), KeyModifiers::CONTROL));
+        assert_eq!(app.search.filter, SearchFilter::Artists);
+        app.handle_key(key(KeyCode::Esc));
+        assert_eq!(app.search.filter, SearchFilter::All);
+        assert_eq!(app.search.applied_filter, SearchFilter::All);
+    }
+
+    #[test]
+    fn stale_search_replies_are_ignored() {
+        let mut app = App::new();
+        app.search.query = "b".to_owned();
+        app.search.loading = true;
+        app.view = View::Search;
+        app.apply(Ok(lekima_ipc::Reply::Search {
+            query: "a".to_owned(),
+            kind: lekima_domain::SearchKind::All,
+            results: catalogue_results(),
+        }));
+        assert!(app.search.entries.is_empty());
+        assert!(app.search.loading);
     }
 
     #[test]

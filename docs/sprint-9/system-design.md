@@ -15,7 +15,7 @@ lekima-domain  ←  lekima-core  ←  lekima-ipc  ←  lekima-cli / lekima-tui
 Catalogue reads are provider calls: they stay in `lekima-ncm`. The domain gains
 read models and port methods; the core does not gain I/O.
 
-## 2. Provider — `ncmapi 1.9.0`
+## 2. Provider — `ncmapi 1.9.1`
 
 Everything below was verified against the live public endpoints on 2026-11-17
 with plain GET/POST requests and no session.
@@ -88,8 +88,8 @@ songs:[Track]}`. Add `AlbumDetailBody { album: Album, songs: Vec<Track> }`.
 
 ### 2.6 Release
 
-`1.9.0` (additive): changelog, tag, `cargo publish --registry crates-io`, then
-bump `lekima` to `ncmapi = "1.9"`. Never a path patch.
+`1.9.1` (additive): changelog, tag, `cargo publish --registry crates-io`, then
+bump `lekima` to `ncmapi = "1.9.1"`. Never a path patch.
 
 ## 3. Domain
 
@@ -267,7 +267,7 @@ already left) are ignored, mirroring the lyrics pane’s guard.
 
 ## 8. Rollout
 
-1. `ncmapi 1.9.0`: implement, test, publish, tag.
+1. `ncmapi 1.9.1`: implement, test, publish, tag.
 2. `lekima`: bump the pin, add domain/IPC/core, then CLI/MCP/HTTP, then TUI.
 3. Update README, product design, sprint docs and changelog.
 4. Release `0.9.0` through the existing tag → CI → tap flow.

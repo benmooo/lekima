@@ -422,7 +422,11 @@ impl Daemon {
                     .music()
                     .search(&query, kind, limit, offset)
                     .await?;
-                Ok(Reply::Search { results })
+                Ok(Reply::Search {
+                    query,
+                    kind,
+                    results,
+                })
             }
             Command::QueueAlbum { id, next } => {
                 self.player.queue_album(id, next).await?;

@@ -37,10 +37,13 @@ pub(crate) fn album(album: provider::Album) -> domain::Album {
         id: domain::AlbumId(album.id),
         name: text(album.name),
         cover_url: non_empty(album.pic_url),
-        artist: None,
+        artist: album.artist.map(|artist| domain::Artist {
+            id: domain::ArtistId(artist.id),
+            name: text(artist.name),
+        }),
         year: year_from_timestamp(album.publish_time),
         track_count: (album.size > 0).then_some(album.size),
-        description: String::new(),
+        description: text(album.description),
     }
 }
 

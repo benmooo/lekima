@@ -297,7 +297,7 @@ fn summary(reply: &Reply) -> String {
             Some(first) => format!("{} tracks · first: {}", tracks.len(), first.name),
             None => "no tracks".to_owned(),
         },
-        Reply::Search { results } => format!(
+        Reply::Search { results, .. } => format!(
             "{} results · {} tracks, {} albums, {} artists, {} playlists",
             results.total,
             results.tracks.len(),

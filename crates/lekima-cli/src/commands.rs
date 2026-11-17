@@ -292,7 +292,14 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
             let query = query.join(" ");
             let service = service(&paths, &config)?;
             let results = bounded(service.search(&query, kind.into(), limit, offset)).await?;
-            output::print_reply(&Reply::Search { results }, json);
+            output::print_reply(
+                &Reply::Search {
+                    query,
+                    kind: kind.into(),
+                    results,
+                },
+                json,
+            );
             Ok(())
         }
 

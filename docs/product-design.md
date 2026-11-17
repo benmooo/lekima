@@ -2,7 +2,7 @@
 
 > NetEase Cloud Music in your terminal. Vim-first, agent-native.
 
-Status: **Living document** — shipped through 0.8.0 · Owner: @benmooo · Rewrite
+Status: **Living document** — shipped through 0.9.1 · Owner: @benmooo · Rewrite
 of the archived Go project [`benmooo/lekima`](https://github.com/benmooo/lekima)
 
 ---
@@ -132,7 +132,7 @@ The comments pane becomes a wrapped feed with likes, dates and replies; notices
 and errors become bordered alert panels; an empty library shows the `LEKIMA`
 wordmark with key hints.
 
-### v0.9 — “catalogue depth” (shipped in 0.9.0)
+### v0.9 — “catalogue depth” (shipped in 0.9.0, hardened in 0.9.1)
 
 > Detailed specification: [`sprint-9/`](./sprint-9/).
 
@@ -366,7 +366,7 @@ token.
 | **M10 Assisted login** (done, 0.6.0) | Browser-assisted sign-in, persisted device id | 0.6.0 shipped |
 | **M11 Control + hardening** (done, 0.7.x) | HTTP control, phone remote, preview truth, restart UX, null-safe comments | 0.7.1 shipped |
 | **M12 Console surfaces** (done, 0.8.0) | Comments feed, alert panels, empty-state wordmark | 0.8.0 shipped |
-| **M13 Catalogue depth** (design, 0.9.0) | Album/artist search, artist and album pages, album play/queue | 0.9.0 released |
+| **M13 Catalogue depth** (done, 0.9.0/0.9.1) | Album/artist search, artist and album pages, album play/queue, error/search/history hardening | 0.9.1 released |
 
 ## 9. Risks & mitigations
 
@@ -385,6 +385,6 @@ token.
 1. **Default UI density.** Do we keep the original’s always-visible sidebar, or
    start in a single-pane “just the queue” mode?
 2. **Windows.** WSL only, or native named pipes and SMTC in a later release?
-3. **Next theme.** Catalogue depth is planned for 0.9.0. After it, desktop
-   notifications, scrobbling, listening history and multiple profiles remain
-   candidates.
+3. **Next theme.** Catalogue depth shipped in 0.9.0 and was hardened in 0.9.1.
+   Desktop notifications, scrobbling, listening history and multiple profiles
+   remain candidates.

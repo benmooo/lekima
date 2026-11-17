@@ -58,6 +58,11 @@ $ lekima status --json
 
 ## Status
 
+`0.9.1` hardens catalogue depth: provider 404s are `not_found`, search
+filters/loading/stale replies stay coherent, interrupted artist/album/search
+pages refetch from history, and album results carry the artist. See
+[`docs/sprint-9/`](docs/sprint-9/).
+
 `0.8.0` redesigns the console surfaces: the comments pane becomes a wrapped
 feed with likes, dates and replies; notices and errors become bordered alert
 panels; and an empty library shows the `LEKIMA` wordmark with key hints.

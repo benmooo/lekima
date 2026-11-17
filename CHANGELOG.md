@@ -3,6 +3,20 @@
 All notable changes to lekima are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## 0.9.1 — 2026-11-18
+
+### Fixed
+
+- Provider `404` responses map to `not_found` (exit 4) instead of `backend`
+  (exit 5), so agents can distinguish a bad id from a provider outage.
+- Search filters apply to the results on screen; `Esc` restores the applied
+  filter, in-flight searches show a loading state, and replies from an older
+  query/kind are ignored.
+- Artist, album and search pages that left the screen mid-request refetch when
+  restored from history instead of showing a permanent spinner.
+- Album search results include the artist and description from `ncmapi 1.9.1`.
+- Catalogue footers degrade cleanly by width; album errors expose `r retry`.
+
 ## 0.9.0 — 2026-11-17
 
 ### Added

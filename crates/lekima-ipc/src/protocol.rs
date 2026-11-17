@@ -238,6 +238,10 @@ pub enum Reply {
         tracks: Vec<Track>,
     },
     Search {
+        #[serde(default)]
+        query: String,
+        #[serde(default)]
+        kind: SearchKind,
         results: SearchResults,
     },
     Playlists {

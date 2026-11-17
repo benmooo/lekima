@@ -131,6 +131,13 @@ fn ensure_success<T>(response: ApiResponse<T>) -> domain::Result<ApiResponse<T>>
         301 => Err(DomainError::AuthenticationRequired(
             "the music provider rejected the session; run `lekima login`".to_owned(),
         )),
+        404 => Err(DomainError::NotFound(format!(
+            "the music provider could not find the requested item{}",
+            response
+                .message
+                .as_deref()
+                .map_or_else(String::new, |message| format!(": {message}"))
+        ))),
         code => Err(DomainError::Unavailable(format!(
             "the music provider returned code {code}{}",
             response
@@ -571,8 +578,9 @@ mod tests {
     use std::time::Duration;
 
     use lekima_domain::MusicService;
+    use ncmapi::ApiResponse;
 
-    use super::{NcmMusicService, NcmOptions};
+    use super::{NcmMusicService, NcmOptions, ensure_success};
 
     fn service() -> NcmMusicService {
         let dir = tempfile::tempdir().expect("temp dir");
@@ -597,5 +605,18 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(error, lekima_domain::DomainError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn provider_404_is_not_found() {
+        let response = ApiResponse {
+            code: 404,
+            message: Some("missing".to_owned()),
+            body: (),
+        };
+        assert!(matches!(
+            ensure_success(response),
+            Err(lekima_domain::DomainError::NotFound(_))
+        ));
     }
 }

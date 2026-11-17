@@ -1086,14 +1086,21 @@ fn draw_search(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     }
     frame.render_widget(Paragraph::new(Line::from(title)), label);
 
-    if let Some(error) = &app.search.error {
-        frame.render_widget(
-            Paragraph::new(Text::from(error_block(error, theme, content.width))),
-            content,
-        );
-        return;
-    }
     if app.search.entries.is_empty() {
+        if app.search.loading {
+            frame.render_widget(
+                Paragraph::new(loading_line(&app.source, theme, app.frame)),
+                content,
+            );
+            return;
+        }
+        if let Some(error) = &app.search.error {
+            frame.render_widget(
+                Paragraph::new(Text::from(error_block(error, theme, content.width))),
+                content,
+            );
+            return;
+        }
         let text = if app.search.query.is_empty() {
             "type a query and press enter".to_owned()
         } else {
@@ -2586,6 +2593,39 @@ fn draw_footer(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
 fn normal_hints(app: &App, theme: &Theme, width: u16) -> String {
     let enter = theme.glyphs.enter;
     let sep = theme.glyphs.separator;
+    if app.view == View::Search {
+        return if width >= 80 {
+            format!(
+                "j/k {sep} {enter} open {sep} a queue {sep} / refine {sep} esc back {sep} ? keys"
+            )
+        } else if width >= 52 {
+            format!("j/k {sep} {enter} {sep} a queue {sep} / {sep} esc")
+        } else {
+            format!("j/k {sep} {enter} {sep} / {sep} esc")
+        };
+    }
+    if app.view == View::Artist {
+        return if width >= 76 {
+            format!(
+                "j/k {sep} {enter} album {sep} a queue {sep} n more {sep} r refresh {sep} esc back"
+            )
+        } else if width >= 48 {
+            format!("j/k {sep} {enter} {sep} a queue {sep} n more {sep} esc")
+        } else {
+            format!("j/k {sep} {enter} {sep} esc")
+        };
+    }
+    if app.view == View::Album {
+        return if width >= 72 {
+            format!(
+                "j/k {sep} {enter} play {sep} a queue {sep} r refresh {sep} esc back {sep} ? keys"
+            )
+        } else if width >= 48 {
+            format!("j/k {sep} {enter} play {sep} a queue {sep} esc")
+        } else {
+            format!("j/k {sep} {enter} {sep} esc")
+        };
+    }
     if width >= 108 {
         format!(
             "j/k {sep} {enter} play {sep} space {sep} Q queue {sep} S theme {sep} / search {sep} : cmd {sep} ctrl-o/i hist {sep} ? keys"
@@ -3803,7 +3843,11 @@ mod tests {
     fn search_results_render_grouped_sections_at_both_sizes() {
         let mut app = App::new();
         app.search.query = "mota".to_owned();
+        app.search.loading = true;
+        app.view = crate::app::View::Search;
         app.apply(Ok(lekima_ipc::Reply::Search {
+            query: "mota".to_owned(),
+            kind: lekima_domain::SearchKind::All,
             results: search_results(),
         }));
 
