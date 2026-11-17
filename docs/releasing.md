@@ -121,9 +121,8 @@ pre-release spike, removed before the merge.
 
 ### App crates on crates.io
 
-Every published crate shares the workspace version, so `lekima 0.9.0` and
-`lekima-platform 0.9.0` are part of the same release even when a crate did not
-change. Publishing needs a token scoped to `lekima*` with `publish-new`,
+Every published crate shares the workspace version, so one release publishes
+the whole workspace at one number even when a crate did not change. Publishing needs a token scoped to `lekima*` with `publish-new`,
 `publish-update` and `yank` (`cargo login --registry crates-io`). Publish in
 dependency order:
 
