@@ -40,9 +40,9 @@ implemented. Evidence lives in the workspace tests:
 | TUI-12 | done | `keymap.rs` feeds the help; `help_fits_an_eighty_by_twenty_four_terminal` |
 | TUI-13 | done | cursor editing and history; `prompt_editing_supports_midline_and_word_delete`, `prompt_history_recalls_a_previous_search` |
 | TUI-14 | done | stacked lyrics below 80 columns; `lyrics_stack_on_mid_widths_and_split_on_wide_ones` |
-| TUI-15 | done | `empty_states_are_actionable` |
+| TUI-15 | done | compact wordmark + key hints; `empty_state_renders_the_brand_and_a_hint`, `tiny_empty_state_falls_back_to_one_hint_line` |
 | TUI-16 | done | `playlist_numbering_survives_three_digits` |
-| TUI-17 | done | one-line chip; existing toast tests |
+| TUI-17 | done | double-bordered console alert; `notices_render_as_toasts_not_in_the_command_bar`, `long_error_toasts_wrap_and_truncate_without_panicking` |
 | TUI-18 | done | indices and durations use `muted`; `dim` is chrome only |
 | TUI-19 | done | shuffle uses `accent_alt` |
 | TUI-20 | done | `light` palette, `LEKIMA_THEME`, `dark`/`auto`; `environment_and_light_theme_resolve` |

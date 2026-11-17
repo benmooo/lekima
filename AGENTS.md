@@ -28,8 +28,8 @@ Guidance for coding agents working in this repository.
 
 ## Releasing
 
-This machine mirrors crates.io through rsproxy. Every registry write must name the
-real registry:
+This machine mirrors crates.io through rsproxy (`rsproxy.cn`). Every registry
+write must name the real registry:
 
 ```bash
 cargo publish --dry-run --registry crates-io
@@ -74,7 +74,7 @@ LEKIMA_CONFIG_DIR=$(mktemp -d) cargo run -p lekima -- status --json
 
 ## Changing `ncmapi`
 
-`ncmapi` is a published dependency (currently `1.8`). When a feature needs a new
+`ncmapi` is a published dependency (currently `1.9`). When a feature needs a new
 endpoint, change the crate in `../ncmapi-rs`, keep the API additive, run its
 deterministic suite (`cargo test`, `cargo publish --dry-run`), publish a minor
 version, then bump the pin here. Do not reintroduce a path patch unless you are

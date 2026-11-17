@@ -1,13 +1,18 @@
 # Releasing
 
-This machine uses the **rsproxy crates.io mirror** (`~/.cargo/config.toml`
-replaces `crates-io` with the sparse index). Two consequences:
+This machine uses the **rsproxy.cn crates.io mirror** (`~/.cargo/config.toml`
+replaces `crates-io` with the sparse index). Every registry write must name the
+real registry: `cargo publish`, `cargo yank`, `cargo owner` and `cargo login` all
+take `--registry crates-io`. Without it they operate on (or look for credentials
+for) the mirror, which is read-only. Newly published versions can also lag
+briefly in the mirror index; see §3.
 
-1. **Write commands must name the real registry**: `cargo publish`, `cargo yank`,
-   `cargo owner`, `cargo login` all take `--registry crates-io`. Without it they
-   operate on (or look for credentials for) the mirror, which is read-only.
-2. **Newly published versions may lag briefly** in the mirror index. Reads can
-   fail for a short window even though crates.io has the crate. See §5.
+There are two release shapes:
+
+| Shape | Artifact | Pipeline |
+| --- | --- | --- |
+| **App release** (`lekima`) | GitHub binaries + Homebrew tap | tag → Actions → tap formula |
+| **Library release** (`ncmapi`) | crates.io package | publish → tag → dependent pin |
 
 ## 0. One-time auth
 
@@ -15,57 +20,124 @@ replaces `crates-io` with the sparse index). Two consequences:
 $ cargo login --registry crates-io   # paste a token from crates.io/settings/tokens
 ```
 
-Token hygiene: scope tokens to the crates you publish (`publish-new`,
-`publish-update`, crate-name pattern), set an expiry, and revoke unused ones.
-`cargo login` writes them to `~/.cargo/credentials.toml`.
+Token hygiene: scope tokens to the crates you publish, set an expiry and revoke
+unused ones. The current `ncmapi` token is restricted to the `ncmapi` pattern;
+publishing the app workspace crates needs a second token scoped to `lekima*`.
+`cargo login` writes tokens to `~/.cargo/credentials.toml`.
 
-## 1. Preflight
+## 1. App release — `lekima`
+
+### 1.1 Preflight
 
 ```console
 $ cargo fmt --all --check
 $ cargo clippy --workspace --all-targets -- -D warnings
 $ cargo test --workspace
-$ cargo publish --dry-run --registry crates-io
 ```
 
-`--dry-run` packages and verifies the crate without uploading. Fix anything it
-reports before tagging.
-
-## 2. Version and changelog
-
-- Bump `version` in `Cargo.toml` (SemVer; additive endpoints are minor).
-- Add a `CHANGELOG.md` entry.
-- Update `README.md` examples if the public API changed.
-
-## 3. Tag, then publish
+Also render the TUI examples for the changed surfaces:
 
 ```console
-$ git commit -am "release: ncmapi 1.2.0"
-$ git tag -a v1.2.0 -m "ncmapi 1.2.0"
+$ cargo run -p lekima-tui --example preview -- --width 120 --height 30
+```
+
+### 1.2 Version and changelog
+
+- Bump `version` in the workspace `Cargo.toml` and every internal
+  `lekima-*` dependency. `lekima-platform` has its own version line; bump it
+  only when that crate changes.
+- Add a `CHANGELOG.md` entry with the date.
+- Update the `## Status` paragraph in `README.md` and the scope table in
+  `docs/product-design.md`.
+
+### 1.3 Tag and build
+
+```console
+$ git add -A
+$ git commit -m "release: lekima 0.8.0"
+$ git tag -a v0.8.0 -m "lekima 0.8.0"
 $ git push origin main
-$ git push origin v1.2.0
+$ git push origin v0.8.0
+$ gh run list --branch v0.8.0 --limit 1
+$ gh run watch <run-id> --exit-status
+```
+
+The workflow builds macOS arm64/x86_64 and Linux arm64/x86_64 tarballs plus
+`.sha256` files, then creates the GitHub release.
+
+### 1.4 Homebrew tap
+
+The tap lives at `benmooo/homebrew-tap`; Homebrew keeps it under
+`$(brew --repository benmooo/tap)`.
+
+1. Download the published checksums:
+   ```console
+   $ gh release download v0.8.0 --pattern '*.sha256' --dir /tmp/lekima-shas
+   $ for f in /tmp/lekima-shas/*.sha256; do cat "$f"; done
+   ```
+2. Update `Formula/lekima.rb`: four `url` lines and four `sha256` values.
+3. Commit and push:
+   ```console
+   $ git -C "$(brew --repository benmooo/tap)" add Formula/lekima.rb
+   $ git -C "$(brew --repository benmooo/tap)" commit -m "lekima 0.8.0"
+   $ git -C "$(brew --repository benmooo/tap)" push origin main
+   ```
+4. Upgrade and verify:
+   ```console
+   $ brew upgrade lekima
+   $ lekima --version
+   $ lekima daemon stop && lekima daemon start
+   ```
+
+Restarting the daemon makes the running player use the new binary. A running
+TUI keeps its old process until relaunched; say so in the release notes.
+
+## 2. Library release — `ncmapi`
+
+`ncmapi` is a published dependency. When `lekima` needs a new provider
+endpoint, change the crate in `../ncmapi-rs`, keep the API additive, and release
+a minor:
+
+```console
+$ cd ../ncmapi-rs
+$ cargo fmt --all --check
+$ cargo test
+$ cargo publish --dry-run --registry crates-io
+$ git tag -a v1.9.0 -m "ncmapi 1.9.0"
+$ git push origin main v1.9.0
 $ cargo publish --registry crates-io
 ```
 
-Cargo waits until the version is visible in the index; the crate is live when
-it prints `Published <crate> v<version> at registry crates-io`.
-
-Create the GitHub release from the tag (`gh release create v1.2.0 --notes …`).
-
-## 4. Yanking
-
-Only for broken releases; users with a lockfile keep working.
+Then bump the pin in `lekima` (`ncmapi = "1.9"`), run
+`cargo update -p ncmapi`, and verify the lockfile source:
 
 ```console
-$ cargo yank --version 1.2.0 --registry crates-io
-$ cargo yank --version 1.2.0 --undo --registry crates-io   # unyank
+$ grep -A2 'name = "ncmapi"' Cargo.lock
 ```
 
-## 5. Mirror lag (this machine only)
+Never commit a `[patch.crates-io]` path entry. The only exception is an explicit
+pre-release spike, removed before the merge.
 
-After publishing, the rsproxy index can take a short while to list the new
-version. Symptom: `cargo check` says *“candidate versions found which didn't
-match”* and names the older version.
+### App crates on crates.io
+
+The app workspace was last published to crates.io at **0.7.0**. Publishing
+0.7.1+ app crates is currently pending a token scoped to `lekima*`; the Homebrew
+tap and GitHub release are the supported install path in the meantime. To
+resume, publish in dependency order with `--registry crates-io`:
+
+```
+lekima-domain → lekima-config → lekima-ipc → lekima-core → lekima-ncm →
+lekima-audio → lekima-tui → lekima
+```
+
+(`lekima-platform` is versioned separately and published only when it changes.)
+Verify with `cargo publish --dry-run -p <crate> --registry crates-io` first.
+
+## 3. Mirror lag
+
+After publishing, the rsproxy index can lag a few minutes behind crates.io.
+Symptom: `cargo check` says *“candidate versions found which didn't match”* and
+names the older version.
 
 Options:
 
@@ -96,25 +168,23 @@ Options:
    Check any mirror with
    `curl -s <index>/<first2>/<next2>/<crate> | tail -1`.
 
-Do not commit a `[patch.crates-io]` path entry to work around lag: it breaks
-`cargo install` for everyone else.
+## 4. Yanking
 
-## 6. Dependent crates
-
-After publishing, update dependents to the new registry version and confirm the
-lockfile source:
+Only for broken releases; users with a lockfile keep working.
 
 ```console
-$ cargo update -p <crate> --precise <version>
-$ grep -A2 'name = "<crate>"' Cargo.lock   # source = registry+https://github.com/rust-lang/crates.io-index
+$ cargo yank --version 1.9.0 --registry crates-io
+$ cargo yank --version 1.9.0 --undo --registry crates-io   # unyank
 ```
 
-## 7. Checklist
+## 5. Checklist
 
-- [ ] `fmt`, `clippy`, `test`, `publish --dry-run --registry crates-io`
-- [ ] version + changelog + README
+- [ ] `fmt`, `clippy`, `test`, preview renders
+- [ ] version + changelog + README status + product scope
 - [ ] commit, tag, push `main` and the tag
-- [ ] `cargo publish --registry crates-io`
-- [ ] GitHub release
-- [ ] dependent updated to the registry version (no path patch)
-- [ ] mirror has caught up (or the lag workaround is documented in the PR)
+- [ ] GitHub Actions release is green and all four tarballs exist
+- [ ] tap formula URLs and four checksums updated
+- [ ] `brew upgrade lekima` reports the new version
+- [ ] daemon restarted on the new binary; TUI relaunch noted
+- [ ] dependent crates pinned to the published library version (no path patch)
+- [ ] crates.io app-crate publication handled or explicitly deferred

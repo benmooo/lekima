@@ -3,6 +3,30 @@
 All notable changes to lekima are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## 0.8.0 — 2026-11-17
+
+### Added
+
+- The comments pane is now a console feed: a header with the total and
+  `↓ MORE`, `HOT`/`ALL` sections with counts and notes, author-led entries with
+  compact likes and UTC dates, width-wrapped bodies, hanging `↳` replies and
+  dim `[deleted]` markers for removed content.
+- The empty library shows a compact two-tone `LEKIMA` wordmark with actionable
+  key hints, collapsing to one line on small panes and using a text wordmark
+  in ASCII glyph mode.
+- Notices and errors are console alerts: severity-coloured double borders and
+  titles, readable body text, wrapped or ellipsized messages, and
+  lyrics-aware placement.
+
+## 0.7.1 — 2026-11-16
+
+### Fixed
+
+- Track comments no longer fail with `provider protocol error: JSON
+  serialization or deserialization failed` when the provider returns `null`
+  for deleted replies or accounts. Requires `ncmapi 1.8.1`, which tolerates
+  null comment fields.
+
 ## 0.7.0 — 2026-11-16
 
 ### Added
