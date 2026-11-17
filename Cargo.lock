@@ -1978,9 +1978,9 @@ checksum = "743fb55ba31b18fb1ecef6bdc9aa2743314978ac084044301a7eee33fb99a20d"
 
 [[package]]
 name = "ncmapi"
-version = "1.8.1"
+version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4775089f5f30ae09aed91ab873bb5af9b5f22d0caca1d3be2e1bc80ca42c26b2"
+checksum = "c740e097842c31a48d97d0b274d0e46eb589387852e2690d68c9c433a7c38e2a"
 dependencies = [
  "aes",
  "async-trait",
@@ -3775,7 +3775,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
