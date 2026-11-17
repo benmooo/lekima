@@ -66,6 +66,21 @@ $ gh run watch <run-id> --exit-status
 The workflow builds macOS arm64/x86_64 and Linux arm64/x86_64 tarballs plus
 `.sha256` files, then creates the GitHub release.
 
+If a matrix job is cancelled by runner capacity (aarch64 macOS has happened),
+build that target locally from the tag and attach it manually:
+
+```console
+$ cargo build --release --locked -p lekima --target <target>
+$ name="lekima-<version>-<target>" && mkdir -p "dist/$name"
+$ cp "target/<target>/release/lekima" README.md LICENSE CHANGELOG.md "dist/$name/"
+$ tar -C dist -czf "dist/$name.tar.gz" "$name"
+$ shasum -a 256 "dist/$name.tar.gz" > "dist/$name.tar.gz.sha256"
+$ gh release create v<version> dist/* --generate-notes
+```
+
+Use the same checksums in the tap formula. Do not add a `[patch]` or rebuild
+from a dirty tree: `git rev-parse HEAD` must match the release tag.
+
 ### 1.4 Homebrew tap
 
 The tap lives at `benmooo/homebrew-tap`; Homebrew keeps it under
