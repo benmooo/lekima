@@ -37,7 +37,9 @@ fn capabilities_are_machine_readable() {
         .iter()
         .filter_map(|command| command["name"].as_str())
         .collect();
-    for expected in ["play", "search", "queue", "daemon", "tui"] {
+    for expected in [
+        "play", "search", "queue", "daemon", "tui", "artist", "album",
+    ] {
         assert!(
             names.contains(&expected),
             "missing `{expected}` in {names:?}"
@@ -180,7 +182,15 @@ fn mcp_speaks_initialize_and_tools_list() {
         .iter()
         .filter_map(|tool| tool["name"].as_str())
         .collect();
-    for expected in ["player_status", "play", "search", "lyrics"] {
+    for expected in [
+        "player_status",
+        "play",
+        "search",
+        "lyrics",
+        "artist",
+        "artist_albums",
+        "album",
+    ] {
         assert!(names.contains(&expected), "{names:?}");
     }
 }
@@ -197,6 +207,54 @@ fn serve_requires_the_http_flag() {
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("--http"), "{stderr}");
+}
+
+#[test]
+fn catalogue_commands_reject_zero_ids_before_any_network_call() {
+    let dir = hermetic("catalogue-ids");
+    for args in [
+        vec!["album", "show", "0"],
+        vec!["artist", "show", "0"],
+        vec!["artist", "albums", "0"],
+    ] {
+        let output = binary()
+            .env("LEKIMA_CONFIG_DIR", &dir)
+            .args(&args)
+            .arg("--json")
+            .output()
+            .expect("run lekima");
+        assert_eq!(output.status.code(), Some(2), "{args:?}");
+        let json: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("valid json envelope");
+        assert_eq!(json["ok"], false, "{args:?}");
+        assert_eq!(json["error"]["code"], "bad_request", "{args:?}");
+    }
+}
+
+#[test]
+fn search_kinds_are_validated_and_all_is_accepted() {
+    let dir = hermetic("search-kinds");
+
+    // `all` reaches the provider layer, which rejects the blank query.
+    let output = binary()
+        .env("LEKIMA_CONFIG_DIR", &dir)
+        .args(["search", "", "--kind", "all", "--json"])
+        .output()
+        .expect("run lekima");
+    assert_eq!(output.status.code(), Some(2));
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("valid json envelope");
+    assert_eq!(json["error"]["code"], "bad_request");
+
+    // Unknown kinds are a usage error rather than a silent track search.
+    let output = binary()
+        .env("LEKIMA_CONFIG_DIR", &dir)
+        .args(["search", "mota", "--kind", "genre"])
+        .output()
+        .expect("run lekima");
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("invalid value"), "{stderr}");
 }
 
 #[test]

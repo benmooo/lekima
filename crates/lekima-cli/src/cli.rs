@@ -180,6 +180,18 @@ pub enum TopCommand {
         action: PlaylistCommand,
     },
 
+    /// Show an artist and their albums.
+    Artist {
+        #[command(subcommand)]
+        action: ArtistCommand,
+    },
+
+    /// Show, play or queue an album.
+    Album {
+        #[command(subcommand)]
+        action: AlbumCommand,
+    },
+
     /// Print lyrics for a track (requires ncmapi 1.1).
     Lyrics {
         #[arg(long, value_name = "ID")]
@@ -379,6 +391,46 @@ pub enum PlaylistCommand {
 }
 
 #[derive(Debug, Subcommand)]
+pub enum ArtistCommand {
+    /// Show an artist profile: counts, aliases and biography.
+    Show {
+        #[arg(value_name = "ID")]
+        id: u64,
+    },
+    /// List an artist's albums, newest first.
+    Albums {
+        #[arg(value_name = "ID")]
+        id: u64,
+        #[arg(long, default_value_t = 20)]
+        limit: u32,
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum AlbumCommand {
+    /// Show an album's metadata and track list.
+    Show {
+        #[arg(value_name = "ID")]
+        id: u64,
+    },
+    /// Replace the queue with the album and start playing.
+    Play {
+        #[arg(value_name = "ID")]
+        id: u64,
+    },
+    /// Append the album to the queue.
+    Queue {
+        #[arg(value_name = "ID")]
+        id: u64,
+        /// Insert directly after the current track.
+        #[arg(long)]
+        next: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 pub enum DaemonCommand {
     /// Start the daemon in the background.
     Start,
@@ -420,6 +472,8 @@ impl From<QualityArg> for Quality {
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum Kind {
+    /// Every catalogue kind, merged.
+    All,
     Track,
     Album,
     Artist,
@@ -429,6 +483,7 @@ pub enum Kind {
 impl From<Kind> for lekima_domain::SearchKind {
     fn from(kind: Kind) -> Self {
         match kind {
+            Kind::All => Self::All,
             Kind::Track => Self::Track,
             Kind::Album => Self::Album,
             Kind::Artist => Self::Artist,

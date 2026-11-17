@@ -20,7 +20,7 @@ use axum::{
     routing::{get, post},
 };
 use lekima_config::{HttpToken, Paths};
-use lekima_ipc::{ApiError, Command, ErrorCode, IpcError, MAX_FRAME_BYTES, call};
+use lekima_ipc::{ApiError, Command, ErrorCode, IpcError, MAX_FRAME_BYTES, PlayTarget, call};
 use serde_json::{Value, json};
 
 use crate::output::{self, Failure};
@@ -44,7 +44,7 @@ const CONTENT_SECURITY_POLICY: &str = "default-src 'none'; style-src 'unsafe-inl
      script-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; \
      form-action 'none'; frame-ancestors 'none'";
 /// Command tags accepted by `POST /v1/command`.
-const COMMAND_TYPES: [&str; 34] = [
+const COMMAND_TYPES: [&str; 39] = [
     "status",
     "play",
     "jump",
@@ -79,6 +79,11 @@ const COMMAND_TYPES: [&str; 34] = [
     "playlist_tracks",
     "lyrics",
     "whoami",
+    "artist",
+    "artist_albums",
+    "album",
+    "queue_album",
+    "queue_playlist",
 ];
 
 #[derive(Clone)]
@@ -338,6 +343,18 @@ fn status_for(code: ErrorCode) -> StatusCode {
 
 /// Default-deny allowlist: commands added later stay private until listed.
 fn permitted(command: &Command) -> bool {
+    // Album playback resolves tracks and rewrites the queue, so it stays local
+    // until a deployment opts in explicitly (ADR-004).
+    if matches!(
+        command,
+        Command::QueueAlbum { .. }
+            | Command::QueuePlaylist { .. }
+            | Command::Play {
+                target: PlayTarget::Album { .. }
+            }
+    ) {
+        return false;
+    }
     matches!(
         command,
         Command::Status
@@ -374,6 +391,9 @@ fn permitted(command: &Command) -> bool {
             | Command::PlaylistTracks { .. }
             | Command::Lyrics { .. }
             | Command::Whoami
+            | Command::Artist { .. }
+            | Command::ArtistAlbums { .. }
+            | Command::Album { .. }
     )
 }
 
@@ -541,6 +561,30 @@ mod tests {
             cookie: "MUSIC_U=secret".to_owned()
         }));
         assert!(!permitted(&Command::Logout));
+    }
+
+    #[test]
+    fn catalogue_reads_are_permitted_but_album_playback_is_local() {
+        assert!(permitted(&Command::Artist {
+            id: lekima_domain::ArtistId(6452)
+        }));
+        assert!(permitted(&Command::ArtistAlbums {
+            id: lekima_domain::ArtistId(6452),
+            limit: 20,
+            offset: 0
+        }));
+        assert!(permitted(&Command::Album {
+            id: lekima_domain::AlbumId(9)
+        }));
+        assert!(!permitted(&Command::QueueAlbum {
+            id: lekima_domain::AlbumId(9),
+            next: false
+        }));
+        assert!(!permitted(&Command::Play {
+            target: lekima_ipc::PlayTarget::Album {
+                id: lekima_domain::AlbumId(9)
+            }
+        }));
     }
 
     #[test]

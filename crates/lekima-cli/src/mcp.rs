@@ -120,9 +120,20 @@ fn build_command(name: &str, args: &Value) -> Result<Command, String> {
         "player_status" => Command::Status,
         "search" => Command::Search {
             query: string_arg(args, "query")?,
-            kind: lekima_domain::SearchKind::Track,
+            kind: search_kind(args.get("kind").and_then(Value::as_str).unwrap_or("track"))?,
             limit: number_arg(args, "limit").unwrap_or(25.0).clamp(1.0, 100.0) as u32,
-            offset: 0,
+            offset: number_arg(args, "offset").unwrap_or(0.0).clamp(0.0, 1e9) as u32,
+        },
+        "artist" => Command::Artist {
+            id: lekima_domain::ArtistId(u64_arg(args, "id")?),
+        },
+        "artist_albums" => Command::ArtistAlbums {
+            id: lekima_domain::ArtistId(u64_arg(args, "id")?),
+            limit: number_arg(args, "limit").unwrap_or(20.0).clamp(1.0, 100.0) as u32,
+            offset: number_arg(args, "offset").unwrap_or(0.0).clamp(0.0, 1e9) as u32,
+        },
+        "album" => Command::Album {
+            id: lekima_domain::AlbumId(u64_arg(args, "id")?),
         },
         "play" => Command::Play {
             target: play_target(args)?,
@@ -214,7 +225,27 @@ fn play_target(args: &Value) -> Result<PlayTarget, String> {
     if let Some(id) = args.get("playlist").and_then(Value::as_u64) {
         return Ok(PlayTarget::Playlist { id: id.into() });
     }
-    Err("pass `query`, `ids` or `playlist`".to_owned())
+    if let Some(id) = args.get("album").and_then(Value::as_u64) {
+        return Ok(PlayTarget::Album { id: id.into() });
+    }
+    Err("pass `query`, `ids`, `playlist` or `album`".to_owned())
+}
+
+fn search_kind(value: &str) -> Result<lekima_domain::SearchKind, String> {
+    Ok(match value {
+        "all" => lekima_domain::SearchKind::All,
+        "track" | "tracks" => lekima_domain::SearchKind::Track,
+        "album" | "albums" => lekima_domain::SearchKind::Album,
+        "artist" | "artists" => lekima_domain::SearchKind::Artist,
+        "playlist" | "playlists" => lekima_domain::SearchKind::Playlist,
+        other => return Err(format!("unknown search kind `{other}`")),
+    })
+}
+
+fn u64_arg(args: &Value, name: &str) -> Result<u64, String> {
+    args.get(name)
+        .and_then(Value::as_u64)
+        .ok_or_else(|| format!("`{name}` is required and must be an integer"))
 }
 
 fn id_list(args: &Value) -> Result<Vec<TrackId>, String> {
@@ -266,7 +297,26 @@ fn summary(reply: &Reply) -> String {
             Some(first) => format!("{} tracks · first: {}", tracks.len(), first.name),
             None => "no tracks".to_owned(),
         },
-        Reply::Search { results } => format!("{} results", results.tracks.len()),
+        Reply::Search { results } => format!(
+            "{} results · {} tracks, {} albums, {} artists, {} playlists",
+            results.total,
+            results.tracks.len(),
+            results.albums.len(),
+            results.artists.len(),
+            results.playlists.len()
+        ),
+        Reply::Artist { artist } => format!(
+            "{} · {} albums, {} tracks",
+            artist.name, artist.album_count, artist.track_count
+        ),
+        Reply::ArtistAlbums { page } => format!(
+            "{} albums{}",
+            page.albums.len(),
+            if page.has_more { " (more)" } else { "" }
+        ),
+        Reply::Album { detail } => {
+            format!("{} · {} tracks", detail.album.name, detail.tracks.len())
+        }
         Reply::Playlists { playlists } => format!("{} playlists", playlists.len()),
         Reply::Toplists { toplists } => format!("{} charts", toplists.len()),
         Reply::Queue { tracks, index } => {
@@ -331,23 +381,66 @@ fn tools() -> Vec<Value> {
         ),
         tool(
             "search",
-            "Search NetEase Cloud Music tracks.",
+            "Search NetEase Cloud Music tracks, albums, artists or playlists.",
             json!({
                 "type": "object",
-                "properties": { "query": { "type": "string" }, "limit": { "type": "integer", "minimum": 1, "maximum": 100 } },
+                "properties": {
+                    "query": { "type": "string" },
+                    "kind": {
+                        "type": "string",
+                        "enum": ["all", "track", "album", "artist", "playlist"]
+                    },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 100 },
+                    "offset": { "type": "integer", "minimum": 0 }
+                },
                 "required": ["query"]
             }),
             true,
         ),
         tool(
+            "artist",
+            "A full artist profile: counts, aliases and biography.",
+            json!({
+                "type": "object",
+                "properties": { "id": { "type": "integer", "minimum": 1 } },
+                "required": ["id"]
+            }),
+            true,
+        ),
+        tool(
+            "artist_albums",
+            "One page of an artist's albums, newest first.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "id": { "type": "integer", "minimum": 1 },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 100 },
+                    "offset": { "type": "integer", "minimum": 0 }
+                },
+                "required": ["id"]
+            }),
+            true,
+        ),
+        tool(
+            "album",
+            "An album's metadata and ordered track list.",
+            json!({
+                "type": "object",
+                "properties": { "id": { "type": "integer", "minimum": 1 } },
+                "required": ["id"]
+            }),
+            true,
+        ),
+        tool(
             "play",
-            "Play a search query, track ids or a playlist.",
+            "Play a search query, track ids, a playlist or an album.",
             json!({
                 "type": "object",
                 "properties": {
                     "query": { "type": "string" },
                     "ids": { "type": "array", "items": { "type": "integer" } },
-                    "playlist": { "type": "integer" }
+                    "playlist": { "type": "integer" },
+                    "album": { "type": "integer" }
                 }
             }),
             false,
@@ -484,6 +577,9 @@ mod tests {
         for expected in [
             "player_status",
             "search",
+            "artist",
+            "artist_albums",
+            "album",
             "play",
             "pause",
             "resume",
@@ -511,6 +607,37 @@ mod tests {
         assert!(matches!(command, Command::Play { .. }));
         let command = build_command("play", &serde_json::json!({"ids": [1, 2]})).unwrap();
         assert!(matches!(command, Command::Play { .. }));
+        let command = build_command("play", &serde_json::json!({"album": 9})).unwrap();
+        assert!(matches!(
+            command,
+            Command::Play {
+                target: lekima_ipc::PlayTarget::Album { .. }
+            }
+        ));
         assert!(build_command("play", &serde_json::json!({})).is_err());
+    }
+
+    #[test]
+    fn catalogue_tools_map_to_read_only_commands() {
+        assert!(matches!(
+            build_command("artist", &serde_json::json!({"id": 6452})).unwrap(),
+            Command::Artist { .. }
+        ));
+        assert!(matches!(
+            build_command("artist_albums", &serde_json::json!({"id": 6452})).unwrap(),
+            Command::ArtistAlbums { .. }
+        ));
+        assert!(matches!(
+            build_command("album", &serde_json::json!({"id": 9})).unwrap(),
+            Command::Album { .. }
+        ));
+        assert!(build_command("album", &serde_json::json!({})).is_err());
+        assert!(
+            build_command(
+                "search",
+                &serde_json::json!({"query": "a", "kind": "genre"})
+            )
+            .is_err()
+        );
     }
 }

@@ -23,6 +23,7 @@ lekima-platform.workspace = true
 lekima-tui.workspace = true
 
 anyhow.workspace = true
+unicode-width.workspace = true
 axum.workspace = true
 qrcode.workspace = true
 clap.workspace = true

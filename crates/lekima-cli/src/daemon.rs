@@ -280,7 +280,15 @@ impl Daemon {
                 id: *id,
                 liked: *liked,
             }),
-            Reply::Ack if matches!(command, Command::Enqueue { .. } | Command::ClearQueue) => {
+            Reply::Ack
+                if matches!(
+                    command,
+                    Command::Enqueue { .. }
+                        | Command::ClearQueue
+                        | Command::QueueAlbum { .. }
+                        | Command::QueuePlaylist { .. }
+                ) =>
+            {
                 let (tracks, index) = self.player.queue().await;
                 self.hub.publish(Event::Queue { tracks, index });
             }
@@ -416,6 +424,30 @@ impl Daemon {
                     .await?;
                 Ok(Reply::Search { results })
             }
+            Command::QueueAlbum { id, next } => {
+                self.player.queue_album(id, next).await?;
+                Ok(Reply::Ack)
+            }
+            Command::QueuePlaylist { id, next } => {
+                self.player.queue_playlist(id, next).await?;
+                Ok(Reply::Ack)
+            }
+            Command::Artist { id } => {
+                let artist = self.player.music().artist(id).await?;
+                Ok(Reply::Artist { artist })
+            }
+            Command::ArtistAlbums { id, limit, offset } => {
+                let page = self
+                    .player
+                    .music()
+                    .artist_albums(id, limit.max(1), offset)
+                    .await?;
+                Ok(Reply::ArtistAlbums { page })
+            }
+            Command::Album { id } => {
+                let detail = self.player.music().album(id).await?;
+                Ok(Reply::Album { detail })
+            }
             Command::Playlists => {
                 let playlists = self.player.music().playlists(None).await?;
                 Ok(Reply::Playlists { playlists })
@@ -545,6 +577,7 @@ impl Daemon {
     async fn play(&self, target: PlayTarget) -> std::result::Result<(), ApiError> {
         let kind = match &target {
             PlayTarget::Playlist { .. } => QueueKind::Playlist,
+            PlayTarget::Album { .. } => QueueKind::Album,
             _ => QueueKind::Manual,
         };
         let tracks = match target {
@@ -564,6 +597,16 @@ impl Daemon {
             }
             PlayTarget::Tracks { ids } => self.player.resolve_tracks(&ids).await?,
             PlayTarget::Playlist { id } => self.player.music().playlist_tracks(id).await?,
+            PlayTarget::Album { id } => {
+                let detail = self.player.music().album(id).await?;
+                if detail.tracks.is_empty() {
+                    return Err(ApiError::new(
+                        lekima_ipc::ErrorCode::NotFound,
+                        format!("album {id} has no tracks"),
+                    ));
+                }
+                detail.tracks
+            }
         };
         self.player
             .play(PlayRequest::Tracks { tracks, kind })

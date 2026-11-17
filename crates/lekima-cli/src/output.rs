@@ -8,7 +8,8 @@
 //! ```
 
 use lekima_domain::{
-    PlaybackState, Playlist, SearchResults, Track, sanitize_line, sanitize_multiline,
+    Album, AlbumDetail, ArtistAlbums, ArtistDetail, PlaybackState, Playlist, SearchResults, Track,
+    sanitize_line, sanitize_multiline,
 };
 use lekima_ipc::{ApiError, ErrorCode, IpcError, Reply};
 use serde::Serialize;
@@ -108,6 +109,9 @@ pub fn print_reply(reply: &Reply, json: bool) {
         Reply::Status { state } => print_status(state),
         Reply::Tracks { tracks } => print_tracks(tracks),
         Reply::Search { results } => print_search(results),
+        Reply::Artist { artist } => print_artist(artist),
+        Reply::ArtistAlbums { page } => print_artist_albums(page),
+        Reply::Album { detail } => print_album(detail),
         Reply::Playlists { playlists } => print_playlists(playlists),
         Reply::Queue { tracks, index } => print_queue(tracks, *index),
         Reply::User { user } => match user {
@@ -271,7 +275,109 @@ fn print_tracks(tracks: &[Track]) {
 }
 
 fn print_search(results: &SearchResults) {
-    print_tracks(&results.tracks);
+    if results.is_empty() {
+        crate::say!("no matches");
+        return;
+    }
+    crate::say!("// SEARCH · {} RESULTS", results.total);
+    if !results.tracks.is_empty() {
+        crate::say!("// TRACKS · {}", results.tracks.len());
+        print_tracks(&results.tracks);
+    }
+    if !results.albums.is_empty() {
+        crate::say!("// ALBUMS · {}", results.totals.albums);
+        print_albums(&results.albums);
+    }
+    if !results.artists.is_empty() {
+        crate::say!("// ARTISTS · {}", results.artists.len());
+        for artist in &results.artists {
+            crate::say!(
+                "{:>10}  {}",
+                artist.id,
+                truncate(&sanitize_line(&artist.name), 40)
+            );
+        }
+    }
+    if !results.playlists.is_empty() {
+        crate::say!("// PLAYLISTS · {}", results.playlists.len());
+        print_playlists(&results.playlists);
+    }
+}
+
+fn print_albums(albums: &[Album]) {
+    for album in albums {
+        crate::say!(
+            "{:>10}  {:<40} {:<22} {:>4}  {}",
+            album.id,
+            truncate(&sanitize_line(&album.name), 40),
+            truncate(&sanitize_line(album.artist_name()), 22),
+            album
+                .year
+                .map_or_else(|| "—".to_owned(), |year| year.to_string()),
+            album.track_count.map_or_else(
+                || "—".to_owned(),
+                |count| format!("{count} {}", plural(count as usize)),
+            )
+        );
+    }
+    if albums.is_empty() {
+        crate::say!("no albums");
+    }
+}
+
+fn print_artist(artist: &ArtistDetail) {
+    crate::say!(
+        "// ARTIST · {} · {}",
+        artist.id,
+        sanitize_line(&artist.name)
+    );
+    crate::say!(
+        "   {} albums · {} tracks",
+        artist.album_count,
+        artist.track_count
+    );
+    if !artist.aliases.is_empty() {
+        crate::say!("   {}", sanitize_line(&artist.aliases.join(" · ")));
+    }
+    if !artist.description.is_empty() {
+        // Biographies run to paragraphs; two wrapped lines are enough here.
+        for line in wrap_text(&sanitize_line(&artist.description), 96)
+            .into_iter()
+            .take(2)
+        {
+            crate::say!("   {line}");
+        }
+    }
+}
+
+fn print_artist_albums(page: &ArtistAlbums) {
+    print_albums(&page.albums);
+    if page.has_more {
+        crate::say!("more available · use --offset");
+    }
+}
+
+fn print_album(detail: &AlbumDetail) {
+    let album = &detail.album;
+    crate::say!("// ALBUM · {} · {}", album.id, sanitize_line(&album.name));
+    let artist = sanitize_line(album.artist_name());
+    let artist = if artist.is_empty() { "—" } else { &artist };
+    let year = album
+        .year
+        .map_or_else(|| "—".to_owned(), |year| year.to_string());
+    let tracks = album
+        .track_count
+        .map_or(detail.tracks.len(), |count| count as usize);
+    crate::say!("   {artist} · {year} · {tracks} {}", plural(tracks));
+    if !album.description.is_empty() {
+        for line in wrap_text(&sanitize_line(&album.description), 96)
+            .into_iter()
+            .take(2)
+        {
+            crate::say!("   {line}");
+        }
+    }
+    print_tracks(&detail.tracks);
 }
 
 fn print_playlists(playlists: &[Playlist]) {
@@ -305,6 +411,57 @@ fn format_clock(ms: u64) -> String {
     format!("{:02}:{:02}", seconds / 60, seconds % 60)
 }
 
+/// Greedy wrap so long provider prose stays readable in a terminal.
+///
+/// Widths are terminal columns, not characters, and long unspaced runs (CJK
+/// prose) break mid-run instead of overflowing the line.
+fn wrap_text(value: &str, width: usize) -> Vec<String> {
+    use unicode_width::UnicodeWidthChar;
+
+    let width = width.max(8);
+    let mut lines = Vec::new();
+    let mut line = String::new();
+    let mut line_width = 0;
+    let mut last_space: Option<usize> = None;
+
+    for character in value.chars() {
+        let character_width = character.width().unwrap_or(0);
+        if line_width + character_width > width {
+            // Only rewind to a space when it leaves a reasonably full line;
+            // otherwise a lone word before a long CJK run would sit alone.
+            let space_break = last_space.filter(|index| {
+                let prefix: usize = line[..*index].chars().map(|c| c.width().unwrap_or(0)).sum();
+                prefix + 1 >= width / 2
+            });
+            if let Some(index) = space_break {
+                let rest = line[index..].trim_start().to_owned();
+                line.truncate(index);
+                lines.push(line.trim_end().to_owned());
+                line = rest;
+                line_width = line.chars().map(|c| c.width().unwrap_or(0)).sum();
+            } else {
+                lines.push(std::mem::take(&mut line));
+                line_width = 0;
+            }
+            last_space = line.rfind(' ');
+        }
+        if character == ' ' {
+            last_space = Some(line.len());
+        }
+        line.push(character);
+        line_width += character_width;
+    }
+    if !line.trim().is_empty() {
+        lines.push(line.trim_end().to_owned());
+    }
+    lines
+}
+
+/// `track`/`tracks` so counts read naturally.
+fn plural(count: usize) -> &'static str {
+    if count == 1 { "track" } else { "tracks" }
+}
+
 fn truncate(value: &str, width: usize) -> String {
     if value.chars().count() <= width {
         return value.to_owned();
@@ -312,4 +469,28 @@ fn truncate(value: &str, width: usize) -> String {
     let mut truncated: String = value.chars().take(width.saturating_sub(1)).collect();
     truncated.push('…');
     truncated
+}
+
+#[cfg(test)]
+mod tests {
+    use unicode_width::UnicodeWidthStr;
+
+    use super::wrap_text;
+
+    #[test]
+    fn wraps_ascii_and_cjk_prose_by_display_width() {
+        assert_eq!(
+            wrap_text("alpha beta gamma", 11),
+            vec!["alpha beta", "gamma"]
+        );
+        let lines = wrap_text("周杰伦（Jay Chou）是一位歌手", 10);
+        assert!(
+            lines.iter().all(|line| line.width() <= 10),
+            "{lines:?} must fit 10 columns"
+        );
+        assert_eq!(
+            lines.concat().replace(' ', ""),
+            "周杰伦（JayChou）是一位歌手"
+        );
+    }
 }

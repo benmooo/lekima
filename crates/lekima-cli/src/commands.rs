@@ -17,8 +17,8 @@ use lekima_ncm::{NcmMusicService, NcmOptions};
 use crate::{
     browser_login,
     cli::{
-        CacheCommand, Cli, DaemonCommand, FmCommand, PlaylistCommand, QueueCommand, TopCommand,
-        ToplistCommand,
+        AlbumCommand, ArtistCommand, CacheCommand, Cli, DaemonCommand, FmCommand, PlaylistCommand,
+        QueueCommand, TopCommand, ToplistCommand,
     },
     daemon,
     output::{self, Failure},
@@ -295,6 +295,66 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
             output::print_reply(&Reply::Search { results }, json);
             Ok(())
         }
+
+        TopCommand::Artist { action } => {
+            let service = service(&paths, &config)?;
+            match action {
+                ArtistCommand::Show { id } => {
+                    let artist = bounded(service.artist(id.into())).await?;
+                    output::print_reply(&Reply::Artist { artist }, json);
+                }
+                ArtistCommand::Albums { id, limit, offset } => {
+                    let page = bounded(service.artist_albums(id.into(), limit, offset)).await?;
+                    output::print_reply(&Reply::ArtistAlbums { page }, json);
+                }
+            }
+            Ok(())
+        }
+
+        TopCommand::Album { action } => match action {
+            AlbumCommand::Show { id } => {
+                let service = service(&paths, &config)?;
+                let detail = bounded(service.album(id.into())).await?;
+                output::print_reply(&Reply::Album { detail }, json);
+                Ok(())
+            }
+            AlbumCommand::Play { id } => {
+                let reply = daemon_call(
+                    &socket,
+                    &paths,
+                    &config,
+                    Command::Play {
+                        target: PlayTarget::Album { id: id.into() },
+                    },
+                )
+                .await?;
+                output::print_reply(&reply, json);
+                Ok(())
+            }
+            AlbumCommand::Queue { id, next } => {
+                daemon_call(
+                    &socket,
+                    &paths,
+                    &config,
+                    Command::QueueAlbum {
+                        id: id.into(),
+                        next,
+                    },
+                )
+                .await?;
+                if json {
+                    output::emit_json(
+                        true,
+                        Some(serde_json::json!({"queued": id, "next": next})),
+                        None,
+                    );
+                    Ok(())
+                } else {
+                    crate::say!("queued album {id}{}", if next { " next" } else { "" });
+                    Ok(())
+                }
+            }
+        },
 
         TopCommand::Playlist { action } => {
             let service = service(&paths, &config)?;
