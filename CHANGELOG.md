@@ -24,6 +24,8 @@
 
 - The provider pin moves to `ncmapi 1.9`, which exposes artist and album
   endpoints and album search results.
+- Every published crate now shares the workspace version: the unchanged
+  `lekima-platform` publishes at 0.9.0 instead of keeping its own 0.3.0 line.
 
 # Changelog
 

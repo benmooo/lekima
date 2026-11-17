@@ -43,9 +43,10 @@ $ cargo run -p lekima-tui --example preview -- --width 120 --height 30
 
 ### 1.2 Version and changelog
 
-- Bump `version` in the workspace `Cargo.toml` and every internal
-  `lekima-*` dependency. `lekima-platform` has its own version line; bump it
-  only when that crate changes.
+- Bump `version` in the workspace `Cargo.toml`, every internal `lekima-*`
+  dependency, and `crates/lekima-platform/Cargo.toml`. Every published crate
+  shares one version line, so an unchanged crate is re-published at the same
+  number instead of keeping a second line.
 - Add a `CHANGELOG.md` entry with the date.
 - Update the `## Status` paragraph in `README.md` and the scope table in
   `docs/product-design.md`.
@@ -120,17 +121,17 @@ pre-release spike, removed before the merge.
 
 ### App crates on crates.io
 
-The app workspace was last published to crates.io at **0.7.0**. Publishing
-0.7.1+ app crates is currently pending a token scoped to `lekima*`; the Homebrew
-tap and GitHub release are the supported install path in the meantime. To
-resume, publish in dependency order with `--registry crates-io`:
+Every published crate shares the workspace version, so `lekima 0.9.0` and
+`lekima-platform 0.9.0` are part of the same release even when a crate did not
+change. Publishing needs a token scoped to `lekima*` with `publish-new`,
+`publish-update` and `yank` (`cargo login --registry crates-io`). Publish in
+dependency order:
 
 ```
-lekima-domain → lekima-config → lekima-ipc → lekima-core → lekima-ncm →
-lekima-audio → lekima-tui → lekima
+lekima-domain → lekima-platform → lekima-config → lekima-ipc → lekima-core →
+lekima-ncm → lekima-audio → lekima-tui → lekima
 ```
 
-(`lekima-platform` is versioned separately and published only when it changes.)
 Verify with `cargo publish --dry-run -p <crate> --registry crates-io` first.
 
 ## 3. Mirror lag

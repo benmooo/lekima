@@ -1741,7 +1741,7 @@ dependencies = [
 
 [[package]]
 name = "lekima-platform"
-version = "0.3.0"
+version = "0.9.0"
 dependencies = [
  "block2",
  "mpris-server",

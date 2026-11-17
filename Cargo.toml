@@ -18,7 +18,7 @@ lekima-config = { path = "crates/lekima-config", version = "0.9.0" }
 lekima-ipc = { path = "crates/lekima-ipc", version = "0.9.0" }
 lekima-ncm = { path = "crates/lekima-ncm", version = "0.9.0" }
 lekima-audio = { path = "crates/lekima-audio", version = "0.9.0" }
-lekima-platform = { path = "crates/lekima-platform", version = "0.3.0" }
+lekima-platform = { path = "crates/lekima-platform", version = "0.9.0" }
 lekima-tui = { path = "crates/lekima-tui", version = "0.9.0" }
 
 # external
