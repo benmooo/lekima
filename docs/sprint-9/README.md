@@ -1,6 +1,6 @@
 # Sprint 9 — Catalogue depth
 
-Status: **Design** · Started 2026-11-17 · Target 0.9.0
+Status: **Shipped in 0.9.0** · Started 2026-11-17
 
 The player can search tracks and play them, but the catalogue is still
 one-dimensional: artists and albums are only strings in track metadata, album

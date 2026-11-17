@@ -18,6 +18,11 @@ Exit codes: `0` ok, `2` usage, `3` unauthorized, `4` not found, `5` backend,
 lekima play "mota" --json
 lekima queue add "teardrop" --next --json
 lekima status --json | jq -r .data.status
+lekima search "jay chou" --kind all --json
+lekima artist show 6452 --json
+lekima artist albums 6452 --limit 20 --json
+lekima album show 242091487 --json
+lekima album queue 242091487 --next --json
 ```
 
 ## Events: `lekima watch`
@@ -43,10 +48,13 @@ you lagged and should fetch `status`/`queue`.
 lekima mcp
 ```
 
-JSON-RPC over stdio. Tools: `player_status`, `search`, `play`, `pause`,
-`resume`, `next`, `previous`, `set_volume`, `queue_list`, `queue_add`,
-`queue_remove`, `queue_move`, `sleep`, `set_quality`, `lyrics`, `comments`,
-`daily`, `fm`.
+JSON-RPC over stdio. Tools: `player_status`, `search`, `artist`,
+`artist_albums`, `album`, `play`, `pause`, `resume`, `next`, `previous`,
+`set_volume`, `queue_list`, `queue_add`, `queue_remove`, `queue_move`, `sleep`,
+`set_quality`, `lyrics`, `comments`, `daily`, `fm`.
+
+`search` accepts `kind` (`all`, `track`, `album`, `artist`, `playlist`) and
+`play` accepts `query`, `ids`, `playlist` or `album`.
 
 ## HTTP control
 

@@ -132,7 +132,7 @@ The comments pane becomes a wrapped feed with likes, dates and replies; notices
 and errors become bordered alert panels; an empty library shows the `LEKIMA`
 wordmark with key hints.
 
-### v0.9 — “catalogue depth” (in design)
+### v0.9 — “catalogue depth” (shipped in 0.9.0)
 
 > Detailed specification: [`sprint-9/`](./sprint-9/).
 

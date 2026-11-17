@@ -62,8 +62,10 @@ $ lekima status --json
 feed with likes, dates and replies; notices and errors become bordered alert
 panels; and an empty library shows the `LEKIMA` wordmark with key hints.
 
-`0.9.0` is in design: catalogue depth (album/artist search, artist and album
-pages, album play/queue). See [`docs/sprint-9/`](docs/sprint-9/).
+`0.9.0` adds catalogue depth: merged search across tracks, albums, artists and
+playlists, artist pages with paginated albums, album pages with their track
+list, and album play/queue from the TUI, CLI, MCP and HTTP. See
+[`docs/sprint-9/`](docs/sprint-9/).
 
 `0.7.0` adds token-guarded HTTP control: `lekima serve --http` exposes status,
 queue and the allowlisted command surface, plus a built-in neon web remote at
@@ -103,7 +105,7 @@ daemon, a vim-driven TUI (responsive HUD, real spectrum, buffered shading,
 lyrics pane, history, UI settings, twelve themes), device selection, gapless
 playback, MPRIS/Now Playing, push events (`lekima watch`), an MCP stdio server
 (`lekima mcp`) and token-guarded HTTP control with a built-in phone remote
-(`lekima serve --http`, see [docs/http.md](docs/http.md)). `ncmapi` 1.8 is
+(`lekima serve --http`, see [docs/http.md](docs/http.md)). `ncmapi` 1.9 is
 published on crates.io.
 
 ```console

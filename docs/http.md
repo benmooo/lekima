@@ -78,8 +78,12 @@ $ curl -s -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" 
 ```
 
 `login`, `logout`, `shutdown`, `hello` and `subscribe` are not exposed. Queue
-and playback commands, search, library reads, likes, sleep and quality changes
-are.
+and playback commands, search, library reads (including the read-only `artist`,
+`artist_albums` and `album`), likes, sleep and quality changes are.
+
+Album playback and queueing (`play` with an `album` target, `queue_album`,
+`queue_playlist`) are local-only by default: they rewrite the queue, so a
+remote server must not trigger them implicitly.
 
 ## Status codes
 

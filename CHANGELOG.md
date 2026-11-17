@@ -1,3 +1,30 @@
+## 0.9.0 — 2026-11-17
+
+### Added
+
+- Catalogue depth: `lekima search --kind all` merges tracks, albums, artists and
+  playlists, and album results are decoded instead of dropped.
+- Artist pages: `lekima artist show <id>` and `lekima artist albums <id>` return
+  counts, aliases, biography and paginated albums.
+- Album pages: `lekima album show <id>` returns metadata plus the ordered track
+  list; `lekima album play <id>` and `lekima album queue <id> [--next]` drive the
+  queue through the daemon.
+- IPC gains `artist`, `artist_albums`, `album`, `queue_album`, `queue_playlist`
+  and `PlayTarget::Album`. The additions are backward compatible; the protocol
+  version stays 2.
+- MCP gains the read-only `artist`, `artist_albums` and `album` tools, and
+  `play` accepts an `album` target.
+- The TUI gains search filters (`Tab`/`Ctrl-1..5`), grouped result pages, artist
+  and album pages with paging and history, `:album`/`:artist` jumps, and album
+  or playlist queueing from result rows.
+- HTTP control allows the read-only artist and album commands; album playback
+  and queueing stay local by default.
+
+### Changed
+
+- The provider pin moves to `ncmapi 1.9`, which exposes artist and album
+  endpoints and album search results.
+
 # Changelog
 
 All notable changes to lekima are documented here. The format follows

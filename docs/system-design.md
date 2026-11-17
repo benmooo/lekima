@@ -1,6 +1,6 @@
 # lekima — System Design
 
-Status: **Living document** — up to date through 0.8.0 · Companion to
+Status: **Living document** — up to date through 0.9.0 · Companion to
 [`product-design.md`](./product-design.md)
 
 ---
@@ -307,6 +307,11 @@ Properties:
 - Status replies carry the daemon’s current event revision. Clients that also
   subscribe to events discard a poll whose revision predates the newest event,
   so a slow reply cannot move progress/lyrics back to the previous track.
+- **Catalogue reads (0.9, additive)**: `artist`, `artist_albums` and `album`
+  are read-only commands/replies; `queue_album`, `queue_playlist` and
+  `PlayTarget::Album` resolve tracks in the daemon so every frontend shares one
+  implementation (ADR-004). Protocol version stays 2 because old clients never
+  send the new commands.
 - **MCP**: `lekima mcp` speaks JSON-RPC over stdio and maps its tools onto the
   same IPC commands; it owns no state and never reads the session file.
 
@@ -332,8 +337,10 @@ reads the session file.
   token. `POST /v1/command` takes one IPC `Command` and is capped at
   `MAX_FRAME_BYTES`.
 - A default-deny allowlist exposes playback, queue, search, library, likes,
-  sleep and quality. `login`, `logout`, `shutdown`, `hello` and `subscribe` stay
-  internal to the CLI/socket.
+  sleep and quality, plus the read-only `artist`, `artist_albums` and `album`
+  commands. `login`, `logout`, `shutdown`, `hello` and `subscribe` stay internal
+  to the CLI/socket; `queue_album`, `queue_playlist` and `PlayTarget::Album`
+  stay local because they rewrite the queue.
 - Loopback is the default bind; LAN binding is explicit and prints a warning.
   The server does not autostart the daemon: offline requests return `503`.
 
@@ -352,8 +359,10 @@ Reference: [`http.md`](./http.md).
 
 ### 8.1 Extending `ncmapi-rs`
 
-`ncmapi` 1.7 is published. 1.1 added playlist detail/paging, lyrics and QR
-login; 1.2 added daily recommendations, personal FM, likes and toplists.
+`ncmapi` 1.9 is published. 1.1 added playlist detail/paging, lyrics and QR
+login; 1.2 added daily recommendations, personal FM, likes and toplists; 1.9
+added album search results, artist profiles, artist album pages and album
+detail with tracks.
 `ncmapi` resolves catalogue data and stream URLs; byte-range fetching for
 seekable spools lives in `lekima-audio`, not the provider crate. Endpoint calls
 that mutate state or whose answer changes between identical requests (QR

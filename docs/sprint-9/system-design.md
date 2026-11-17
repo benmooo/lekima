@@ -1,6 +1,6 @@
 # Sprint 9 — System design: catalogue depth
 
-Status: **Design** · Target 0.9.0
+Status: **Shipped in 0.9.0**
 
 ## 1. Layering
 
