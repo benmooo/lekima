@@ -6,8 +6,9 @@
 //! agents all speak the same language.
 
 use lekima_domain::{
-    Comments, Lyrics, PlaybackState, Playlist, PlaylistId, Quality, RepeatMode, SearchKind,
-    SearchResults, Toplist, Track, TrackId, UserProfile,
+    AlbumDetail, AlbumId, ArtistAlbums, ArtistDetail, ArtistId, Comments, Lyrics, PlaybackState,
+    Playlist, PlaylistId, Quality, RepeatMode, SearchKind, SearchResults, Toplist, Track, TrackId,
+    UserProfile,
 };
 use serde::{Deserialize, Serialize};
 
@@ -133,6 +134,30 @@ pub enum Command {
     PlaylistTracks {
         id: PlaylistId,
     },
+    /// A full artist profile.
+    Artist {
+        id: ArtistId,
+    },
+    /// One page of an artist's albums.
+    ArtistAlbums {
+        id: ArtistId,
+        limit: u32,
+        offset: u32,
+    },
+    /// An album with its track list.
+    Album {
+        id: AlbumId,
+    },
+    /// Append every track of an album to the queue.
+    QueueAlbum {
+        id: AlbumId,
+        next: bool,
+    },
+    /// Append every track of a playlist to the queue.
+    QueuePlaylist {
+        id: PlaylistId,
+        next: bool,
+    },
     Lyrics {
         id: Option<TrackId>,
     },
@@ -162,6 +187,8 @@ pub enum PlayTarget {
     Tracks { ids: Vec<TrackId> },
     /// Play every track of a playlist.
     Playlist { id: PlaylistId },
+    /// Play every track of an album.
+    Album { id: AlbumId },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -215,6 +242,15 @@ pub enum Reply {
     },
     Playlists {
         playlists: Vec<Playlist>,
+    },
+    Artist {
+        artist: ArtistDetail,
+    },
+    ArtistAlbums {
+        page: ArtistAlbums,
+    },
+    Album {
+        detail: AlbumDetail,
     },
     Lyrics {
         id: TrackId,
@@ -339,5 +375,84 @@ mod tests {
         let response = Response::ok(1, Reply::Ack);
         assert!(response.is_ok());
         assert!(serde_json::to_string(&response).unwrap().contains("ack"));
+    }
+
+    #[test]
+    fn catalogue_commands_round_trip() {
+        let cases = vec![
+            Command::Artist {
+                id: lekima_domain::ArtistId(6452),
+            },
+            Command::ArtistAlbums {
+                id: lekima_domain::ArtistId(6452),
+                limit: 20,
+                offset: 0,
+            },
+            Command::Album {
+                id: lekima_domain::AlbumId(242_091_487),
+            },
+            Command::QueueAlbum {
+                id: lekima_domain::AlbumId(242_091_487),
+                next: true,
+            },
+            Command::Play {
+                target: PlayTarget::Album {
+                    id: lekima_domain::AlbumId(9),
+                },
+            },
+        ];
+        for command in cases {
+            let encoded = serde_json::to_string(&command).unwrap();
+            let decoded: Command = serde_json::from_str(&encoded).unwrap();
+            assert_eq!(
+                serde_json::to_string(&decoded).unwrap(),
+                encoded,
+                "round trip must be stable"
+            );
+        }
+    }
+
+    #[test]
+    fn catalogue_replies_round_trip() {
+        let artist = lekima_domain::ArtistDetail {
+            id: lekima_domain::ArtistId(6452),
+            name: "周杰伦".to_owned(),
+            avatar_url: None,
+            cover_url: None,
+            album_count: 49,
+            track_count: 592,
+            description: String::new(),
+            aliases: vec!["Jay Chou".to_owned()],
+        };
+        let album = lekima_domain::AlbumDetail {
+            album: lekima_domain::Album {
+                id: lekima_domain::AlbumId(9),
+                name: "Mota".to_owned(),
+                cover_url: None,
+                artist: None,
+                year: Some(2024),
+                track_count: Some(1),
+                description: String::new(),
+            },
+            tracks: Vec::new(),
+        };
+        for reply in [
+            Reply::Artist { artist },
+            Reply::ArtistAlbums {
+                page: lekima_domain::ArtistAlbums {
+                    albums: Vec::new(),
+                    has_more: true,
+                },
+            },
+            Reply::Album { detail: album },
+        ] {
+            let encoded = serde_json::to_string(&reply).unwrap();
+            let decoded: Reply = serde_json::from_str(&encoded).unwrap();
+            assert_eq!(
+                serde_json::to_string(&decoded).unwrap(),
+                encoded,
+                "round trip must be stable"
+            );
+        }
     }
 }
