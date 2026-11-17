@@ -98,12 +98,46 @@ like/unlike, playlist search, mouse-optional scroll, themes, `NO_COLOR`,
 MPRIS on Linux, Now Playing and media keys on macOS, output device selection,
 range seeks for streamed tracks, and gapless playback for matching formats.
 
-### v0.5 — “offline and comments” (unreleased)
+### v0.4 — “TUI polish” (shipped in 0.4.0)
+
+> Detailed specification: [`sprint-6/`](./sprint-6/) and
+> [`tui-backlog.md`](./tui-backlog.md).
+
+Responsive HUD and tables, queue confirmation and movement, buffered-range
+shading, history, settings, themes and terminal-text sanitization.
+
+### v0.5 — “offline and comments” (shipped in 0.5.0)
 
 > Detailed specification: [`sprint-8/`](./sprint-8/).
 
 A 256 MiB LRU stream cache with `lekima cache`, cached-playback fallback and a
 `CACHE` badge; public track comments in the CLI, MCP and a scrollable TUI pane.
+
+### v0.6 — “assisted login” (shipped in 0.6.0)
+
+Browser-assisted sign-in and a persisted device id, so sessions are created from
+the terminal without pasting cookies.
+
+### v0.7 — “playback hardening + control” (shipped in 0.7.0/0.7.1)
+
+> Detailed specification: [`sprint-7/`](./sprint-7/).
+
+Preview-duration truth, queue-end recovery, persistence and restart UX, plus
+token-guarded HTTP control and the phone web remote. 0.7.1 fixes null comment
+fields through `ncmapi 1.8.1`.
+
+### v0.8 — “console surfaces” (shipped in 0.8.0)
+
+The comments pane becomes a wrapped feed with likes, dates and replies; notices
+and errors become bordered alert panels; an empty library shows the `LEKIMA`
+wordmark with key hints.
+
+### v0.9 — “catalogue depth” (in design)
+
+> Detailed specification: [`sprint-9/`](./sprint-9/).
+
+Album and artist search, artist pages with albums, album pages with tracks, and
+album play/queue across the TUI, CLI, MCP and HTTP.
 
 ### Later
 
@@ -328,6 +362,11 @@ token.
 | **M6 Playback depth** (done, 0.2.0) | Streaming spool, buffering, large files, sleep timer, quality switching | 0.2.0 shipped |
 | **M7 Platform** (done, 0.3.0) | Device picker, range seeks, gapless, MPRIS/Now Playing | 0.3.0 shipped |
 | **M8 TUI polish** (done, 0.4.0) | Responsive HUD/tables, queue UX, buffered shading, sanitization | 0.4.0 shipped |
+| **M9 Offline cache + comments** (done, 0.5.0) | 256 MiB stream cache, comments CLI/MCP/TUI | 0.5.0 shipped |
+| **M10 Assisted login** (done, 0.6.0) | Browser-assisted sign-in, persisted device id | 0.6.0 shipped |
+| **M11 Control + hardening** (done, 0.7.x) | HTTP control, phone remote, preview truth, restart UX, null-safe comments | 0.7.1 shipped |
+| **M12 Console surfaces** (done, 0.8.0) | Comments feed, alert panels, empty-state wordmark | 0.8.0 shipped |
+| **M13 Catalogue depth** (design, 0.9.0) | Album/artist search, artist and album pages, album play/queue | 0.9.0 released |
 
 ## 9. Risks & mitigations
 
@@ -346,5 +385,6 @@ token.
 1. **Default UI density.** Do we keep the original’s always-visible sidebar, or
    start in a single-pane “just the queue” mode?
 2. **Windows.** WSL only, or native named pipes and SMTC in a later release?
-3. **Next theme.** Nothing is scheduled after offline cache/comments; desktop
-   notifications, scrobbling and LAN control are candidates.
+3. **Next theme.** Catalogue depth is planned for 0.9.0. After it, desktop
+   notifications, scrobbling, listening history and multiple profiles remain
+   candidates.

@@ -49,6 +49,8 @@ $ lekima status --json
   preview duration, queue-end recovery, persistence and restart UX.
 - [`docs/sprint-8/`](docs/sprint-8/) — **Offline cache and comments** (0.5.0):
   256 MiB stream cache, `lekima cache`, comments CLI/MCP/TUI.
+- [`docs/sprint-9/`](docs/sprint-9/) — **Catalogue depth** (in design): album
+  and artist search, artist and album pages, album play/queue.
 - [`docs/releasing.md`](docs/releasing.md) — release flow, including
   `--registry crates-io` on this rsproxy-mirrored machine.
 - [`docs/sessions/`](docs/sessions/) — archived OpenCode sessions (this rewrite,
@@ -59,6 +61,9 @@ $ lekima status --json
 `0.8.0` redesigns the console surfaces: the comments pane becomes a wrapped
 feed with likes, dates and replies; notices and errors become bordered alert
 panels; and an empty library shows the `LEKIMA` wordmark with key hints.
+
+`0.9.0` is in design: catalogue depth (album/artist search, artist and album
+pages, album play/queue). See [`docs/sprint-9/`](docs/sprint-9/).
 
 `0.7.0` adds token-guarded HTTP control: `lekima serve --http` exposes status,
 queue and the allowlisted command surface, plus a built-in neon web remote at
