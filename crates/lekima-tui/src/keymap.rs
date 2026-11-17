@@ -48,6 +48,17 @@ pub const MOVE: &[Binding] = &[
     },
 ];
 
+pub const CATALOGUE: &[Binding] = &[
+    Binding {
+        key: "tab / c-1..5",
+        description: "search filter",
+    },
+    Binding {
+        key: ":album/:artist",
+        description: "open album / artist",
+    },
+];
+
 pub const PLAY: &[Binding] = &[
     Binding {
         key: "enter",
@@ -174,6 +185,11 @@ pub const SECTIONS: &[Section] = &[
         title: "PLAY",
         column: 0,
         bindings: PLAY,
+    },
+    Section {
+        title: "CATALOGUE",
+        column: 0,
+        bindings: CATALOGUE,
     },
     Section {
         title: "QUEUE",

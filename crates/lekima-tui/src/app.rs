@@ -5,7 +5,10 @@
 //! daemon reply back into the state.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use lekima_domain::{Lyrics, PlaybackState, PlaybackStatus, Playlist, Toplist, Track, TrackId};
+use lekima_domain::{
+    Album, AlbumDetail, AlbumId, Artist, ArtistDetail, ArtistId, Lyrics, PlaybackState,
+    PlaybackStatus, Playlist, SearchKind, SearchResults, Toplist, Track, TrackId,
+};
 use lekima_ipc::{Command, ErrorCode, IpcError, PlayTarget, Reply};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,6 +53,133 @@ const HISTORY_LIMIT: usize = 50;
 pub enum View {
     Tracks,
     Toplists,
+    Search,
+    Artist,
+    Album,
+}
+
+/// Result filter shown above the search prompt.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SearchFilter {
+    #[default]
+    All,
+    Tracks,
+    Albums,
+    Artists,
+    Playlists,
+}
+
+impl SearchFilter {
+    /// Display order, also the `Ctrl-1..5` order.
+    pub const ALL: [Self; 5] = [
+        Self::All,
+        Self::Tracks,
+        Self::Albums,
+        Self::Artists,
+        Self::Playlists,
+    ];
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::All => "ALL",
+            Self::Tracks => "TRACKS",
+            Self::Albums => "ALBUMS",
+            Self::Artists => "ARTISTS",
+            Self::Playlists => "PLAYLISTS",
+        }
+    }
+
+    #[must_use]
+    pub const fn kind(self) -> SearchKind {
+        match self {
+            Self::All => SearchKind::All,
+            Self::Tracks => SearchKind::Track,
+            Self::Albums => SearchKind::Album,
+            Self::Artists => SearchKind::Artist,
+            Self::Playlists => SearchKind::Playlist,
+        }
+    }
+
+    #[must_use]
+    pub fn shifted(self, delta: isize) -> Self {
+        let index = Self::ALL
+            .iter()
+            .position(|filter| *filter == self)
+            .unwrap_or(0) as isize;
+        Self::ALL[(index + delta).rem_euclid(Self::ALL.len() as isize) as usize]
+    }
+
+    #[must_use]
+    pub fn from_index(index: usize) -> Option<Self> {
+        Self::ALL.get(index).copied()
+    }
+}
+
+/// One row of a search result page, in section order.
+#[derive(Debug, Clone)]
+pub enum SearchEntry {
+    Track(Track),
+    Album(Album),
+    Artist(Artist),
+    Playlist(Playlist),
+}
+
+impl SearchEntry {
+    fn flatten(results: &SearchResults, filter: SearchFilter) -> Vec<Self> {
+        let mut entries = Vec::new();
+        if matches!(filter, SearchFilter::All | SearchFilter::Tracks) {
+            entries.extend(results.tracks.iter().cloned().map(Self::Track));
+        }
+        if matches!(filter, SearchFilter::All | SearchFilter::Albums) {
+            entries.extend(results.albums.iter().cloned().map(Self::Album));
+        }
+        if matches!(filter, SearchFilter::All | SearchFilter::Artists) {
+            entries.extend(results.artists.iter().cloned().map(Self::Artist));
+        }
+        if matches!(filter, SearchFilter::All | SearchFilter::Playlists) {
+            entries.extend(results.playlists.iter().cloned().map(Self::Playlist));
+        }
+        entries
+    }
+}
+
+/// The search page: query, filter and flattened entries.
+#[derive(Debug, Clone, Default)]
+pub struct SearchState {
+    pub query: String,
+    pub filter: SearchFilter,
+    pub results: Option<SearchResults>,
+    pub entries: Vec<SearchEntry>,
+    pub error: Option<String>,
+}
+
+/// The artist page: profile, one page of albums and paging state.
+#[derive(Debug, Clone, Default)]
+pub struct ArtistState {
+    pub id: Option<ArtistId>,
+    pub detail: Option<ArtistDetail>,
+    pub albums: Vec<Album>,
+    pub has_more: bool,
+    /// True while the next album page is in flight.
+    pub paging: bool,
+    pub loading: bool,
+    pub error: Option<String>,
+}
+
+/// The album page: metadata plus its ordered tracks.
+#[derive(Debug, Clone, Default)]
+pub struct AlbumState {
+    pub id: Option<AlbumId>,
+    pub detail: Option<AlbumDetail>,
+    pub loading: bool,
+    pub error: Option<String>,
+}
+
+impl AlbumState {
+    pub fn tracks(&self) -> &[Track] {
+        self.detail.as_ref().map_or(&[], |detail| &detail.tracks)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -177,6 +307,9 @@ struct HistoryEntry {
     view: View,
     tracks: Vec<Track>,
     toplists: Vec<Toplist>,
+    search: SearchState,
+    artist: ArtistState,
+    album: AlbumState,
     source: String,
     selection: usize,
 }
@@ -188,6 +321,9 @@ pub struct App {
     pub status: PlaybackState,
     pub tracks: Vec<Track>,
     pub toplists: Vec<Toplist>,
+    pub search: SearchState,
+    pub artist: ArtistState,
+    pub album: AlbumState,
     pub view: View,
     pub lyrics_state: LyricsState,
     pub lyrics_open: bool,
@@ -253,6 +389,9 @@ impl Default for App {
             status: PlaybackState::default(),
             tracks: Vec::new(),
             toplists: Vec::new(),
+            search: SearchState::default(),
+            artist: ArtistState::default(),
+            album: AlbumState::default(),
             view: View::Tracks,
             lyrics_state: LyricsState::Idle,
             lyrics_open: false,
@@ -312,6 +451,9 @@ impl App {
             view: self.view,
             tracks: self.tracks.clone(),
             toplists: self.toplists.clone(),
+            search: self.search.clone(),
+            artist: self.artist.clone(),
+            album: self.album.clone(),
             source: self.source.clone(),
             selection: self.main_selection,
         }
@@ -321,6 +463,9 @@ impl App {
         self.view = entry.view;
         self.tracks = entry.tracks;
         self.toplists = entry.toplists;
+        self.search = entry.search;
+        self.artist = entry.artist;
+        self.album = entry.album;
         self.source = entry.source;
         self.main_selection = entry.selection;
         self.focus = Focus::Main;
@@ -446,11 +591,18 @@ impl App {
         SIDEBAR_STATICS.len() + self.playlists.len()
     }
 
-    fn clamp_selection(&mut self) {
-        let main = match self.view {
+    fn view_len(&self) -> usize {
+        match self.view {
             View::Tracks => self.tracks.len(),
             View::Toplists => self.toplists.len(),
-        };
+            View::Search => self.search.entries.len(),
+            View::Artist => self.artist.albums.len(),
+            View::Album => self.album.tracks().len(),
+        }
+    }
+
+    fn clamp_selection(&mut self) {
+        let main = self.view_len();
         self.main_selection = self.main_selection.min(main.saturating_sub(1));
         self.sidebar_selection = self
             .sidebar_selection
@@ -459,7 +611,15 @@ impl App {
     }
 
     fn selected_track(&self) -> Option<&Track> {
-        self.tracks.get(self.main_selection)
+        match self.view {
+            View::Tracks => self.tracks.get(self.main_selection),
+            View::Search => match self.search.entries.get(self.main_selection) {
+                Some(SearchEntry::Track(track)) => Some(track),
+                _ => None,
+            },
+            View::Album => self.album.tracks().get(self.main_selection),
+            View::Artist | View::Toplists => None,
+        }
     }
 
     /// Handles a key press and returns what the loop should do.
@@ -507,6 +667,25 @@ impl App {
 
     fn handle_prompt_key(&mut self, key: KeyEvent) -> Action {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        if self.mode == Mode::Search {
+            match key.code {
+                KeyCode::Tab => {
+                    self.search.filter = self.search.filter.shifted(1);
+                    return Action::None;
+                }
+                KeyCode::BackTab => {
+                    self.search.filter = self.search.filter.shifted(-1);
+                    return Action::None;
+                }
+                KeyCode::Char(digit @ '1'..='5') if ctrl => {
+                    if let Some(filter) = SearchFilter::from_index(digit as usize - '1' as usize) {
+                        self.search.filter = filter;
+                    }
+                    return Action::None;
+                }
+                _ => {}
+            }
+        }
         match key.code {
             KeyCode::Esc => {
                 self.mode = Mode::Normal;
@@ -527,11 +706,16 @@ impl App {
                 self.remember_prompt(mode, input.trim());
                 match mode {
                     Mode::Search => {
+                        let query = input.trim().to_owned();
                         self.remember();
-                        self.source = format!("search: {}", input.trim());
+                        self.search.query.clone_from(&query);
+                        self.search.error = None;
+                        self.view = View::Search;
+                        self.main_selection = 0;
+                        self.source = format!("search: {query}");
                         Action::Call(Command::Search {
-                            query: input.trim().to_owned(),
-                            kind: lekima_domain::SearchKind::Track,
+                            query,
+                            kind: self.search.filter.kind(),
                             limit: 40,
                             offset: 0,
                         })
@@ -730,6 +914,8 @@ impl App {
                 self.mode = Mode::Queue;
                 Action::Call(Command::Queue)
             }
+            "album" => self.album_command(rest.trim()),
+            "artist" => self.artist_command(rest.trim()),
             "sleep" => match parse_sleep_minutes(rest.trim()) {
                 Ok(minutes) => Action::Call(Command::Sleep { minutes }),
                 Err(message) => {
@@ -789,6 +975,84 @@ impl App {
             other => {
                 let text = format!("unknown command: {other}");
                 self.notify(text, true);
+                Action::None
+            }
+        }
+    }
+
+    fn current_album_id(&self) -> Option<AlbumId> {
+        if self.view == View::Album {
+            return self.album.id.filter(|id| id.get() > 0);
+        }
+        self.status
+            .track
+            .as_ref()
+            .and_then(|track| track.album.as_ref())
+            .map(|album| album.id)
+            .filter(|id| id.get() > 0)
+    }
+
+    fn current_artist_id(&self) -> Option<ArtistId> {
+        if self.view == View::Artist {
+            return self.artist.id.filter(|id| id.get() > 0);
+        }
+        self.status
+            .track
+            .as_ref()
+            .and_then(|track| track.artists.first())
+            .map(|artist| artist.id)
+            .filter(|id| id.get() > 0)
+    }
+
+    /// `:album`, `:album play`, `:album queue`, `:album <id>`.
+    fn album_command(&mut self, spec: &str) -> Action {
+        match spec {
+            "play" | "queue" => {
+                let Some(id) = self.current_album_id() else {
+                    self.notify("no album for the current track", true);
+                    return Action::None;
+                };
+                if spec == "play" {
+                    Action::Call(Command::Play {
+                        target: PlayTarget::Album { id },
+                    })
+                } else {
+                    self.notify("queued album", false);
+                    Action::Call(Command::QueueAlbum { id, next: false })
+                }
+            }
+            "" => match self.current_album_id() {
+                Some(id) => self.open_album(id),
+                None => {
+                    self.notify("nothing playing has an album", true);
+                    Action::None
+                }
+            },
+            other => match other.parse::<u64>() {
+                Ok(id) if id > 0 => self.open_album(AlbumId(id)),
+                _ => {
+                    self.notify("usage: :album [play|queue|<id>]", true);
+                    Action::None
+                }
+            },
+        }
+    }
+
+    /// `:artist` or `:artist <id>`.
+    fn artist_command(&mut self, spec: &str) -> Action {
+        if spec.is_empty() {
+            return match self.current_artist_id() {
+                Some(id) => self.open_artist(id),
+                None => {
+                    self.notify("nothing playing has an artist", true);
+                    Action::None
+                }
+            };
+        }
+        match spec.parse::<u64>() {
+            Ok(id) if id > 0 => self.open_artist(ArtistId(id)),
+            _ => {
+                self.notify("usage: :artist [<id>]", true);
                 Action::None
             }
         }
@@ -1040,9 +1304,20 @@ impl App {
                 Action::None
             }
             KeyCode::Char(' ') => Action::Call(Command::Toggle),
+            KeyCode::Char('n') if self.view == View::Artist && self.artist.has_more => {
+                self.artist_next_page()
+            }
             KeyCode::Char('n') => Action::Call(Command::Next),
             KeyCode::Char('p') => Action::Call(Command::Prev),
             KeyCode::Char('m') => Action::Call(Command::ToggleMute),
+            KeyCode::Esc if matches!(self.view, View::Search | View::Artist | View::Album) => {
+                self.go_back();
+                Action::None
+            }
+            KeyCode::Char('r') if self.view == View::Search => self.retry_search(),
+            KeyCode::Char('r') if matches!(self.view, View::Artist | View::Album) => {
+                self.refresh_page()
+            }
             KeyCode::Char('r') => Action::Call(Command::CycleRepeat),
             KeyCode::Char('s') => Action::Call(Command::SetShuffle {
                 enabled: !self.status.shuffle,
@@ -1121,10 +1396,7 @@ impl App {
         let next = (current + delta).max(0) as usize;
         match self.focus {
             Focus::Main => {
-                let len = match self.view {
-                    View::Tracks => self.tracks.len(),
-                    View::Toplists => self.toplists.len(),
-                };
+                let len = self.view_len();
                 self.main_selection = next.min(len.saturating_sub(1));
             }
             Focus::Sidebar => {
@@ -1136,10 +1408,7 @@ impl App {
     fn set_selection(&mut self, index: usize) {
         match self.focus {
             Focus::Main => {
-                let len = match self.view {
-                    View::Tracks => self.tracks.len(),
-                    View::Toplists => self.toplists.len(),
-                };
+                let len = self.view_len();
                 self.main_selection = index.min(len.saturating_sub(1));
             }
             Focus::Sidebar => {
@@ -1182,17 +1451,109 @@ impl App {
                         .skip(self.main_selection)
                         .map(|track| track.id)
                         .collect();
-                    if ids.is_empty() {
-                        self.notify("nothing selected", true);
-                        Action::None
-                    } else {
-                        Action::Call(Command::Play {
-                            target: PlayTarget::Tracks { ids },
-                        })
-                    }
+                    self.play_ids(ids)
                 }
+                View::Album => {
+                    let ids: Vec<_> = self
+                        .album
+                        .tracks()
+                        .iter()
+                        .skip(self.main_selection)
+                        .map(|track| track.id)
+                        .collect();
+                    self.play_ids(ids)
+                }
+                View::Search => match self.search.entries.get(self.main_selection).cloned() {
+                    Some(SearchEntry::Track(track)) => self.play_ids(vec![track.id]),
+                    Some(SearchEntry::Album(album)) => self.open_album(album.id),
+                    Some(SearchEntry::Artist(artist)) => self.open_artist(artist.id),
+                    Some(SearchEntry::Playlist(playlist)) => {
+                        let (id, name) = (playlist.id, playlist.name.clone());
+                        self.remember();
+                        self.source = format!("playlist: {name}");
+                        Action::Call(Command::PlaylistTracks { id })
+                    }
+                    None => Action::None,
+                },
+                View::Artist => match self.artist.albums.get(self.main_selection) {
+                    Some(album) => self.open_album(album.id),
+                    None => Action::None,
+                },
             },
         }
+    }
+
+    fn play_ids(&mut self, ids: Vec<TrackId>) -> Action {
+        if ids.is_empty() {
+            self.notify("nothing selected", true);
+            Action::None
+        } else {
+            Action::Call(Command::Play {
+                target: PlayTarget::Tracks { ids },
+            })
+        }
+    }
+
+    /// Opens an album page and asks the daemon for its tracks.
+    fn open_album(&mut self, id: AlbumId) -> Action {
+        self.remember();
+        let name = self
+            .search
+            .entries
+            .iter()
+            .find_map(|entry| match entry {
+                SearchEntry::Album(album) if album.id == id => Some(album.name.clone()),
+                _ => None,
+            })
+            .or_else(|| {
+                self.artist
+                    .albums
+                    .iter()
+                    .find(|album| album.id == id)
+                    .map(|album| album.name.clone())
+            });
+        self.album = AlbumState {
+            id: Some(id),
+            loading: true,
+            ..AlbumState::default()
+        };
+        self.view = View::Album;
+        self.source = name.map_or_else(|| format!("album {id}"), |name| format!("album: {name}"));
+        self.main_selection = 0;
+        self.focus = Focus::Main;
+        Action::Call(Command::Album { id })
+    }
+
+    /// Opens an artist page and asks the daemon for the profile and first page.
+    fn open_artist(&mut self, id: ArtistId) -> Action {
+        self.remember();
+        let name = self
+            .search
+            .entries
+            .iter()
+            .find_map(|entry| match entry {
+                SearchEntry::Artist(artist) if artist.id == id => Some(artist.name.clone()),
+                _ => None,
+            })
+            .or_else(|| {
+                self.status.track.as_ref().and_then(|track| {
+                    track
+                        .artists
+                        .iter()
+                        .find(|artist| artist.id == id)
+                        .map(|artist| artist.name.clone())
+                })
+            });
+        self.artist = ArtistState {
+            id: Some(id),
+            loading: true,
+            ..ArtistState::default()
+        };
+        self.view = View::Artist;
+        self.source = name.map_or_else(|| format!("artist {id}"), |name| format!("artist: {name}"));
+        self.main_selection = 0;
+        self.focus = Focus::Main;
+        Action::Call(Command::Artist { id })
     }
 
     fn open_static(&mut self, index: usize) -> Option<Action> {
@@ -1350,28 +1711,120 @@ impl App {
         }
     }
 
+    /// Re-runs the last search, keeping its query and filter.
+    fn retry_search(&mut self) -> Action {
+        if self.search.query.is_empty() {
+            return Action::None;
+        }
+        self.search.error = None;
+        Action::Call(Command::Search {
+            query: self.search.query.clone(),
+            kind: self.search.filter.kind(),
+            limit: 40,
+            offset: 0,
+        })
+    }
+
+    fn refresh_page(&mut self) -> Action {
+        match self.view {
+            View::Artist => {
+                let Some(id) = self.artist.id else {
+                    return Action::None;
+                };
+                self.artist.loading = true;
+                self.artist.error = None;
+                Action::Call(Command::ArtistAlbums {
+                    id,
+                    limit: 20,
+                    offset: 0,
+                })
+            }
+            View::Album => {
+                let Some(id) = self.album.id else {
+                    return Action::None;
+                };
+                self.album.loading = true;
+                self.album.error = None;
+                Action::Call(Command::Album { id })
+            }
+            _ => Action::None,
+        }
+    }
+
+    /// Loads the next page of an artist's albums (`n` while `has_more`).
+    fn artist_next_page(&mut self) -> Action {
+        let Some(id) = self.artist.id else {
+            return Action::None;
+        };
+        if !self.artist.has_more || self.artist.paging {
+            return Action::None;
+        }
+        self.artist.paging = true;
+        Action::Call(Command::ArtistAlbums {
+            id,
+            limit: 20,
+            offset: u32::try_from(self.artist.albums.len()).unwrap_or(u32::MAX),
+        })
+    }
+
     fn enqueue_selected(&mut self, next: bool) -> Action {
         if self.focus == Focus::Sidebar {
             self.notify("select a track to queue", true);
             return Action::None;
         }
-        match self.selected_track().map(|track| track.id) {
-            Some(id) => {
-                self.notify(
-                    if next {
-                        "queued to play next"
-                    } else {
-                        "queued"
-                    },
-                    false,
-                );
-                Action::Call(Command::Enqueue {
-                    tracks: vec![id],
-                    next,
-                })
-            }
-            None => Action::None,
+        match self.view {
+            View::Search => match self.search.entries.get(self.main_selection).cloned() {
+                Some(SearchEntry::Track(track)) => self.enqueue_tracks(vec![track.id], next),
+                Some(SearchEntry::Album(album)) => self.enqueue_album(album.id, next),
+                Some(SearchEntry::Playlist(playlist)) => {
+                    self.notify("queued playlist", false);
+                    Action::Call(Command::QueuePlaylist {
+                        id: playlist.id,
+                        next,
+                    })
+                }
+                Some(SearchEntry::Artist(artist)) => {
+                    self.notify(format!("open {} to queue an album", artist.name), false);
+                    Action::None
+                }
+                None => Action::None,
+            },
+            View::Artist => match self.artist.albums.get(self.main_selection).map(|a| a.id) {
+                Some(id) => self.enqueue_album(id, next),
+                None => {
+                    self.notify("no album selected", true);
+                    Action::None
+                }
+            },
+            _ => match self.selected_track().map(|track| track.id) {
+                Some(id) => self.enqueue_tracks(vec![id], next),
+                None => Action::None,
+            },
         }
+    }
+
+    fn enqueue_tracks(&mut self, ids: Vec<TrackId>, next: bool) -> Action {
+        self.notify(
+            if next {
+                "queued to play next"
+            } else {
+                "queued"
+            },
+            false,
+        );
+        Action::Call(Command::Enqueue { tracks: ids, next })
+    }
+
+    fn enqueue_album(&mut self, id: AlbumId, next: bool) -> Action {
+        self.notify(
+            if next {
+                "album queued to play next"
+            } else {
+                "album queued"
+            },
+            false,
+        );
+        Action::Call(Command::QueueAlbum { id, next })
     }
 
     /// Folds a daemon reply into the view state. Returns a follow-up command.
@@ -1455,12 +1908,61 @@ impl App {
                         self.focus = Focus::Main;
                     }
                     Reply::Search { results } => {
-                        self.tracks = results.tracks;
-                        self.view = View::Tracks;
+                        let entries = SearchEntry::flatten(&results, self.search.filter);
+                        let empty = entries.is_empty();
+                        self.search.error = None;
+                        self.search.results = Some(results);
+                        self.search.entries = entries;
+                        self.view = View::Search;
                         self.main_selection = 0;
                         self.focus = Focus::Main;
-                        if self.tracks.is_empty() {
-                            self.notify("no matches", true);
+                        if empty {
+                            self.notify(
+                                format!("no matches for \"{}\" · / to refine", self.search.query),
+                                false,
+                            );
+                        }
+                    }
+                    Reply::Artist { artist } => {
+                        if self.view == View::Artist
+                            && self.artist.id.is_none_or(|id| id == artist.id)
+                        {
+                            let id = artist.id;
+                            self.artist.detail = Some(artist);
+                            self.artist.error = None;
+                            // The profile and its first album page are separate
+                            // commands; chain the page so one key press loads both.
+                            self.artist.loading = true;
+                            return Action::Call(Command::ArtistAlbums {
+                                id,
+                                limit: 20,
+                                offset: 0,
+                            });
+                        }
+                    }
+                    Reply::ArtistAlbums { page } => {
+                        // Only fold a page into the artist view that asked for it.
+                        if self.view == View::Artist && (self.artist.loading || self.artist.paging)
+                        {
+                            if self.artist.paging {
+                                self.artist.albums.extend(page.albums);
+                            } else {
+                                self.artist.albums = page.albums;
+                            }
+                            self.artist.paging = false;
+                            self.artist.loading = false;
+                            self.artist.has_more = page.has_more;
+                            self.artist.error = None;
+                            if self.artist.albums.is_empty() {
+                                self.notify("no albums", false);
+                            }
+                        }
+                    }
+                    Reply::Album { detail } => {
+                        if self.view == View::Album && self.album.id == Some(detail.album.id) {
+                            self.album.detail = Some(detail);
+                            self.album.loading = false;
+                            self.album.error = None;
                         }
                     }
                     Reply::Playlists { playlists } => {
@@ -1554,6 +2056,18 @@ impl App {
                 Action::None
             }
             Err(error) => {
+                if self.artist.loading || self.artist.paging {
+                    self.artist.loading = false;
+                    self.artist.paging = false;
+                    self.artist.error = Some(error_message(&error));
+                }
+                if self.album.loading {
+                    self.album.loading = false;
+                    self.album.error = Some(error_message(&error));
+                }
+                if self.view == View::Search {
+                    self.search.error = Some(error_message(&error));
+                }
                 if let LyricsState::Loading { track } = self.lyrics_state {
                     self.lyrics_state = LyricsState::Error {
                         track,
@@ -1664,7 +2178,10 @@ mod tests {
 
     use lekima_domain::Track;
 
-    use super::{Action, App, Focus, LyricsState, Mode};
+    use super::{
+        Action, AlbumState, App, ArtistState, Focus, LyricsState, Mode, SearchEntry, SearchFilter,
+        View,
+    };
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
@@ -2256,5 +2773,281 @@ mod tests {
         ));
         let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
         assert!(matches!(app.handle_key(ctrl_c), Action::Quit));
+    }
+
+    fn catalogue_results() -> lekima_domain::SearchResults {
+        use lekima_domain::{Album, Artist, Playlist, SearchResults, SearchTotals};
+        SearchResults {
+            tracks: vec![sample_track(1)],
+            albums: vec![Album {
+                id: 9.into(),
+                name: "Mota".to_owned(),
+                cover_url: None,
+                artist: Some(Artist {
+                    id: 2.into(),
+                    name: "Aash".to_owned(),
+                }),
+                year: Some(2024),
+                track_count: Some(1),
+                description: String::new(),
+            }],
+            artists: vec![Artist {
+                id: 6452.into(),
+                name: "Jay Chou".to_owned(),
+            }],
+            playlists: vec![Playlist {
+                id: 5.into(),
+                name: "Focus".to_owned(),
+                description: String::new(),
+                track_count: 42,
+                cover_url: None,
+                owner: None,
+            }],
+            totals: SearchTotals {
+                tracks: 1,
+                albums: 1,
+                artists: 1,
+                playlists: 1,
+            },
+            total: 4,
+        }
+    }
+
+    fn open_search_results(app: &mut App) {
+        app.search.query = "mota".to_owned();
+        app.apply(Ok(lekima_ipc::Reply::Search {
+            results: catalogue_results(),
+        }));
+    }
+
+    fn sample_artist() -> lekima_domain::ArtistDetail {
+        lekima_domain::ArtistDetail {
+            id: 6452.into(),
+            name: "Jay Chou".to_owned(),
+            avatar_url: None,
+            cover_url: None,
+            album_count: 49,
+            track_count: 592,
+            description: "bio".to_owned(),
+            aliases: vec!["周董".to_owned()],
+        }
+    }
+
+    fn sample_album() -> lekima_domain::AlbumDetail {
+        use lekima_domain::{Album, AlbumDetail};
+        AlbumDetail {
+            album: Album {
+                id: 9.into(),
+                name: "Mota".to_owned(),
+                cover_url: None,
+                artist: None,
+                year: Some(2024),
+                track_count: Some(2),
+                description: String::new(),
+            },
+            tracks: vec![sample_track(1), sample_track(2)],
+        }
+    }
+
+    #[test]
+    fn search_filter_cycles_and_drives_the_command() {
+        let mut app = App::new();
+        app.handle_key(key(KeyCode::Char('/')));
+        assert_eq!(app.search.filter, SearchFilter::All);
+
+        app.handle_key(key(KeyCode::Tab));
+        assert_eq!(app.search.filter, SearchFilter::Tracks);
+        app.handle_key(key(KeyCode::BackTab));
+        assert_eq!(app.search.filter, SearchFilter::All);
+        app.handle_key(KeyEvent::new(KeyCode::Char('3'), KeyModifiers::CONTROL));
+        assert_eq!(app.search.filter, SearchFilter::Albums);
+
+        for character in "mota".chars() {
+            app.handle_key(key(KeyCode::Char(character)));
+        }
+        match app.handle_key(key(KeyCode::Enter)) {
+            Action::Call(lekima_ipc::Command::Search { kind, .. }) => {
+                assert_eq!(kind, lekima_domain::SearchKind::Album);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        assert_eq!(app.view, View::Search);
+    }
+
+    #[test]
+    fn search_results_flatten_by_section() {
+        let mut app = App::new();
+        open_search_results(&mut app);
+        assert_eq!(app.view, View::Search);
+        assert_eq!(app.search.entries.len(), 4);
+        assert!(matches!(app.search.entries[0], SearchEntry::Track(_)));
+        assert!(matches!(app.search.entries[1], SearchEntry::Album(_)));
+        assert!(matches!(app.search.entries[2], SearchEntry::Artist(_)));
+        assert!(matches!(app.search.entries[3], SearchEntry::Playlist(_)));
+    }
+
+    #[test]
+    fn enter_opens_albums_and_artists_then_history_returns() {
+        let mut app = App::new();
+        open_search_results(&mut app);
+
+        app.main_selection = 1;
+        match app.handle_key(key(KeyCode::Enter)) {
+            Action::Call(lekima_ipc::Command::Album { id }) => assert_eq!(id, 9.into()),
+            other => panic!("unexpected {other:?}"),
+        }
+        assert_eq!(app.view, View::Album);
+        assert!(app.album.loading);
+        app.apply(Ok(lekima_ipc::Reply::Album {
+            detail: sample_album(),
+        }));
+        assert_eq!(app.album.tracks().len(), 2);
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL));
+        assert_eq!(app.view, View::Search);
+
+        app.main_selection = 2;
+        match app.handle_key(key(KeyCode::Enter)) {
+            Action::Call(lekima_ipc::Command::Artist { id }) => assert_eq!(id, 6452.into()),
+            other => panic!("unexpected {other:?}"),
+        }
+        assert_eq!(app.view, View::Artist);
+        let action = app.apply(Ok(lekima_ipc::Reply::Artist {
+            artist: sample_artist(),
+        }));
+        assert!(
+            matches!(
+                action,
+                Action::Call(lekima_ipc::Command::ArtistAlbums { .. })
+            ),
+            "the profile chains its first album page"
+        );
+        assert!(app.artist.loading);
+        app.apply(Ok(lekima_ipc::Reply::ArtistAlbums {
+            page: lekima_domain::ArtistAlbums {
+                albums: vec![sample_album().album],
+                has_more: false,
+            },
+        }));
+        assert_eq!(app.artist.albums.len(), 1);
+        assert!(!app.artist.loading);
+    }
+
+    #[test]
+    fn catalogue_rows_queue_albums_and_artists_do_not() {
+        let mut app = App::new();
+        open_search_results(&mut app);
+
+        app.main_selection = 1;
+        match app.handle_key(key(KeyCode::Char('a'))) {
+            Action::Call(lekima_ipc::Command::QueueAlbum { id, next }) => {
+                assert_eq!((id, next), (9.into(), false));
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        match app.handle_key(key(KeyCode::Char('A'))) {
+            Action::Call(lekima_ipc::Command::QueueAlbum { id, next }) => {
+                assert_eq!((id, next), (9.into(), true));
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+
+        app.main_selection = 2;
+        assert!(matches!(
+            app.handle_key(key(KeyCode::Char('a'))),
+            Action::None
+        ));
+        assert!(app.message.as_ref().is_some_and(|message| !message.error));
+
+        app.main_selection = 3;
+        assert!(matches!(
+            app.handle_key(key(KeyCode::Char('a'))),
+            Action::Call(lekima_ipc::Command::QueuePlaylist { .. })
+        ));
+    }
+
+    #[test]
+    fn artist_page_pages_albums_and_queues_on_a() {
+        let mut app = App::new();
+        app.view = View::Artist;
+        app.artist = ArtistState {
+            id: Some(6452.into()),
+            detail: Some(sample_artist()),
+            albums: vec![sample_album().album],
+            has_more: true,
+            ..ArtistState::default()
+        };
+
+        match app.handle_key(key(KeyCode::Char('n'))) {
+            Action::Call(lekima_ipc::Command::ArtistAlbums { id, offset, .. }) => {
+                assert_eq!((id, offset), (6452.into(), 1));
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        assert!(app.artist.paging);
+
+        // A paging failure clears the flag and surfaces on the page.
+        app.apply(Err(lekima_ipc::IpcError::Remote {
+            code: lekima_ipc::ErrorCode::Backend,
+            message: "provider down".to_owned(),
+        }));
+        assert!(!app.artist.paging);
+        assert_eq!(
+            app.artist.error.as_deref(),
+            Some("provider error: provider down")
+        );
+
+        match app.handle_key(key(KeyCode::Char('A'))) {
+            Action::Call(lekima_ipc::Command::QueueAlbum { next, .. }) => assert!(next),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn album_tracks_play_from_the_selection() {
+        let mut app = App::new();
+        app.view = View::Album;
+        app.album = AlbumState {
+            id: Some(9.into()),
+            detail: Some(sample_album()),
+            ..AlbumState::default()
+        };
+        app.main_selection = 1;
+        match app.handle_key(key(KeyCode::Enter)) {
+            Action::Call(lekima_ipc::Command::Play {
+                target: lekima_ipc::PlayTarget::Tracks { ids },
+            }) => assert_eq!(ids, vec![2.into()]),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn colon_commands_jump_from_the_current_track() {
+        let mut app = App::new();
+        let mut track = sample_track(1);
+        track.album = Some(sample_album().album);
+        track.artists = vec![lekima_domain::Artist {
+            id: 6452.into(),
+            name: "Jay Chou".to_owned(),
+        }];
+        app.status.track = Some(track);
+
+        app.handle_key(key(KeyCode::Char(':')));
+        for character in "album".chars() {
+            app.handle_key(key(KeyCode::Char(character)));
+        }
+        match app.handle_key(key(KeyCode::Enter)) {
+            Action::Call(lekima_ipc::Command::Album { id }) => assert_eq!(id, 9.into()),
+            other => panic!("unexpected {other:?}"),
+        }
+
+        app.handle_key(key(KeyCode::Char(':')));
+        for character in "artist".chars() {
+            app.handle_key(key(KeyCode::Char(character)));
+        }
+        match app.handle_key(key(KeyCode::Enter)) {
+            Action::Call(lekima_ipc::Command::Artist { id }) => assert_eq!(id, 6452.into()),
+            other => panic!("unexpected {other:?}"),
+        }
     }
 }

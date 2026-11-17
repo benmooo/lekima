@@ -20,7 +20,8 @@ use ratatui::{
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app::{
-    App, CommentsState, Focus, LyricsState, Mode, SETTINGS_ROWS, SIDEBAR_STATICS, View,
+    App, CommentsState, Focus, LyricsState, Mode, SETTINGS_ROWS, SIDEBAR_STATICS, SearchEntry,
+    SearchFilter, View,
 };
 use crate::keymap::{self, Section};
 use crate::theme::{Density, Theme};
@@ -82,7 +83,11 @@ pub fn draw(frame: &mut Frame, app: &mut App, theme: &Theme) {
     .areas(area);
 
     draw_hud(frame, app, theme, hud);
-    draw_rule(frame, theme, rule);
+    if app.mode == Mode::Search {
+        draw_search_filters(frame, app, theme, rule);
+    } else {
+        draw_rule(frame, theme, rule);
+    }
     let lyrics = draw_body(frame, app, theme, body);
     draw_footer(frame, app, theme, footer);
     draw_toast(frame, app, theme, area, lyrics);
@@ -545,6 +550,9 @@ fn draw_main(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         (Mode::Queue, _) => draw_queue(frame, app, theme, inner),
         (Mode::Comments, _) => draw_comments(frame, app, theme, inner),
         (_, View::Toplists) => draw_toplists(frame, app, theme, inner),
+        (_, View::Search) => draw_search(frame, app, theme, inner),
+        (_, View::Artist) => draw_artist(frame, app, theme, inner),
+        (_, View::Album) => draw_album(frame, app, theme, inner),
         _ => draw_tracks(frame, app, theme, inner),
     }
 }
@@ -963,6 +971,651 @@ fn draw_toplists(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     frame.render_stateful_widget(table, content, &mut state);
 }
 
+/// Filter row shown in place of the rule while the search prompt is open.
+fn draw_search_filters(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    let mut spans = vec![Span::styled(" ", Style::new())];
+    for filter in SearchFilter::ALL {
+        let active = filter == app.search.filter;
+        let label = if active {
+            format!("[{}]", filter.label())
+        } else {
+            format!(" {} ", filter.label())
+        };
+        spans.push(Span::styled(
+            label,
+            if active {
+                Style::new()
+                    .fg(theme.badge_fg)
+                    .bg(theme.badge_bg)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::new().fg(theme.muted)
+            },
+        ));
+    }
+    if area.width >= 72 {
+        spans.push(Span::styled(
+            format!("  tab cycles {} ctrl-1..5", theme.glyphs.separator),
+            Style::new().fg(theme.dim),
+        ));
+    }
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+fn section_line(label: &str, count: usize, theme: &Theme) -> Line<'static> {
+    Line::from(vec![
+        Span::styled("// ", Style::new().fg(theme.panel)),
+        Span::styled(label.to_owned(), Style::new().fg(theme.muted)),
+        Span::styled(
+            format!(" {} {}", theme.glyphs.separator, count),
+            Style::new().fg(theme.accent_alt),
+        ),
+    ])
+}
+
+fn rule_line(width: usize, theme: &Theme) -> Line<'static> {
+    Line::from(Span::styled(
+        theme.glyphs.rule.repeat(width.min(240)),
+        Style::new().fg(theme.dim),
+    ))
+}
+
+/// Provider error state shared by the catalogue pages.
+fn error_block(message: &str, theme: &Theme, width: u16) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::from(vec![
+        Span::styled("! ", Style::new().fg(theme.warn)),
+        Span::styled(
+            "CATALOGUE UNAVAILABLE",
+            Style::new().fg(theme.warn).add_modifier(Modifier::BOLD),
+        ),
+    ])];
+    for line in wrap_to_width(&clean(message), usize::from(width).saturating_sub(2).max(8)) {
+        lines.push(Line::from(vec![
+            Span::styled("  ", Style::new()),
+            Span::styled(line, Style::new().fg(theme.text)),
+        ]));
+    }
+    lines.push(Line::from(vec![
+        Span::styled("  ", Style::new()),
+        Span::styled(
+            format!("r retry {} esc close", theme.glyphs.separator),
+            Style::new().fg(theme.muted),
+        ),
+    ]));
+    lines
+}
+
+fn draw_search(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
+    let [label, content] =
+        Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(area);
+    let focused = app.focus == Focus::Main;
+    let window = usize::from(content.height);
+    app.main_view_height = content.height;
+
+    let total = app
+        .search
+        .results
+        .as_ref()
+        .map_or(app.search.entries.len(), |results| {
+            usize::try_from(results.total).unwrap_or(usize::MAX)
+        });
+    let query = truncate_to_width(&clean(&app.search.query), 24, theme.glyphs.ellipsis);
+    let mut title = vec![
+        Span::styled("// ", Style::new().fg(theme.panel)),
+        Span::styled("SEARCH", Style::new().fg(theme.muted)),
+        Span::styled(
+            format!(" {} ", theme.glyphs.separator),
+            Style::new().fg(theme.dim),
+        ),
+        Span::styled(format!("\"{query}\""), Style::new().fg(theme.text)),
+        Span::styled(
+            format!(" {} ", theme.glyphs.separator),
+            Style::new().fg(theme.dim),
+        ),
+        Span::styled(
+            compact_count(total as u64),
+            Style::new().fg(theme.accent_alt),
+        ),
+        Span::styled(" RESULTS", Style::new().fg(theme.muted)),
+    ];
+    if focused {
+        title.push(Span::styled(
+            format!(" {}", theme.glyphs.active),
+            Style::new().fg(theme.accent),
+        ));
+    }
+    frame.render_widget(Paragraph::new(Line::from(title)), label);
+
+    if let Some(error) = &app.search.error {
+        frame.render_widget(
+            Paragraph::new(Text::from(error_block(error, theme, content.width))),
+            content,
+        );
+        return;
+    }
+    if app.search.entries.is_empty() {
+        let text = if app.search.query.is_empty() {
+            "type a query and press enter".to_owned()
+        } else {
+            format!(
+                "no matches for \"{}\" {} / to refine",
+                clean(&app.search.query),
+                theme.glyphs.separator
+            )
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                truncate_to_width(&text, usize::from(content.width), theme.glyphs.ellipsis),
+                Style::new().fg(theme.dim),
+            ))),
+            content,
+        );
+        return;
+    }
+
+    let width = usize::from(content.width);
+    let title_width = width.saturating_sub(28).clamp(12, 48);
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut line_of: Vec<usize> = Vec::with_capacity(app.search.entries.len());
+    let mut current: Option<u8> = None;
+    for (index, entry) in app.search.entries.iter().enumerate() {
+        let kind = match entry {
+            SearchEntry::Track(_) => 0,
+            SearchEntry::Album(_) => 1,
+            SearchEntry::Artist(_) => 2,
+            SearchEntry::Playlist(_) => 3,
+        };
+        if current != Some(kind) {
+            current = Some(kind);
+            if !lines.is_empty() {
+                lines.push(Line::from(""));
+            }
+            let (heading, count) = match (kind, app.search.results.as_ref()) {
+                (0, Some(results)) => ("TRACKS", results.tracks.len()),
+                (1, Some(results)) => ("ALBUMS", results.albums.len()),
+                (2, Some(results)) => ("ARTISTS", results.artists.len()),
+                (3, Some(results)) => ("PLAYLISTS", results.playlists.len()),
+                _ => ("RESULTS", 0),
+            };
+            lines.push(section_line(heading, count, theme));
+        }
+        line_of.push(lines.len());
+        lines.push(search_entry_line(
+            theme,
+            entry,
+            index,
+            focused && index == app.main_selection,
+            title_width,
+        ));
+    }
+
+    let offset = line_of
+        .get(app.main_selection)
+        .map_or(0, |line| scroll_offset(*line, window));
+    frame.render_widget(
+        Paragraph::new(Text::from(lines)).scroll((u16::try_from(offset).unwrap_or(u16::MAX), 0)),
+        content,
+    );
+}
+
+/// Keeps `line` visible in a `window`-line viewport with the least scrolling.
+fn scroll_offset(line: usize, window: usize) -> usize {
+    if window == 0 || line < window {
+        0
+    } else {
+        line + 1 - window
+    }
+}
+
+fn search_entry_line(
+    theme: &Theme,
+    entry: &SearchEntry,
+    index: usize,
+    selected: bool,
+    title_width: usize,
+) -> Line<'static> {
+    let marker = if selected { theme.glyphs.active } else { " " };
+    let (title, meta) = match entry {
+        SearchEntry::Track(track) => (
+            track.name.clone(),
+            format!(
+                "{} {} {}",
+                track.artist_names(),
+                theme.glyphs.separator,
+                track.duration_label()
+            ),
+        ),
+        SearchEntry::Album(album) => {
+            let artist = album.artist_name();
+            let artist = if artist.is_empty() { "—" } else { artist };
+            let year = album
+                .year
+                .map_or_else(|| "—".to_owned(), |year| year.to_string());
+            let tracks = album.track_count.map_or_else(
+                || "— tracks".to_owned(),
+                |count| format!("{count} {}", tracks_word(count as usize)),
+            );
+            (
+                album.name.clone(),
+                format!(
+                    "{artist} {} {year} {} {tracks}",
+                    theme.glyphs.separator, theme.glyphs.separator
+                ),
+            )
+        }
+        SearchEntry::Artist(artist) => (artist.name.clone(), String::new()),
+        SearchEntry::Playlist(playlist) => (
+            playlist.name.clone(),
+            format!("{} tracks", compact_count(playlist.track_count)),
+        ),
+    };
+    let title = truncate_to_width(&clean(&title), title_width, theme.glyphs.ellipsis);
+    let pad = " ".repeat(title_width.saturating_sub(display_width(&title)) + 2);
+    let primary = if selected {
+        selection_style(theme)
+    } else {
+        Style::new().fg(theme.text)
+    };
+    let secondary = if selected {
+        selection_style(theme)
+    } else {
+        Style::new().fg(theme.muted)
+    };
+    Line::from(vec![
+        Span::styled(
+            format!("{marker} "),
+            Style::new().fg(if selected { theme.accent } else { theme.dim }),
+        ),
+        Span::styled(
+            format!("{:>3}  ", index + 1),
+            if selected {
+                primary
+            } else {
+                Style::new().fg(theme.muted)
+            },
+        ),
+        Span::styled(title, primary),
+        Span::styled(format!("{pad}{}", clean(&meta)), secondary),
+    ])
+}
+
+fn draw_artist(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
+    let [label, content] =
+        Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(area);
+    let focused = app.focus == Focus::Main;
+    let window = usize::from(content.height);
+    app.main_view_height = content.height;
+
+    let name = app
+        .artist
+        .detail
+        .as_ref()
+        .map_or_else(|| app.source.clone(), |detail| detail.name.clone());
+    let id = app.artist.id.map(|id| id.to_string()).unwrap_or_default();
+    let mut title = vec![
+        Span::styled("// ", Style::new().fg(theme.panel)),
+        Span::styled("ARTIST", Style::new().fg(theme.muted)),
+    ];
+    if !id.is_empty() {
+        title.push(Span::styled(
+            format!(" {} {id}", theme.glyphs.separator),
+            Style::new().fg(theme.muted),
+        ));
+    }
+    title.push(Span::styled(
+        format!(" {} ", theme.glyphs.separator),
+        Style::new().fg(theme.dim),
+    ));
+    title.push(Span::styled(
+        truncate_to_width(&clean(&name), 40, theme.glyphs.ellipsis),
+        Style::new().fg(theme.text),
+    ));
+    if focused {
+        title.push(Span::styled(
+            format!(" {}", theme.glyphs.active),
+            Style::new().fg(theme.accent),
+        ));
+    }
+    frame.render_widget(Paragraph::new(Line::from(title)), label);
+
+    let width = usize::from(content.width);
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    if let Some(detail) = app.artist.detail.as_ref() {
+        lines.push(Line::from(vec![
+            Span::styled("  ", Style::new()),
+            Span::styled(
+                format!(
+                    "{} albums {} {} tracks",
+                    compact_count(detail.album_count),
+                    theme.glyphs.separator,
+                    compact_count(detail.track_count)
+                ),
+                Style::new().fg(theme.accent_alt),
+            ),
+        ]));
+        if !detail.aliases.is_empty() {
+            lines.push(Line::from(vec![
+                Span::styled("  ", Style::new()),
+                Span::styled(
+                    truncate_to_width(
+                        &clean(&detail.aliases.join(" · ")),
+                        width.saturating_sub(2),
+                        theme.glyphs.ellipsis,
+                    ),
+                    Style::new().fg(theme.muted),
+                ),
+            ]));
+        }
+        if !detail.description.is_empty() && window > lines.len() + 4 {
+            for line in wrap_to_width(&clean(&detail.description), width.saturating_sub(2).max(8))
+                .into_iter()
+                .take(1)
+            {
+                lines.push(Line::from(vec![
+                    Span::styled("  ", Style::new()),
+                    Span::styled(line, Style::new().fg(theme.dim)),
+                ]));
+            }
+        }
+        lines.push(rule_line(width, theme));
+    }
+
+    if let Some(error) = &app.artist.error {
+        // Keep whatever profile loaded before the failed page request.
+        let mut block = lines;
+        block.extend(error_block(error, theme, content.width));
+        frame.render_widget(Paragraph::new(Text::from(block)), content);
+        return;
+    }
+
+    if app.artist.albums.is_empty() {
+        if app.artist.loading {
+            lines.push(loading_line(&app.source, theme, app.frame));
+        } else {
+            lines.push(Line::from(vec![
+                Span::styled("// ", Style::new().fg(theme.panel)),
+                Span::styled(
+                    "NO ALBUMS",
+                    Style::new().fg(theme.panel).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("  r retry {} esc close", theme.glyphs.separator),
+                    Style::new().fg(theme.muted),
+                ),
+            ]));
+        }
+        frame.render_widget(Paragraph::new(Text::from(lines)), content);
+        return;
+    }
+
+    lines.push(section_line("ALBUMS", app.artist.albums.len(), theme));
+    let mut line_of = Vec::with_capacity(app.artist.albums.len());
+    let title_width = width.saturating_sub(30).clamp(12, 48);
+    for (index, album) in app.artist.albums.iter().enumerate() {
+        line_of.push(lines.len());
+        lines.push(album_line(
+            theme,
+            album,
+            index,
+            focused && index == app.main_selection,
+            title_width,
+        ));
+    }
+    if app.artist.has_more {
+        lines.push(Line::from(vec![
+            Span::styled("  ", Style::new()),
+            Span::styled(
+                format!(
+                    "{} MORE ALBUMS {} n loads the next page",
+                    theme.glyphs.stopped, theme.glyphs.separator
+                ),
+                Style::new().fg(theme.accent_alt),
+            ),
+        ]));
+    }
+
+    let offset = line_of
+        .get(app.main_selection)
+        .map_or(0, |line| scroll_offset(*line, window));
+    frame.render_widget(
+        Paragraph::new(Text::from(lines)).scroll((u16::try_from(offset).unwrap_or(u16::MAX), 0)),
+        content,
+    );
+}
+
+fn loading_line(target: &str, theme: &Theme, frame: u64) -> Line<'static> {
+    let spinner = theme.glyphs.spinner[(frame % 4) as usize];
+    Line::from(vec![
+        Span::styled(
+            format!("{spinner} LOADING "),
+            Style::new().fg(theme.warn).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            truncate_to_width(&clean(target), 48, theme.glyphs.ellipsis),
+            Style::new().fg(theme.muted),
+        ),
+    ])
+}
+
+fn album_line(
+    theme: &Theme,
+    album: &lekima_domain::Album,
+    index: usize,
+    selected: bool,
+    title_width: usize,
+) -> Line<'static> {
+    let marker = if selected { theme.glyphs.active } else { " " };
+    let year = album
+        .year
+        .map_or_else(|| "—".to_owned(), |year| format!("{year:>4}"));
+    let tracks = album.track_count.map_or_else(
+        || "—".to_owned(),
+        |count| format!("{count} {}", tracks_word(count as usize)),
+    );
+    let title = truncate_to_width(&clean(&album.name), title_width, theme.glyphs.ellipsis);
+    let pad = " ".repeat(title_width.saturating_sub(display_width(&title)) + 2);
+    let primary = if selected {
+        selection_style(theme)
+    } else {
+        Style::new().fg(theme.text)
+    };
+    let secondary = if selected {
+        selection_style(theme)
+    } else {
+        Style::new().fg(theme.muted)
+    };
+    Line::from(vec![
+        Span::styled(
+            format!("{marker} "),
+            Style::new().fg(if selected { theme.accent } else { theme.dim }),
+        ),
+        Span::styled(
+            format!("{:>3} ", index + 1),
+            if selected {
+                primary
+            } else {
+                Style::new().fg(theme.muted)
+            },
+        ),
+        Span::styled(format!("{year}  "), secondary),
+        Span::styled(title, primary),
+        Span::styled(format!("{pad}{tracks}"), secondary),
+    ])
+}
+
+fn draw_album(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
+    let focused = app.focus == Focus::Main;
+    let name = app
+        .album
+        .detail
+        .as_ref()
+        .map_or_else(|| app.source.clone(), |detail| detail.album.name.clone());
+    let id = app.album.id.map(|id| id.to_string()).unwrap_or_default();
+    let mut title = vec![
+        Span::styled("// ", Style::new().fg(theme.panel)),
+        Span::styled("ALBUM", Style::new().fg(theme.muted)),
+    ];
+    if !id.is_empty() {
+        title.push(Span::styled(
+            format!(" {} {id}", theme.glyphs.separator),
+            Style::new().fg(theme.muted),
+        ));
+    }
+    title.push(Span::styled(
+        format!(" {} ", theme.glyphs.separator),
+        Style::new().fg(theme.dim),
+    ));
+    title.push(Span::styled(
+        truncate_to_width(&clean(&name), 40, theme.glyphs.ellipsis),
+        Style::new().fg(theme.text),
+    ));
+    if focused {
+        title.push(Span::styled(
+            format!(" {}", theme.glyphs.active),
+            Style::new().fg(theme.accent),
+        ));
+    }
+
+    if area.height < 6 {
+        let mut lines = vec![Line::from(title)];
+        if let Some(error) = &app.album.error {
+            lines.extend(error_block(error, theme, area.width));
+        }
+        frame.render_widget(Paragraph::new(Text::from(lines)), area);
+        return;
+    }
+
+    let [label, meta, rule, table_area] = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(2),
+        Constraint::Length(1),
+        Constraint::Min(1),
+    ])
+    .areas(area);
+    frame.render_widget(Paragraph::new(Line::from(title)), label);
+
+    let mut meta_lines: Vec<Line<'static>> = Vec::new();
+    if let Some(detail) = app.album.detail.as_ref() {
+        let artist = detail.album.artist_name();
+        let artist = if artist.is_empty() { "—" } else { artist };
+        let year = detail
+            .album
+            .year
+            .map_or_else(|| "—".to_owned(), |year| year.to_string());
+        meta_lines.push(Line::from(vec![
+            Span::styled("  ", Style::new()),
+            Span::styled(
+                format!(
+                    "{artist} {} {year} {} {} TRACK{}",
+                    theme.glyphs.separator,
+                    theme.glyphs.separator,
+                    detail.tracks.len(),
+                    if detail.tracks.len() == 1 { "" } else { "S" }
+                ),
+                Style::new().fg(theme.accent_alt),
+            ),
+        ]));
+        if !detail.album.description.is_empty() {
+            meta_lines.push(Line::from(vec![
+                Span::styled("  ", Style::new()),
+                Span::styled(
+                    truncate_to_width(
+                        &clean(&detail.album.description),
+                        usize::from(meta.width).saturating_sub(2),
+                        theme.glyphs.ellipsis,
+                    ),
+                    Style::new().fg(theme.dim),
+                ),
+            ]));
+        }
+    } else if app.album.loading {
+        meta_lines.push(loading_line(&app.source, theme, app.frame));
+    }
+    frame.render_widget(Paragraph::new(Text::from(meta_lines)), meta);
+    frame.render_widget(
+        Paragraph::new(rule_line(usize::from(rule.width), theme)),
+        rule,
+    );
+
+    if let Some(error) = &app.album.error {
+        frame.render_widget(
+            Paragraph::new(Text::from(error_block(error, theme, table_area.width))),
+            table_area,
+        );
+        return;
+    }
+
+    let tracks = app.album.tracks();
+    app.main_view_height = table_area.height;
+    if tracks.is_empty() {
+        let line = if app.album.loading {
+            loading_line(&app.source, theme, app.frame)
+        } else {
+            Line::from(vec![
+                Span::styled("// ", Style::new().fg(theme.panel)),
+                Span::styled(
+                    "NO TRACKS",
+                    Style::new().fg(theme.panel).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("  r retry {} esc close", theme.glyphs.separator),
+                    Style::new().fg(theme.muted),
+                ),
+            ])
+        };
+        frame.render_widget(Paragraph::new(line), table_area);
+        return;
+    }
+
+    let columns = track_columns(table_area.width);
+    let playing_id = app.status.track.as_ref().map(|track| track.id);
+    let comfortable = theme.density == Density::Comfortable;
+    let mut rows: Vec<Row> = Vec::with_capacity(tracks.len() * 2);
+    {
+        let view: &App = app;
+        for (index, track) in tracks.iter().enumerate() {
+            rows.push(track_row(
+                view,
+                theme,
+                track,
+                index,
+                TrackRowState {
+                    current: Some(track.id) == playing_id,
+                    past: false,
+                    selection: focus_tick(focused, index == app.main_selection, theme),
+                },
+                &columns,
+            ));
+            if comfortable {
+                rows.push(Row::new(Vec::<Span>::new()));
+            }
+        }
+    }
+
+    let mut header = vec!["", "#", "", "TITLE"];
+    if columns.artist.is_some() {
+        header.push("ARTIST");
+    }
+    if columns.time {
+        header.push("TIME");
+    }
+    let table = Table::new(rows, columns.constraints())
+        .column_spacing(0)
+        .header(Row::new(header).style(Style::new().fg(theme.panel)))
+        .row_highlight_style(if focused {
+            selection_style(theme)
+        } else {
+            inactive_selection_style(theme)
+        });
+    let visual_selection = if comfortable {
+        app.main_selection * 2
+    } else {
+        app.main_selection
+    };
+    let mut state = TableState::default().with_selected(Some(visual_selection));
+    frame.render_stateful_widget(table, table_area, &mut state);
+}
+
 fn draw_lyrics(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     if app.lyrics_state.track().is_none() || area.height < 4 {
         return;
@@ -1302,6 +1955,11 @@ fn wrap_to_width(value: &str, width: usize) -> Vec<String> {
 }
 
 /// `1 234` becomes `1.2k`, `44 054` becomes `44k`, and so on.
+/// `track`/`tracks` so counts read naturally.
+fn tracks_word(count: usize) -> &'static str {
+    if count == 1 { "track" } else { "tracks" }
+}
+
 fn compact_count(count: u64) -> String {
     if count < 1_000 {
         return count.to_string();
@@ -2464,7 +3122,7 @@ mod tests {
     use super::{
         comment_date, compact_count, display_width, draw, truncate_to_width, wrap_to_width,
     };
-    use crate::app::{App, Focus, Mode};
+    use crate::app::{AlbumState, App, ArtistState, Focus, Mode, View};
     use crate::theme::Theme;
 
     fn render(app: &mut App, width: u16, height: u16) -> String {
@@ -3097,5 +3755,188 @@ mod tests {
         );
         assert_eq!(wrap_to_width("abcdefghij", 4), vec!["abcd", "efgh", "ij"]);
         assert_eq!(wrap_to_width("", 10), vec![""]);
+    }
+
+    fn album(name: &str, year: Option<u16>) -> lekima_domain::Album {
+        lekima_domain::Album {
+            id: 9.into(),
+            name: name.to_owned(),
+            cover_url: None,
+            artist: Some(lekima_domain::Artist {
+                id: 2.into(),
+                name: "Aash".to_owned(),
+            }),
+            year,
+            track_count: Some(12),
+            description: String::new(),
+        }
+    }
+
+    fn search_results() -> lekima_domain::SearchResults {
+        use lekima_domain::{Playlist, SearchResults, SearchTotals};
+        SearchResults {
+            tracks: vec![track("Mota")],
+            albums: vec![album("Mota LP", Some(2024))],
+            artists: vec![lekima_domain::Artist {
+                id: 6452.into(),
+                name: "Jay Chou".to_owned(),
+            }],
+            playlists: vec![Playlist {
+                id: 5.into(),
+                name: "Post-rock".to_owned(),
+                description: String::new(),
+                track_count: 42,
+                cover_url: None,
+                owner: None,
+            }],
+            totals: SearchTotals {
+                tracks: 1,
+                albums: 1,
+                artists: 1,
+                playlists: 1,
+            },
+            total: 4,
+        }
+    }
+
+    #[test]
+    fn search_results_render_grouped_sections_at_both_sizes() {
+        let mut app = App::new();
+        app.search.query = "mota".to_owned();
+        app.apply(Ok(lekima_ipc::Reply::Search {
+            results: search_results(),
+        }));
+
+        for (width, height) in [(80, 24), (120, 30)] {
+            let screen = render(&mut app, width, height);
+            for expected in [
+                "// SEARCH",
+                "TRACKS",
+                "ALBUMS",
+                "ARTISTS",
+                "PLAYLISTS",
+                "Mota",
+                "Aash",
+                "Jay Chou",
+                "42 tracks",
+            ] {
+                assert!(
+                    screen.contains(expected),
+                    "{width}x{height} missing `{expected}`"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn search_filters_render_above_the_prompt() {
+        let mut app = App::new();
+        app.handle_key(crossterm::event::KeyEvent::new(
+            KeyCode::Char('/'),
+            KeyModifiers::NONE,
+        ));
+        let screen = render(&mut app, 100, 24);
+        assert!(screen.contains("[ALL]"));
+        assert!(screen.contains("ALBUMS"));
+        assert!(screen.contains("ctrl-1..5"));
+    }
+
+    #[test]
+    fn artist_page_renders_counts_albums_and_paging() {
+        let mut app = App::new();
+        app.view = View::Artist;
+        app.source = "artist: Jay Chou".to_owned();
+        app.artist = ArtistState {
+            id: Some(6452.into()),
+            detail: Some(lekima_domain::ArtistDetail {
+                id: 6452.into(),
+                name: "Jay Chou".to_owned(),
+                avatar_url: None,
+                cover_url: None,
+                album_count: 49,
+                track_count: 592,
+                description: "华语流行乐男歌手".to_owned(),
+                aliases: vec!["周董".to_owned()],
+            }),
+            albums: vec![album("最伟大的作品", Some(2022))],
+            has_more: true,
+            ..ArtistState::default()
+        };
+
+        for (width, height) in [(80, 24), (120, 30)] {
+            let screen = render(&mut app, width, height);
+            for expected in [
+                "// ARTIST",
+                "6452",
+                "Jay Chou",
+                "49 albums",
+                "592 tracks",
+                "ALBUMS",
+                "2022",
+                "12 tracks",
+                "MORE ALBUMS",
+            ] {
+                assert!(
+                    screen.contains(expected),
+                    "{width}x{height} missing `{expected}`"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn album_page_renders_metadata_and_the_track_table() {
+        let mut app = App::new();
+        app.view = View::Album;
+        app.source = "album: Mota".to_owned();
+        app.album = AlbumState {
+            id: Some(9.into()),
+            detail: Some(lekima_domain::AlbumDetail {
+                album: album("Mota", Some(2024)),
+                tracks: vec![track("Mota"), track("Mota (Live)")],
+            }),
+            ..AlbumState::default()
+        };
+
+        for (width, height) in [(80, 24), (120, 30)] {
+            let screen = render(&mut app, width, height);
+            for expected in ["// ALBUM", "Mota", "Aash", "2024", "2 TRACKS", "Live"] {
+                assert!(
+                    screen.contains(expected),
+                    "{width}x{height} missing `{expected}`"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn catalogue_empty_and_error_states_are_explicit() {
+        let mut app = App::new();
+        app.view = View::Artist;
+        app.artist = ArtistState {
+            id: Some(6452.into()),
+            ..ArtistState::default()
+        };
+        assert!(render(&mut app, 100, 24).contains("NO ALBUMS"));
+
+        app.view = View::Album;
+        app.album = AlbumState {
+            id: Some(9.into()),
+            detail: Some(lekima_domain::AlbumDetail {
+                album: album("Mota", None),
+                tracks: Vec::new(),
+            }),
+            ..AlbumState::default()
+        };
+        let screen = render(&mut app, 100, 24);
+        assert!(screen.contains("NO TRACKS"));
+        // Missing metadata is an em dash, never a blank column.
+        assert!(screen.contains('—'));
+
+        app.view = View::Search;
+        app.search.error = Some("provider down".to_owned());
+        let screen = render(&mut app, 100, 24);
+        assert!(screen.contains("CATALOGUE UNAVAILABLE"));
+        assert!(screen.contains("provider down"));
     }
 }
