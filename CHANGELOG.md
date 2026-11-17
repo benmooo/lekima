@@ -1,3 +1,8 @@
+# Changelog
+
+All notable changes to lekima are documented here. The format follows
+[Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
+
 ## 0.9.0 — 2026-11-17
 
 ### Added
@@ -26,11 +31,6 @@
   endpoints and album search results.
 - Every published crate now shares the workspace version: the unchanged
   `lekima-platform` publishes at 0.9.0 instead of keeping its own 0.3.0 line.
-
-# Changelog
-
-All notable changes to lekima are documented here. The format follows
-[Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
 ## 0.8.0 — 2026-11-17
 
