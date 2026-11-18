@@ -6,6 +6,9 @@
 //! that come from the OS (MPRIS clients on Linux, media keys and Control Center
 //! on macOS) and feeds them into the same command path as the CLI and TUI.
 //!
+//! It also owns one [`Notifier`] for desktop notifications; that path is
+//! delivery-only and never feeds commands back.
+//!
 //! Backends:
 //!
 //! | OS | Mechanism |
@@ -17,6 +20,7 @@
 use std::sync::Arc;
 
 mod noop;
+pub mod notify;
 
 #[cfg(target_os = "macos")]
 mod host;
@@ -27,6 +31,9 @@ mod linux;
 mod macos;
 
 pub use noop::NoopControls;
+pub use notify::{
+    NoopNotifier, Notification, Notifier, backend_name as notifier_backend, notifier,
+};
 
 #[cfg(target_os = "macos")]
 pub use macos::run_host;

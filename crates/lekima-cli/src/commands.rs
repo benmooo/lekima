@@ -1114,6 +1114,10 @@ async fn doctor(socket: &Path, paths: &Paths, config: &Config, json: bool) -> Re
     let media = serde_json::json!({
         "backend": lekima_platform::backend_name(),
     });
+    let notifications = serde_json::json!({
+        "backend": lekima_platform::notifier_backend(),
+        "on_track_change": config.notifications.on_track_change,
+    });
     let cache = lekima_audio::StreamCache::new(
         paths.cache_dir().join("streams"),
         config.cache.limit_mb,
@@ -1128,6 +1132,7 @@ async fn doctor(socket: &Path, paths: &Paths, config: &Config, json: bool) -> Re
         "config": { "file": paths.config_file(), "loaded": true },
         "audio": audio,
         "media": media,
+        "notifications": notifications,
         "provider": provider,
         "cache": cache,
         "log": paths.log_file(),
@@ -1164,6 +1169,15 @@ async fn doctor(socket: &Path, paths: &Paths, config: &Config, json: bool) -> Re
     crate::say!("config   {}", paths.config_file().display());
     crate::say!("audio    {audio}");
     crate::say!("media    {}", lekima_platform::backend_name());
+    crate::say!(
+        "notify   {} ({})",
+        lekima_platform::notifier_backend(),
+        if config.notifications.on_track_change {
+            "on track change"
+        } else {
+            "off"
+        }
+    );
     crate::say!(
         "cache    {} files, {:.1} / {:.1} MiB ({})",
         cache.files,

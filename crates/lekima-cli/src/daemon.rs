@@ -16,13 +16,15 @@ use std::{
 use anyhow::{Context, Result};
 use lekima_config::{Config, FileCredentials, Paths, PlaybackStore, SavedPlayback};
 use lekima_core::{PlayRequest, Player};
-use lekima_domain::{CredentialsStore, PlaybackState, QueueKind, SearchKind};
+use lekima_domain::{
+    CredentialsStore, PlaybackState, PlaybackStatus, QueueKind, SearchKind, Track, sanitize_line,
+};
 use lekima_ipc::{
     ApiError, Command, Event, EventFrame, Handled, PlayTarget, Reply, Request, Response,
     Subscription, serve_connection,
 };
 use lekima_ncm::{NcmMusicService, NcmOptions};
-use lekima_platform::{MediaCommand, MediaControls, NowPlaying};
+use lekima_platform::{MediaCommand, MediaControls, Notification, Notifier, NowPlaying};
 use tokio::{
     net::UnixListener,
     sync::{Notify, broadcast},
@@ -100,6 +102,8 @@ pub async fn run(paths: &Paths, config: &Config, socket: &Path, _detached: bool)
     let preloaded = Arc::new(AtomicBool::new(false));
     let controls = lekima_platform::controls().await;
     tracing::debug!(backend = controls.backend(), "media integration ready");
+    let notifier = lekima_platform::notifier();
+    tracing::debug!(backend = notifier.backend(), "notification backend ready");
     let daemon = Arc::new(Daemon {
         player: Arc::clone(&player),
         credentials: FileCredentials::new(paths.session_file()),
@@ -108,6 +112,10 @@ pub async fn run(paths: &Paths, config: &Config, socket: &Path, _detached: bool)
         sleep_until: Arc::clone(&sleep_until),
         preloaded: Arc::clone(&preloaded),
         controls,
+        notifier,
+        track_notifications: StdMutex::new(TrackNotifications::new(
+            config.notifications.on_track_change,
+        )),
         playback_store: playback_store.clone(),
     });
 
@@ -172,7 +180,48 @@ struct Daemon {
     sleep_until: Arc<StdMutex<Option<Instant>>>,
     preloaded: Arc<AtomicBool>,
     controls: Arc<dyn MediaControls>,
+    notifier: Arc<dyn Notifier>,
+    /// Which track changes are worth announcing. Guarded because the ticker and
+    /// any future caller observe the same snapshot stream.
+    track_notifications: StdMutex<TrackNotifications>,
     playback_store: PlaybackStore,
+}
+
+/// Decides which track changes become notifications.
+///
+/// Kept out of the daemon so the rule is testable without a player, an audio
+/// device or an OS helper: the daemon only forwards what this returns.
+#[derive(Debug)]
+struct TrackNotifications {
+    enabled: bool,
+    last: Option<u64>,
+}
+
+impl TrackNotifications {
+    fn new(enabled: bool) -> Self {
+        Self {
+            enabled,
+            last: None,
+        }
+    }
+
+    /// Records the current track and returns a notification when it is both new
+    /// and playing.
+    ///
+    /// A new track seen while paused is recorded without notifying, so resuming
+    /// does not deliver a stale announcement.
+    fn observe(&mut self, state: &PlaybackState) -> Option<Notification> {
+        if !self.enabled {
+            return None;
+        }
+        let track = state.track.as_ref()?;
+        let id = track.id.get();
+        if self.last == Some(id) {
+            return None;
+        }
+        self.last = Some(id);
+        (state.status == PlaybackStatus::Playing).then(|| track_notification(track))
+    }
 }
 
 /// Sequenced broadcast with a replay ring.
@@ -633,6 +682,23 @@ impl Daemon {
             .ok_or_else(|| ApiError::new(lekima_ipc::ErrorCode::NotFound, "nothing is playing"))
     }
 
+    /// Announces a track change once per track, and only while playing.
+    fn maybe_notify(&self, state: &PlaybackState) {
+        let Ok(mut notifications) = self.track_notifications.lock() else {
+            return;
+        };
+        let Some(notification) = notifications.observe(state) else {
+            return;
+        };
+        drop(notifications);
+        if !self.notifier.notify(&notification) {
+            tracing::debug!(
+                backend = self.notifier.backend(),
+                "desktop notification was not shown"
+            );
+        }
+    }
+
     async fn status(&self) -> Reply {
         let mut state: PlaybackState = self.player.snapshot().await;
         state.sleep_remaining_ms = self.sleep_until.lock().ok().and_then(|slot| {
@@ -717,6 +783,7 @@ fn spawn_platform(daemon: Arc<Daemon>) {
             interval.tick().await;
             let state = daemon.player.snapshot().await;
             daemon.controls.update(&now_playing(&state));
+            daemon.maybe_notify(&state);
             for action in daemon.controls.poll() {
                 let Some(command) = platform_command(&state, action) else {
                     continue;
@@ -728,6 +795,30 @@ fn spawn_platform(daemon: Arc<Daemon>) {
             }
         }
     });
+}
+
+/// Builds the track-change notification.
+///
+/// Provider text is sanitized here rather than in `lekima-platform` so the
+/// OS-facing string goes through the same helper as every terminal surface.
+fn track_notification(track: &Track) -> Notification {
+    let title = sanitize_line(&track.name);
+    let artist = sanitize_line(&track.artist_names());
+    let album = sanitize_line(track.album_name());
+    let body = match (artist.is_empty(), album.is_empty()) {
+        (true, true) => String::new(),
+        (false, true) => artist,
+        (true, false) => album,
+        (false, false) => format!("{artist} · {album}"),
+    };
+    Notification {
+        title: if title.is_empty() {
+            "Unknown track".to_owned()
+        } else {
+            title
+        },
+        body,
+    }
 }
 
 fn now_playing(state: &PlaybackState) -> NowPlaying {
@@ -995,4 +1086,166 @@ pub async fn wait_until_running(
             "the log file (`lekima daemon logs`)"
         ),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use lekima_domain::{
+        Album, AlbumId, Artist, ArtistId, PlaybackState, PlaybackStatus, Quality, QueueKind, Track,
+        TrackId,
+    };
+
+    use super::{TrackNotifications, track_notification};
+
+    fn track(name: &str, artist: Option<&str>, album: Option<&str>) -> Track {
+        Track {
+            id: TrackId::from(1_u64),
+            name: name.to_owned(),
+            artists: artist
+                .map(|name| {
+                    vec![Artist {
+                        id: ArtistId::from(7_u64),
+                        name: name.to_owned(),
+                    }]
+                })
+                .unwrap_or_default(),
+            album: album.map(|name| Album {
+                id: AlbumId::from(9_u64),
+                name: name.to_owned(),
+                description: String::new(),
+                cover_url: None,
+                artist: None,
+                year: None,
+                track_count: None,
+            }),
+            duration_ms: 0,
+        }
+    }
+
+    #[test]
+    fn track_notification_joins_artist_and_album() {
+        let notification = track_notification(&track("Song", Some("Artist"), Some("Album")));
+        assert_eq!(notification.title, "Song");
+        assert_eq!(notification.body, "Artist · Album");
+    }
+
+    #[test]
+    fn track_notification_falls_back_to_artist_then_album() {
+        let without_album = track_notification(&track("Song", Some("Artist"), None));
+        assert_eq!(without_album.body, "Artist");
+
+        let without_artist = track_notification(&track("Song", None, Some("Album")));
+        assert_eq!(without_artist.body, "Unknown artist · Album");
+    }
+
+    #[test]
+    fn track_notification_sanitizes_provider_text() {
+        let notification = track_notification(&track(
+            "Song\u{1b}[31m red",
+            Some("Art\u{202e}ist"),
+            Some("Al\u{7f}bum"),
+        ));
+        assert!(!notification.title.contains('\u{1b}'), "{notification:?}");
+        assert!(!notification.body.contains('\u{202e}'), "{notification:?}");
+        assert!(!notification.body.contains('\u{7f}'), "{notification:?}");
+    }
+
+    #[test]
+    fn track_notification_names_an_empty_title() {
+        let notification = track_notification(&track("   ", None, None));
+        assert_eq!(notification.title, "Unknown track");
+        assert_eq!(notification.body, "Unknown artist");
+    }
+
+    fn state(status: PlaybackStatus, id: Option<u64>) -> PlaybackState {
+        PlaybackState {
+            status,
+            track: id.map(|id| Track {
+                id: TrackId::from(id),
+                ..track("Song", Some("Artist"), Some("Album"))
+            }),
+            position_ms: 0,
+            volume: 0.7,
+            muted: false,
+            repeat: lekima_domain::RepeatMode::Off,
+            shuffle: false,
+            queue_length: usize::from(id.is_some()),
+            queue_index: id.map(|_| 0),
+            queue_kind: QueueKind::Manual,
+            liked: false,
+            loading: false,
+            buffering: false,
+            cached: false,
+            quality: Quality::Exhigh,
+            sleep_remaining_ms: None,
+            wave: Vec::new(),
+            stream_duration_ms: None,
+            buffered: Vec::new(),
+            revision: 0,
+        }
+    }
+
+    #[test]
+    fn notifications_are_silent_when_disabled() {
+        let mut notifications = TrackNotifications::new(false);
+        assert!(
+            notifications
+                .observe(&state(PlaybackStatus::Playing, Some(1)))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_new_track_announces_once() {
+        let mut notifications = TrackNotifications::new(true);
+        let playing = state(PlaybackStatus::Playing, Some(1));
+
+        assert!(notifications.observe(&playing).is_some());
+        assert!(notifications.observe(&playing).is_none());
+    }
+
+    #[test]
+    fn pausing_and_seeking_do_not_announce_again() {
+        let mut notifications = TrackNotifications::new(true);
+        let mut playing = state(PlaybackStatus::Playing, Some(1));
+        assert!(notifications.observe(&playing).is_some());
+
+        playing.status = PlaybackStatus::Paused;
+        playing.position_ms = 30_000;
+        assert!(notifications.observe(&playing).is_none());
+
+        playing.status = PlaybackStatus::Playing;
+        assert!(notifications.observe(&playing).is_none());
+    }
+
+    #[test]
+    fn a_track_seen_while_paused_is_not_announced_on_resume() {
+        let mut notifications = TrackNotifications::new(true);
+
+        assert!(
+            notifications
+                .observe(&state(PlaybackStatus::Paused, Some(2)))
+                .is_none()
+        );
+        assert!(
+            notifications
+                .observe(&state(PlaybackStatus::Playing, Some(2)))
+                .is_none()
+        );
+        assert!(
+            notifications
+                .observe(&state(PlaybackStatus::Playing, Some(3)))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn an_empty_queue_never_announces() {
+        let mut notifications = TrackNotifications::new(true);
+        assert!(
+            notifications
+                .observe(&state(PlaybackStatus::Stopped, None))
+                .is_none()
+        );
+    }
 }

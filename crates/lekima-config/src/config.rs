@@ -16,6 +16,7 @@ pub struct Config {
     pub ui: UiConfig,
     pub daemon: DaemonConfig,
     pub cache: CacheConfig,
+    pub notifications: NotificationsConfig,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -124,6 +125,17 @@ impl Default for CacheConfig {
             limit_mb: 256,
         }
     }
+}
+
+/// Desktop notifications pushed by the daemon.
+///
+/// Off by default: a notification is an OS-level interruption, so it is opt-in
+/// rather than a surprise after an upgrade.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct NotificationsConfig {
+    /// Show a notification when the playing track changes.
+    pub on_track_change: bool,
 }
 
 /// Persists the output device, preserving every other setting.
@@ -389,6 +401,15 @@ mod tests {
         assert!(config.ui.lyrics_translation);
         assert!((config.playback.volume - 0.25).abs() < f32::EPSILON);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn notifications_are_opt_in() {
+        let config: Config = toml::from_str("[playback]\nvolume = 0.25\n").unwrap();
+        assert!(!config.notifications.on_track_change);
+
+        let enabled: Config = toml::from_str("[notifications]\non_track_change = true\n").unwrap();
+        assert!(enabled.notifications.on_track_change);
     }
 
     #[test]

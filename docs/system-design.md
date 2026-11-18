@@ -418,6 +418,9 @@ show_help_on_start = false
 [daemon]
 autostart = true
 log_level = "info"
+
+[notifications]
+on_track_change = false   # opt-in; `lekima doctor` reports the backend
 ```
 
 Precedence: defaults → file → environment (`LEKIMA_CONFIG_DIR`,
