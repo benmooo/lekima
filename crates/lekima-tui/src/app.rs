@@ -2362,6 +2362,36 @@ mod tests {
     }
 
     #[test]
+    fn album_commands_target_the_current_track() {
+        let mut app = App::new();
+        app.status.track = Some(Track {
+            id: 1.into(),
+            name: "Mota".to_owned(),
+            artists: Vec::new(),
+            album: Some(lekima_domain::Album {
+                id: 7.into(),
+                name: "Mota".to_owned(),
+                cover_url: None,
+                artist: None,
+                year: None,
+                track_count: None,
+                description: String::new(),
+            }),
+            duration_ms: 1_000,
+        });
+        assert!(matches!(
+            app.run_command("album play"),
+            Action::Call(lekima_ipc::Command::Play {
+                target: lekima_ipc::PlayTarget::Album { id }
+            }) if id == 7.into()
+        ));
+        assert!(matches!(
+            app.run_command("album queue"),
+            Action::Call(lekima_ipc::Command::QueueAlbum { id, next: false }) if id == 7.into()
+        ));
+    }
+
+    #[test]
     fn track_changes_refresh_open_lyrics() {
         let mut app = App::new();
         app.status.track = Some(sample_track(1));

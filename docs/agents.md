@@ -50,7 +50,7 @@ lekima mcp
 
 JSON-RPC over stdio. Tools: `player_status`, `search`, `artist`,
 `artist_albums`, `album`, `play`, `pause`, `resume`, `next`, `previous`,
-`set_volume`, `queue_list`, `queue_add`, `queue_remove`, `queue_move`, `sleep`,
+`set_volume`, `queue_list`, `queue_add`, `queue_album`, `queue_remove`, `queue_move`, `sleep`,
 `set_quality`, `lyrics`, `comments`, `daily`, `fm`.
 
 `search` accepts `kind` (`all`, `track`, `album`, `artist`, `playlist`) and

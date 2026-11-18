@@ -145,6 +145,20 @@ terminals; the title is clipped first only when the terminal is very small.
   `:`, `?`). Below 44×12 it collapses to one actionable line
   (`// NOTHING LOADED · / search · Tab library`). No centred banner.
 
+### Catalogue pages
+
+- Search shows a filter row above the prompt (`ALL TRACKS ALBUMS ARTISTS
+  PLAYLISTS`); the active filter is inverted. `Tab`/`Shift-Tab` cycle,
+  `Ctrl-1..5` jump.
+- Results are grouped by kind with `// TRACKS · n` headers; rows show an index,
+  the name and right-aligned metadata (artist/duration, artist/year/tracks).
+- Artist page: `// ARTIST · id · name`, counts and aliases, a clipped biography,
+  then `// ALBUMS · n` rows with year, name and track count.
+- Album page: `// ALBUM · id · name`, a metadata line, then the shared track
+  table.
+- New pages keep the one-gutter layout, use `esc`/`Ctrl-o` back and `r` refresh,
+  and render loading, error (`r retry`) and empty states explicitly.
+
 ### Lyrics pane
 
 - Not a box: a header line (`// LYRICS · n lines`, `LRC` tag), a thin rule, the
@@ -318,3 +332,5 @@ terminals; the title is clipped first only when the terminal is very small.
 - [x] Comments render section counts, wrapped bodies, replies, deleted markers
       and UTC dates.
 - [x] Alerts are double-bordered console panels with severity-coloured titles.
+- [x] Catalogue search, artist and album pages share the section grammar,
+      filter row, history and loading/error states.

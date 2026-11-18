@@ -4,10 +4,12 @@
 //! without a terminal, a daemon or an account.
 
 use lekima_domain::{
-    Artist, Comment, CommentReply, Comments, PlaybackStatus, Playlist, RepeatMode, Track,
+    Album, AlbumDetail, AlbumId, Artist, ArtistDetail, ArtistId, Comment, CommentReply, Comments,
+    PlaybackStatus, Playlist, RepeatMode, SearchResults, SearchTotals, Track,
 };
+use lekima_ipc::Reply;
 use lekima_tui::Theme;
-use lekima_tui::app::{App, CommentsState, LyricsState};
+use lekima_tui::app::{AlbumState, App, ArtistState, CommentsState, LyricsState, View};
 use lekima_tui::ui::draw;
 use ratatui::{Terminal, backend::TestBackend};
 
@@ -133,7 +135,7 @@ fn main() {
                 println!(
                     "usage: preview [--width N] [--height N] [--theme NAME] \
                      [--glyphs unicode|ascii] [--density compact|comfortable] \
-                     [--mode normal|queue|help|settings|comments] [--long-title] \
+                     [--mode normal|queue|help|settings|comments|search|artist|album] [--long-title] \
                      [--buffered] [--empty] [--no-lyrics] [--toast-error]"
                 );
                 return;
@@ -182,6 +184,146 @@ fn main() {
                 ],
             },
         };
+    }
+
+    if mode == "search" {
+        app.search.query = "mota".to_owned();
+        app.search.applied_filter = lekima_tui::app::SearchFilter::All;
+        app.search.loading = true;
+        app.view = View::Search;
+        app.apply(Ok(Reply::Search {
+            query: "mota".to_owned(),
+            kind: lekima_domain::SearchKind::All,
+            results: SearchResults {
+                tracks: app.tracks.clone(),
+                albums: vec![
+                    Album {
+                        id: AlbumId(242_091_487),
+                        name: "Mota".to_owned(),
+                        cover_url: None,
+                        artist: Some(Artist {
+                            id: ArtistId(31_787_312),
+                            name: "Aash".to_owned(),
+                        }),
+                        year: Some(2024),
+                        track_count: Some(1),
+                        description: String::new(),
+                    },
+                    Album {
+                        id: AlbumId(3_061_999),
+                        name: "Station".to_owned(),
+                        cover_url: None,
+                        artist: Some(Artist {
+                            id: ArtistId(1),
+                            name: "Russian Circles".to_owned(),
+                        }),
+                        year: Some(2008),
+                        track_count: Some(8),
+                        description: String::new(),
+                    },
+                ],
+                artists: vec![Artist {
+                    id: ArtistId(1),
+                    name: "Russian Circles".to_owned(),
+                }],
+                playlists: vec![Playlist {
+                    id: 3_778_678.into(),
+                    name: "Post-rock essentials".to_owned(),
+                    description: String::new(),
+                    track_count: 42,
+                    cover_url: None,
+                    owner: None,
+                }],
+                totals: SearchTotals {
+                    tracks: 6,
+                    albums: 2,
+                    artists: 1,
+                    playlists: 1,
+                },
+                total: 10,
+            },
+        }));
+    }
+    if mode == "artist" {
+        app.view = View::Artist;
+        app.artist = ArtistState {
+            id: Some(ArtistId(6452)),
+            detail: Some(ArtistDetail {
+                id: ArtistId(6452),
+                name: "周杰伦".to_owned(),
+                avatar_url: None,
+                cover_url: None,
+                album_count: 49,
+                track_count: 592,
+                description: "华语流行乐男歌手、音乐人、演员、导演，毕业于淡江中学。".to_owned(),
+                aliases: vec!["Jay Chou".to_owned(), "周董".to_owned()],
+            }),
+            albums: vec![
+                Album {
+                    id: AlbumId(1),
+                    name: "太阳之子".to_owned(),
+                    cover_url: None,
+                    artist: None,
+                    year: Some(2026),
+                    track_count: Some(12),
+                    description: String::new(),
+                },
+                Album {
+                    id: AlbumId(2),
+                    name: "最伟大的作品".to_owned(),
+                    cover_url: None,
+                    artist: None,
+                    year: Some(2022),
+                    track_count: Some(12),
+                    description: String::new(),
+                },
+                Album {
+                    id: AlbumId(3),
+                    name: "Mojito".to_owned(),
+                    cover_url: None,
+                    artist: None,
+                    year: Some(2021),
+                    track_count: Some(1),
+                    description: String::new(),
+                },
+            ],
+            has_more: true,
+            paging: false,
+            loading: false,
+            error: None,
+        };
+        app.source = "artist: 周杰伦".to_owned();
+    }
+    if mode == "album" {
+        app.view = View::Album;
+        let album = Album {
+            id: AlbumId(242_091_487),
+            name: "Mota".to_owned(),
+            cover_url: None,
+            artist: Some(Artist {
+                id: ArtistId(31_787_312),
+                name: "Aash".to_owned(),
+            }),
+            year: Some(2024),
+            track_count: Some(6),
+            description: String::new(),
+        };
+        app.album = AlbumState {
+            id: Some(AlbumId(242_091_487)),
+            detail: Some(AlbumDetail {
+                album,
+                tracks: vec![
+                    track(101, "Mota", "Aash", 154_000),
+                    track(102, "Dust", "Aash", 201_000),
+                    track(103, "Signal", "Aash", 188_000),
+                    track(104, "Drift", "Aash", 233_000),
+                ],
+            }),
+            loading: false,
+            error: None,
+        };
+        app.main_selection = 0;
+        app.source = "album: Mota".to_owned();
     }
 
     app.mode = match mode.as_str() {

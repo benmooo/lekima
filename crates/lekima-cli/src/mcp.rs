@@ -135,6 +135,10 @@ fn build_command(name: &str, args: &Value) -> Result<Command, String> {
         "album" => Command::Album {
             id: lekima_domain::AlbumId(u64_arg(args, "id")?),
         },
+        "queue_album" => Command::QueueAlbum {
+            id: lekima_domain::AlbumId(u64_arg(args, "id")?),
+            next: args.get("next").and_then(Value::as_bool).unwrap_or(false),
+        },
         "play" => Command::Play {
             target: play_target(args)?,
         },
@@ -460,6 +464,19 @@ fn tools() -> Vec<Value> {
             false,
         ),
         tool("queue_list", "List the playback queue.", none.clone(), true),
+        tool(
+            "queue_album",
+            "Append every track of an album to the queue, or insert after the current track.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "id": { "type": "integer" },
+                    "next": { "type": "boolean" }
+                },
+                "required": ["id"]
+            }),
+            false,
+        ),
         tool(
             "queue_add",
             "Append tracks to the queue, or insert after the current track.",
