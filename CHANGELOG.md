@@ -3,6 +3,15 @@
 All notable changes to lekima are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## 0.9.2 — 2026-11-18
+
+### Added
+
+- MCP gains `queue_album`, so agents can append an album or insert it after the
+  current track like the CLI and HTTP surfaces.
+- `preview --mode search|artist|album` renders catalogue fixtures for visual
+  review without a daemon or account.
+
 ## 0.9.1 — 2026-11-18
 
 ### Fixed

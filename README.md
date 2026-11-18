@@ -58,6 +58,8 @@ $ lekima status --json
 
 ## Status
 
+`0.9.2` adds the MCP `queue_album` tool and catalogue preview modes.
+
 `0.9.1` hardens catalogue depth: provider 404s are `not_found`, search
 filters/loading/stale replies stay coherent, interrupted artist/album/search
 pages refetch from history, and album results carry the artist. See
