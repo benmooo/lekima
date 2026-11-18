@@ -183,6 +183,8 @@ fn run(mut command: Command) -> bool {
             Ok(None) => std::thread::sleep(POLL),
             Err(error) => {
                 tracing::debug!(%error, "notification helper could not be awaited");
+                let _ = child.kill();
+                let _ = child.wait();
                 return false;
             }
         }

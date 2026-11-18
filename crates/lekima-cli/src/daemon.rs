@@ -197,6 +197,8 @@ struct Daemon {
 #[derive(Debug)]
 struct NotifierHandle {
     sender: std::sync::mpsc::SyncSender<Notification>,
+    /// Set once a dead worker is reported, so it warns per run, not per track.
+    reported: AtomicBool,
 }
 
 impl NotifierHandle {
@@ -217,12 +219,25 @@ impl NotifierHandle {
         if let Err(error) = worker {
             tracing::warn!(%error, "notification thread failed to start");
         }
-        Self { sender }
+        Self {
+            sender,
+            reported: AtomicBool::new(false),
+        }
     }
 
     fn send(&self, notification: Notification) {
-        if self.sender.try_send(notification).is_err() {
-            tracing::debug!("notification queue is full; dropping an announcement");
+        match self.sender.try_send(notification) {
+            Ok(()) => {}
+            Err(std::sync::mpsc::TrySendError::Full(_)) => {
+                tracing::debug!("notification queue is full; dropping an announcement");
+            }
+            Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
+                if !self.reported.swap(true, Ordering::Relaxed) {
+                    tracing::warn!(
+                        "notification worker stopped; notifications are off until the daemon restarts"
+                    );
+                }
+            }
         }
     }
 }
@@ -236,9 +251,6 @@ struct TrackNotifications {
     enabled: bool,
     /// The track the user was already told about.
     announced: Option<TrackId>,
-    /// A new track that is current but not audible yet (stopped, loading or
-    /// buffering). It is announced once it actually starts.
-    pending: Option<TrackId>,
 }
 
 impl TrackNotifications {
@@ -246,7 +258,6 @@ impl TrackNotifications {
         Self {
             enabled,
             announced: None,
-            pending: None,
         }
     }
 
@@ -257,17 +268,17 @@ impl TrackNotifications {
     ///   announces it again.
     /// - A new track seen while paused is marked as announced without
     ///   notifying: the listener paused deliberately, so resuming is not news.
-    /// - A new track that is not playing yet is held as pending and announced
-    ///   when playback actually starts. This covers a restored queue, a queue
-    ///   edit that replaces the current track, and a track whose stream fails
-    ///   to load — none of which should be announced early.
+    /// - A new track that is not audible yet (stopped, loading, buffering) is
+    ///   left unannounced. A later snapshot that shows it playing announces it,
+    ///   which covers a restored queue and a queue edit that replaces the
+    ///   current track; a stream that fails to load never becomes playing, so it
+    ///   is never announced.
     fn observe(&mut self, state: &PlaybackState) -> Option<Notification> {
         if !self.enabled {
             return None;
         }
         let Some(track) = state.track.as_ref() else {
             self.announced = None;
-            self.pending = None;
             return None;
         };
         let id = track.id;
@@ -276,16 +287,13 @@ impl TrackNotifications {
         }
         if state.status == PlaybackStatus::Paused {
             self.announced = Some(id);
-            self.pending = None;
             return None;
         }
         let audible = state.status == PlaybackStatus::Playing && !state.loading && !state.buffering;
         if !audible {
-            self.pending = Some(id);
             return None;
         }
         self.announced = Some(id);
-        self.pending = None;
         Some(track_notification(track))
     }
 }
@@ -1191,10 +1199,13 @@ mod tests {
     }
 
     #[test]
-    fn track_notification_falls_back_to_artist_then_album() {
+    fn track_notification_falls_back_to_artist_when_there_is_no_album() {
         let without_album = track_notification(&track("Song", Some("Artist"), None));
         assert_eq!(without_album.body, "Artist");
 
+        // `artist_names()` never returns an empty string, so a track with no
+        // credited artist reads "Unknown artist · Album" rather than just the
+        // album.
         let without_artist = track_notification(&track("Song", None, Some("Album")));
         assert_eq!(without_artist.body, "Unknown artist · Album");
     }

@@ -30,6 +30,11 @@ the queue index moves":
   clearing announces it again.
 - Position updates, `pause`, `resume` on the same track and `seek` never
   re-announce.
+- A pause that arrives before a new track becomes audible also counts as
+  deliberate: that track is marked announced and resuming it is silent.
+- "Once per track" is per track *id while it stays current*: repeat-one looping
+  the same track announces once, and replaying a one-track queue after it ended
+  does not announce again unless the queue was cleared first.
 
 Payload:
 
@@ -116,6 +121,8 @@ Known limitations:
 - `config.toml` is read when the daemon starts, so changing
   `notifications.on_track_change` needs a daemon restart (`lekima daemon stop`,
   then any command autostarts it).
+- The worker thread is detached: an announcement still queued when the daemon
+  exits is dropped rather than delaying shutdown.
 
 ## 5. Observability
 
@@ -126,9 +133,10 @@ Known limitations:
 ```
 
 The backend comes from the same resolver the daemon uses, so it is the backend
-this host would use — not a hardcoded string. `doctor` runs in its own process
-with its own configuration read, so a running daemon started before a config
-edit can differ until it restarts.
+this host would use — not a hardcoded string. `doctor` runs in its own process,
+so both the configuration read and the `PATH` it searches can differ from a
+daemon started by launchd or systemd; a daemon started before a config edit can
+disagree until it restarts.
 
 A user who enables the setting and sees no notification can now tell whether
 the backend was found (`none`) or the setting is off.
