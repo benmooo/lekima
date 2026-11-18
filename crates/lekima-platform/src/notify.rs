@@ -1,8 +1,10 @@
 //! Desktop notifications.
 //!
-//! Notifications are best-effort and must never block or fail the daemon: a
-//! missing helper, a denied permission or a headless host all degrade to
-//! [`NoopNotifier`] instead of an error.
+//! Notifications are best-effort and must never fail the daemon: a missing
+//! helper, a denied permission or a headless host all degrade to
+//! [`NoopNotifier`] instead of an error. Delivery is synchronous and may block
+//! for up to [`HELPER_TIMEOUT`], so callers on an async runtime must run it off
+//! the executor (the daemon uses a dedicated thread).
 //!
 //! Backends shell out to the platform helper so this crate needs no unsafe code
 //! and no extra dependency:
@@ -21,7 +23,16 @@ use std::{
     path::PathBuf,
     process::{Command, Stdio},
     sync::Arc,
+    time::{Duration, Instant},
 };
+
+/// How long a helper may run before it is killed.
+///
+/// A first notification can wait on a permission prompt, and a wedged
+/// notification daemon can block forever; neither may accumulate.
+pub const HELPER_TIMEOUT: Duration = Duration::from_secs(2);
+
+const POLL: Duration = Duration::from_millis(50);
 
 /// A user-visible notification payload.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -34,8 +45,9 @@ pub struct Notification {
 pub trait Notifier: Send + Sync {
     /// Shows `notification`.
     ///
-    /// Returns `false` when the helper is missing or exits unsuccessfully; the
-    /// caller only logs that, it never retries.
+    /// Blocks until the helper exits or [`HELPER_TIMEOUT`] passes. Returns
+    /// `false` when the helper is missing, timed out or exited unsuccessfully;
+    /// the caller only logs that, it never retries.
     fn notify(&self, notification: &Notification) -> bool;
 
     /// Short backend name for `doctor` and logs.
@@ -67,16 +79,23 @@ const MACOS_SCRIPT: [&str; 3] = [
 
 #[cfg(target_os = "macos")]
 #[derive(Debug)]
-struct MacNotifier;
+struct MacNotifier {
+    /// Absolute path resolved at startup: a daemon started without a login shell
+    /// often has a `PATH` that cannot find the helper.
+    helper: PathBuf,
+}
 
 #[cfg(target_os = "macos")]
 impl Notifier for MacNotifier {
     fn notify(&self, notification: &Notification) -> bool {
-        let mut command = Command::new("osascript");
+        let mut command = Command::new(&self.helper);
         for line in MACOS_SCRIPT {
             command.args(["-e", line]);
         }
-        command.arg(&notification.title).arg(&notification.body);
+        command
+            .arg("--")
+            .arg(&notification.title)
+            .arg(&notification.body);
         run(command)
     }
 
@@ -87,14 +106,16 @@ impl Notifier for MacNotifier {
 
 #[cfg(target_os = "linux")]
 #[derive(Debug)]
-struct NotifySend;
+struct NotifySend {
+    helper: PathBuf,
+}
 
 #[cfg(target_os = "linux")]
 impl Notifier for NotifySend {
     fn notify(&self, notification: &Notification) -> bool {
-        let mut command = Command::new("notify-send");
+        let mut command = Command::new(&self.helper);
         command
-            .args(["--app-name=lekima", "--icon=audio-x-generic"])
+            .args(["--app-name=lekima", "--icon=audio-x-generic", "--"])
             .arg(&notification.title)
             .arg(&notification.body);
         run(command)
@@ -107,58 +128,63 @@ impl Notifier for NotifySend {
 
 /// Creates the notification backend for this OS.
 ///
-/// Detection happens once, at daemon start, so a missing helper costs nothing
-/// per track change.
+/// Detection happens once, at startup, so a missing helper costs nothing per
+/// track change.
 #[must_use]
 pub fn notifier() -> Arc<dyn Notifier> {
-    #[cfg(target_os = "macos")]
-    {
-        if helper("osascript").is_some() {
-            return Arc::new(MacNotifier);
-        }
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        if helper("notify-send").is_some() {
-            return Arc::new(NotifySend);
-        }
-    }
-
-    Arc::new(NoopNotifier)
+    detect().unwrap_or_else(|| Arc::new(NoopNotifier))
 }
 
 /// Name of the notification backend `notifier` would pick on this host.
 #[must_use]
 pub fn backend_name() -> &'static str {
+    detect().map_or("none", |notifier| notifier.backend())
+}
+
+/// Single source of truth for backend selection, shared by [`notifier`] and
+/// [`backend_name`] so `doctor` cannot report a backend that is not used.
+fn detect() -> Option<Arc<dyn Notifier>> {
     #[cfg(target_os = "macos")]
     {
-        if helper("osascript").is_some() {
-            return "osascript";
-        }
+        helper("osascript").map(|helper| Arc::new(MacNotifier { helper }) as Arc<dyn Notifier>)
     }
 
     #[cfg(target_os = "linux")]
     {
-        if helper("notify-send").is_some() {
-            return "notify-send";
-        }
+        helper("notify-send").map(|helper| Arc::new(NotifySend { helper }) as Arc<dyn Notifier>)
     }
 
-    "none"
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        None
+    }
 }
 
-/// Runs a helper without inheriting or leaking its output.
+/// Runs a helper under [`HELPER_TIMEOUT`] without inheriting or leaking output.
 fn run(mut command: Command) -> bool {
     command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    match command.status() {
-        Ok(status) => status.success(),
-        Err(error) => {
-            tracing::debug!(%error, "notification helper failed");
-            false
+    let Ok(mut child) = command.spawn() else {
+        tracing::debug!("notification helper could not be started");
+        return false;
+    };
+    let deadline = Instant::now() + HELPER_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success(),
+            Ok(None) if Instant::now() >= deadline => {
+                tracing::debug!("notification helper timed out");
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+            Ok(None) => std::thread::sleep(POLL),
+            Err(error) => {
+                tracing::debug!(%error, "notification helper could not be awaited");
+                return false;
+            }
         }
     }
 }

@@ -17,7 +17,8 @@ use anyhow::{Context, Result};
 use lekima_config::{Config, FileCredentials, Paths, PlaybackStore, SavedPlayback};
 use lekima_core::{PlayRequest, Player};
 use lekima_domain::{
-    CredentialsStore, PlaybackState, PlaybackStatus, QueueKind, SearchKind, Track, sanitize_line,
+    CredentialsStore, PlaybackState, PlaybackStatus, QueueKind, SearchKind, Track, TrackId,
+    sanitize_line,
 };
 use lekima_ipc::{
     ApiError, Command, Event, EventFrame, Handled, PlayTarget, Reply, Request, Response,
@@ -112,7 +113,7 @@ pub async fn run(paths: &Paths, config: &Config, socket: &Path, _detached: bool)
         sleep_until: Arc::clone(&sleep_until),
         preloaded: Arc::clone(&preloaded),
         controls,
-        notifier,
+        notifications: NotifierHandle::spawn(notifier),
         track_notifications: StdMutex::new(TrackNotifications::new(
             config.notifications.on_track_change,
         )),
@@ -180,11 +181,50 @@ struct Daemon {
     sleep_until: Arc<StdMutex<Option<Instant>>>,
     preloaded: Arc<AtomicBool>,
     controls: Arc<dyn MediaControls>,
-    notifier: Arc<dyn Notifier>,
-    /// Which track changes are worth announcing. Guarded because the ticker and
-    /// any future caller observe the same snapshot stream.
+    notifications: NotifierHandle,
+    /// Which track changes are worth announcing.
     track_notifications: StdMutex<TrackNotifications>,
     playback_store: PlaybackStore,
+}
+
+/// Delivers notifications off the async runtime.
+///
+/// The platform loop that calls this also publishes Now Playing and drains
+/// media keys, so a slow helper (a first-run permission prompt, a wedged
+/// notification daemon) must never run on it. Deliveries go to a dedicated
+/// thread through a small queue; when the queue is full the announcement is
+/// dropped rather than blocking the player.
+#[derive(Debug)]
+struct NotifierHandle {
+    sender: std::sync::mpsc::SyncSender<Notification>,
+}
+
+impl NotifierHandle {
+    const QUEUE: usize = 8;
+
+    fn spawn(notifier: Arc<dyn Notifier>) -> Self {
+        let backend = notifier.backend();
+        let (sender, receiver) = std::sync::mpsc::sync_channel(Self::QUEUE);
+        let worker = std::thread::Builder::new()
+            .name("lekima-notify".to_owned())
+            .spawn(move || {
+                while let Ok(notification) = receiver.recv() {
+                    if !notifier.notify(&notification) {
+                        tracing::debug!(backend, "desktop notification was not shown");
+                    }
+                }
+            });
+        if let Err(error) = worker {
+            tracing::warn!(%error, "notification thread failed to start");
+        }
+        Self { sender }
+    }
+
+    fn send(&self, notification: Notification) {
+        if self.sender.try_send(notification).is_err() {
+            tracing::debug!("notification queue is full; dropping an announcement");
+        }
+    }
 }
 
 /// Decides which track changes become notifications.
@@ -194,33 +234,59 @@ struct Daemon {
 #[derive(Debug)]
 struct TrackNotifications {
     enabled: bool,
-    last: Option<u64>,
+    /// The track the user was already told about.
+    announced: Option<TrackId>,
+    /// A new track that is current but not audible yet (stopped, loading or
+    /// buffering). It is announced once it actually starts.
+    pending: Option<TrackId>,
 }
 
 impl TrackNotifications {
     fn new(enabled: bool) -> Self {
         Self {
             enabled,
-            last: None,
+            announced: None,
+            pending: None,
         }
     }
 
-    /// Records the current track and returns a notification when it is both new
-    /// and playing.
+    /// Records the current track and returns a notification when it is new and
+    /// audible.
     ///
-    /// A new track seen while paused is recorded without notifying, so resuming
-    /// does not deliver a stale announcement.
+    /// - An empty queue clears the memory, so replaying a track after clearing
+    ///   announces it again.
+    /// - A new track seen while paused is marked as announced without
+    ///   notifying: the listener paused deliberately, so resuming is not news.
+    /// - A new track that is not playing yet is held as pending and announced
+    ///   when playback actually starts. This covers a restored queue, a queue
+    ///   edit that replaces the current track, and a track whose stream fails
+    ///   to load — none of which should be announced early.
     fn observe(&mut self, state: &PlaybackState) -> Option<Notification> {
         if !self.enabled {
             return None;
         }
-        let track = state.track.as_ref()?;
-        let id = track.id.get();
-        if self.last == Some(id) {
+        let Some(track) = state.track.as_ref() else {
+            self.announced = None;
+            self.pending = None;
+            return None;
+        };
+        let id = track.id;
+        if self.announced == Some(id) {
             return None;
         }
-        self.last = Some(id);
-        (state.status == PlaybackStatus::Playing).then(|| track_notification(track))
+        if state.status == PlaybackStatus::Paused {
+            self.announced = Some(id);
+            self.pending = None;
+            return None;
+        }
+        let audible = state.status == PlaybackStatus::Playing && !state.loading && !state.buffering;
+        if !audible {
+            self.pending = Some(id);
+            return None;
+        }
+        self.announced = Some(id);
+        self.pending = None;
+        Some(track_notification(track))
     }
 }
 
@@ -682,7 +748,7 @@ impl Daemon {
             .ok_or_else(|| ApiError::new(lekima_ipc::ErrorCode::NotFound, "nothing is playing"))
     }
 
-    /// Announces a track change once per track, and only while playing.
+    /// Announces a track change once per track, and only once it is audible.
     fn maybe_notify(&self, state: &PlaybackState) {
         let Ok(mut notifications) = self.track_notifications.lock() else {
             return;
@@ -691,12 +757,7 @@ impl Daemon {
             return;
         };
         drop(notifications);
-        if !self.notifier.notify(&notification) {
-            tracing::debug!(
-                backend = self.notifier.backend(),
-                "desktop notification was not shown"
-            );
-        }
+        self.notifications.send(notification);
     }
 
     async fn status(&self) -> Reply {
@@ -1247,5 +1308,78 @@ mod tests {
                 .observe(&state(PlaybackStatus::Stopped, None))
                 .is_none()
         );
+    }
+
+    #[test]
+    fn starting_from_stopped_announces_when_playback_begins() {
+        let mut notifications = TrackNotifications::new(true);
+
+        // A restored queue arrives stopped: nothing was heard yet.
+        assert!(
+            notifications
+                .observe(&state(PlaybackStatus::Stopped, Some(1)))
+                .is_none()
+        );
+        assert!(
+            notifications
+                .observe(&state(PlaybackStatus::Playing, Some(1)))
+                .is_some()
+        );
+        assert!(
+            notifications
+                .observe(&state(PlaybackStatus::Playing, Some(1)))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_loading_track_is_announced_only_when_it_starts() {
+        let mut notifications = TrackNotifications::new(true);
+        let mut playing = state(PlaybackStatus::Playing, Some(4));
+        playing.loading = true;
+
+        assert!(notifications.observe(&playing).is_none());
+        playing.loading = false;
+        assert!(notifications.observe(&playing).is_some());
+    }
+
+    #[test]
+    fn a_buffering_track_is_announced_only_when_it_starts() {
+        let mut notifications = TrackNotifications::new(true);
+        let mut playing = state(PlaybackStatus::Playing, Some(5));
+        playing.buffering = true;
+
+        assert!(notifications.observe(&playing).is_none());
+        playing.buffering = false;
+        assert!(notifications.observe(&playing).is_some());
+    }
+
+    #[test]
+    fn a_track_that_fails_to_load_is_never_announced() {
+        let mut notifications = TrackNotifications::new(true);
+        let mut loading = state(PlaybackStatus::Playing, Some(6));
+        loading.loading = true;
+        assert!(notifications.observe(&loading).is_none());
+
+        // The stream failed: the track never becomes current audio.
+        assert!(
+            notifications
+                .observe(&state(PlaybackStatus::Stopped, Some(6)))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn clearing_the_queue_allows_the_same_track_again() {
+        let mut notifications = TrackNotifications::new(true);
+        let playing = state(PlaybackStatus::Playing, Some(1));
+
+        assert!(notifications.observe(&playing).is_some());
+        assert!(
+            notifications
+                .observe(&state(PlaybackStatus::Stopped, None))
+                .is_none()
+        );
+        assert!(notifications.observe(&playing).is_some());
     }
 }
