@@ -6,6 +6,7 @@
 //! CI hermetic.
 
 mod config;
+mod history;
 mod paths;
 mod playback;
 mod private;
@@ -13,8 +14,10 @@ mod session;
 mod token;
 
 pub use config::{
-    AudioConfig, CacheConfig, Config, DaemonConfig, PlaybackConfig, ProviderConfig, UiConfig,
+    AudioConfig, CacheConfig, Config, DaemonConfig, HistoryConfig, NotificationsConfig,
+    PlaybackConfig, ProviderConfig, UiConfig,
 };
+pub use history::HistoryStore;
 pub use paths::{PathError, Paths};
 pub use playback::{PlaybackStore, SavedPlayback, playback_path};
 pub use session::FileCredentials;

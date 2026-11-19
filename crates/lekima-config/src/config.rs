@@ -17,6 +17,7 @@ pub struct Config {
     pub daemon: DaemonConfig,
     pub cache: CacheConfig,
     pub notifications: NotificationsConfig,
+    pub history: HistoryConfig,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -136,6 +137,20 @@ impl Default for CacheConfig {
 pub struct NotificationsConfig {
     /// Show a notification when the playing track changes.
     pub on_track_change: bool,
+}
+
+/// Listening history retained on disk.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct HistoryConfig {
+    /// Number of finished plays kept. Oldest records are dropped first.
+    pub capacity: usize,
+}
+
+impl Default for HistoryConfig {
+    fn default() -> Self {
+        Self { capacity: 1_000 }
+    }
 }
 
 /// Persists the output device, preserving every other setting.
@@ -410,6 +425,15 @@ mod tests {
 
         let enabled: Config = toml::from_str("[notifications]\non_track_change = true\n").unwrap();
         assert!(enabled.notifications.on_track_change);
+    }
+
+    #[test]
+    fn history_defaults_to_a_thousand_records() {
+        let config: Config = toml::from_str("").unwrap();
+        assert_eq!(config.history.capacity, 1_000);
+
+        let tuned: Config = toml::from_str("[history]\ncapacity = 25\n").unwrap();
+        assert_eq!(tuned.history.capacity, 25);
     }
 
     #[test]

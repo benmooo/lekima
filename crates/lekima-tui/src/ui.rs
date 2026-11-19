@@ -549,6 +549,7 @@ fn draw_main(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     match (app.mode, app.view) {
         (Mode::Queue, _) => draw_queue(frame, app, theme, inner),
         (Mode::Comments, _) => draw_comments(frame, app, theme, inner),
+        (Mode::History, _) => draw_history(frame, app, theme, inner),
         (_, View::Toplists) => draw_toplists(frame, app, theme, inner),
         (_, View::Search) => draw_search(frame, app, theme, inner),
         (_, View::Artist) => draw_artist(frame, app, theme, inner),
@@ -2024,6 +2025,109 @@ fn pad_right(value: &str, width: usize) -> String {
     padded
 }
 
+/// Listening history: newest first, with how long each track was heard.
+fn draw_history(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
+    let [label, content] =
+        Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(area);
+
+    let total = app.plays.len();
+    let visible = usize::from(content.height.saturating_sub(1)).max(1);
+    app.plays_view_height = u16::try_from(visible).unwrap_or(u16::MAX);
+
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("// ", Style::new().fg(theme.panel)),
+            Span::styled("HISTORY", Style::new().fg(theme.muted)),
+            Span::styled(
+                format!(" {} {}", theme.glyphs.separator, total),
+                Style::new().fg(theme.accent_alt),
+            ),
+        ])),
+        label,
+    );
+
+    if app.plays.is_empty() {
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                if app.plays_loading {
+                    "loading plays…"
+                } else {
+                    "no plays yet - play something and it will show up here"
+                },
+                Style::new().fg(theme.muted),
+            ))),
+            content,
+        );
+        return;
+    }
+
+    let now = now_ms();
+    let items: Vec<ListItem> = app
+        .plays
+        .iter()
+        .map(|entry| {
+            let marker = if entry.completed {
+                theme.glyphs.active
+            } else {
+                " "
+            };
+            ListItem::new(Line::from(vec![
+                Span::styled(
+                    format!("{:>8}  ", relative_age(entry.started_at, now)),
+                    Style::new().fg(theme.dim),
+                ),
+                Span::styled(marker, Style::new().fg(theme.accent)),
+                Span::styled(
+                    format!(" {}", sanitize_line(&entry.track.name)),
+                    Style::new().fg(if entry.completed {
+                        theme.text
+                    } else {
+                        theme.muted
+                    }),
+                ),
+                Span::styled(
+                    format!(
+                        " {} {}",
+                        theme.glyphs.separator,
+                        sanitize_line(&entry.track.artist_names())
+                    ),
+                    Style::new().fg(theme.muted),
+                ),
+                Span::styled(
+                    format!("  {}", clock(entry.played_ms)),
+                    Style::new().fg(theme.dim),
+                ),
+            ]))
+        })
+        .collect();
+
+    let list = List::new(items).highlight_style(selection_style(theme));
+    let mut state = ListState::default().with_selected(Some(app.plays_selection));
+    frame.render_stateful_widget(list, content, &mut state);
+}
+
+/// Relative age of a Unix-millisecond timestamp.
+fn relative_age(started_at_ms: i64, now_ms: i64) -> String {
+    let elapsed = now_ms.saturating_sub(started_at_ms);
+    if elapsed < 60_000 {
+        "just now".to_owned()
+    } else if elapsed < 3_600_000 {
+        format!("{}m", elapsed / 60_000)
+    } else if elapsed < 86_400_000 {
+        format!("{}h", elapsed / 3_600_000)
+    } else {
+        format!("{}d", elapsed / 86_400_000)
+    }
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| {
+            i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)
+        })
+}
+
 fn draw_queue(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     let [label, content] =
         Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(area);
@@ -2526,6 +2630,13 @@ fn draw_footer(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             ),
         ),
         Mode::Queue => ("QUEUE", queue_hints(theme, area.width)),
+        Mode::History => (
+            "HISTORY",
+            format!(
+                "j/k nav {} enter replay {} r refresh {} H/esc close",
+                theme.glyphs.separator, theme.glyphs.separator, theme.glyphs.separator
+            ),
+        ),
         Mode::Comments => (
             "COMMENTS",
             "j/k scroll · ctrl-d/u page · n more · r refresh · C/esc close".to_owned(),

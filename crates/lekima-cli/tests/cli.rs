@@ -82,6 +82,24 @@ fn status_without_a_daemon_exits_seven_with_a_daemon_error() {
 }
 
 #[test]
+fn history_without_a_daemon_exits_seven_with_a_daemon_error() {
+    let dir = hermetic("history");
+    fs::write(dir.join("config.toml"), "[daemon]\nautostart = false\n").expect("config");
+
+    let output = binary()
+        .env("LEKIMA_CONFIG_DIR", &dir)
+        .args(["history", "--json"])
+        .output()
+        .expect("run lekima");
+
+    assert_eq!(output.status.code(), Some(7));
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("valid json envelope");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "daemon");
+}
+
+#[test]
 fn themes_are_listed_for_agents() {
     let dir = hermetic("themes");
     let output = binary()

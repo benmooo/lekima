@@ -461,6 +461,18 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
             Ok(())
         }
 
+        TopCommand::History { limit } => {
+            let reply = daemon_call(
+                &socket,
+                &paths,
+                &config,
+                Command::History { limit: Some(limit) },
+            )
+            .await?;
+            output::print_reply(&reply, json);
+            Ok(())
+        }
+
         TopCommand::Login {
             cookie_file,
             qr,

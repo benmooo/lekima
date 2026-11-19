@@ -13,6 +13,7 @@
 //! microseconds and reused by the CLI, the TUI and any future frontend.
 
 pub mod error;
+pub mod history;
 pub mod lyrics;
 pub mod model;
 pub mod playback;
@@ -20,6 +21,7 @@ pub mod ports;
 pub mod sanitize;
 
 pub use error::{DomainError, Result};
+pub use history::{COMPLETION_PERCENT, HistoryLog, PlayRecord, is_completed};
 pub use lyrics::{LyricLine, Lyrics, parse_lrc, parse_lrc_with_translation};
 pub use model::{
     Album, AlbumDetail, AlbumId, Artist, ArtistAlbums, ArtistDetail, ArtistId, Comment,

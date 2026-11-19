@@ -211,6 +211,13 @@ pub enum TopCommand {
         offset: u32,
     },
 
+    /// Show what you have listened to, newest first.
+    History {
+        /// How many plays to show.
+        #[arg(long, default_value_t = 50, value_name = "N")]
+        limit: usize,
+    },
+
     /// Stop (pause) playback after a delay. `30m`, `1h`, `90s`, `off`.
     Sleep {
         #[arg(value_name = "DURATION")]

@@ -206,6 +206,8 @@ Global — `q`/`Ctrl-c` quit, `?` help, `/` search, `:` command line,
 | `l` / `h` | Seek forward / back 10 s (also `→`/`←`) |
 | `Ctrl-w 1`…`4` | Focus sidebar / main / queue / lyrics (digits stay counts) |
 | `Q` | Show queue pane |
+| `C` | Show track comments |
+| `H` | Show listening history |
 | `y` | Yank track URL/ID to clipboard (v0.2) |
 | `P` | Toggle provider panel? (removed — `P` in the original was play mode) |
 

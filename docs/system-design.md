@@ -421,6 +421,9 @@ log_level = "info"
 
 [notifications]
 on_track_change = false   # opt-in; `lekima doctor` reports the backend
+
+[history]
+capacity = 1000           # finished plays kept on disk
 ```
 
 Precedence: defaults → file → environment (`LEKIMA_CONFIG_DIR`,
@@ -428,9 +431,14 @@ Precedence: defaults → file → environment (`LEKIMA_CONFIG_DIR`,
 `LEKIMA_THEME` accepts a palette name, `light`, `dark` or `auto`; `NO_COLOR`
 forces mono and wins over both.
 
-Files: `config.toml`, `session.cookies` (0600), `lekima.log`, `cache/`
-(response cache, future offline metadata, and `playback.json`). Nothing outside
-the root is written.
+Files: `config.toml`, `session.cookies` (0600), `lekima.log`, `history.json`,
+`cache/` (response cache, future offline metadata, and `playback.json`). Nothing
+outside the root is written.
+
+`history.json` is the listening log: finished plays only, newest last, bounded by
+`[history] capacity`. It is written by the daemon when a track stops being
+current and on shutdown; the current track is never in it. See
+[`sprint-10/history.md`](./sprint-10/history.md).
 
 `cache/playback.json` is a 0600 snapshot of the queue, current index,
 repeat/shuffle, volume, quality and position. The daemon rewrites it every two

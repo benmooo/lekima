@@ -7,7 +7,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use lekima_domain::{
     Album, AlbumDetail, AlbumId, Artist, ArtistDetail, ArtistId, Lyrics, PlaybackState,
-    PlaybackStatus, Playlist, SearchKind, SearchResults, Toplist, Track, TrackId,
+    PlaybackStatus, Playlist, SearchKind, SearchResults, Toplist, Track, TrackId, sanitize_line,
 };
 use lekima_ipc::{Command, ErrorCode, IpcError, PlayTarget, Reply};
 
@@ -20,6 +20,7 @@ pub enum Mode {
     Queue,
     Settings,
     Comments,
+    History,
 }
 
 /// Persisted UI choices.
@@ -340,6 +341,11 @@ pub struct App {
     pub lyrics_offset_ms: i64,
     pub playlists: Vec<Playlist>,
     pub queue: Vec<Track>,
+    /// Finished plays, newest first, as returned by the daemon.
+    pub plays: Vec<lekima_domain::PlayRecord>,
+    pub plays_selection: usize,
+    pub plays_loading: bool,
+    pub plays_view_height: u16,
     pub mode: Mode,
     pub focus: Focus,
     pub input: String,
@@ -406,6 +412,10 @@ impl Default for App {
             lyrics_offset_ms: 0,
             playlists: Vec::new(),
             queue: Vec::new(),
+            plays: Vec::new(),
+            plays_selection: 0,
+            plays_loading: false,
+            plays_view_height: 0,
             mode: Mode::Normal,
             focus: Focus::Main,
             input: String::new(),
@@ -711,6 +721,7 @@ impl App {
             }
             Mode::Queue => self.handle_queue_key(key),
             Mode::Comments => self.handle_comments_key(key),
+            Mode::History => self.handle_history_key(key),
             Mode::Search | Mode::Command => self.handle_prompt_key(key),
             Mode::Settings => self.handle_settings_key(key),
             Mode::Normal => self.handle_normal_key(key),
@@ -1357,6 +1368,7 @@ impl App {
             KeyCode::Char('f') => self.like_selected(),
             KeyCode::Char('L') => self.toggle_lyrics(),
             KeyCode::Char('C') => self.toggle_comments(),
+            KeyCode::Char('H') => self.toggle_history(),
             KeyCode::Char('[') => {
                 if self.lyrics_open {
                     self.lyrics_offset_ms -= 250;
@@ -1709,6 +1721,80 @@ impl App {
         })
     }
 
+    fn toggle_history(&mut self) -> Action {
+        if self.mode == Mode::History {
+            self.mode = Mode::Normal;
+            return Action::None;
+        }
+        self.mode = Mode::History;
+        self.plays_selection = 0;
+        self.plays_loading = true;
+        Action::Call(Command::History { limit: Some(200) })
+    }
+
+    fn handle_history_key(&mut self, key: KeyEvent) -> Action {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let last = self.plays.len().saturating_sub(1);
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q' | 'H') => {
+                self.mode = Mode::Normal;
+                Action::None
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.plays_selection = (self.plays_selection + 1).min(last);
+                Action::None
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.plays_selection = self.plays_selection.saturating_sub(1);
+                Action::None
+            }
+            KeyCode::Char('g') => {
+                self.plays_selection = 0;
+                Action::None
+            }
+            KeyCode::Char('G') => {
+                self.plays_selection = last;
+                Action::None
+            }
+            KeyCode::Char('d') if ctrl => {
+                self.plays_selection = (self.plays_selection + 10).min(last);
+                Action::None
+            }
+            KeyCode::Char('u') if ctrl => {
+                self.plays_selection = self.plays_selection.saturating_sub(10);
+                Action::None
+            }
+            KeyCode::Char('r') => {
+                self.plays_loading = true;
+                Action::Call(Command::History { limit: Some(200) })
+            }
+            KeyCode::Char(' ') => Action::Call(Command::Toggle),
+            KeyCode::Enter => self.replay_history_selection(),
+            _ => Action::None,
+        }
+    }
+
+    /// Plays the track under the history cursor.
+    fn replay_history_selection(&mut self) -> Action {
+        let Some(id) = self
+            .plays
+            .get(self.plays_selection)
+            .map(|entry| entry.track.id)
+        else {
+            self.notify("no plays yet", true);
+            return Action::None;
+        };
+        let label = self
+            .plays
+            .get(self.plays_selection)
+            .map_or_else(String::new, |entry| sanitize_line(&entry.track.name));
+        self.notify(format!("playing {label}"), false);
+        self.mode = Mode::Normal;
+        Action::Call(Command::Play {
+            target: PlayTarget::Tracks { ids: vec![id] },
+        })
+    }
+
     fn handle_comments_key(&mut self, key: KeyEvent) -> Action {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         match key.code {
@@ -2055,6 +2141,12 @@ impl App {
                         }
                         self.queue_selection =
                             self.queue_selection.min(self.queue.len().saturating_sub(1));
+                    }
+                    Reply::History { entries } => {
+                        self.plays = entries;
+                        self.plays_loading = false;
+                        self.plays_selection =
+                            self.plays_selection.min(self.plays.len().saturating_sub(1));
                     }
                     Reply::User { user } => {
                         self.user = user.map(|user| user.nickname);
@@ -3187,5 +3279,121 @@ mod tests {
             Action::Call(lekima_ipc::Command::Artist { id }) => assert_eq!(id, 6452.into()),
             other => panic!("unexpected {other:?}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod history_tests {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    use lekima_domain::{PlayRecord, QueueKind, Track, TrackId};
+    use lekima_ipc::{Command, PlayTarget, Reply};
+
+    use super::{Action, App, Mode};
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn record(id: u64, completed: bool) -> PlayRecord {
+        PlayRecord {
+            track: Track {
+                id: TrackId::from(id),
+                name: format!("Track {id}"),
+                artists: Vec::new(),
+                album: None,
+                duration_ms: 60_000,
+            },
+            started_at: 1_700_000_000_000,
+            played_ms: 60_000,
+            completed,
+            kind: QueueKind::Manual,
+        }
+    }
+
+    #[test]
+    fn h_opens_the_history_and_asks_for_plays() {
+        let mut app = App::new();
+        match app.handle_key(key(KeyCode::Char('H'))) {
+            Action::Call(Command::History { limit }) => {
+                assert_eq!(limit, Some(200));
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        assert_eq!(app.mode, Mode::History);
+        assert!(app.plays_loading);
+
+        app.handle_key(key(KeyCode::Char('H')));
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn history_replies_populate_the_list_and_clamp_the_cursor() {
+        let mut app = App::new();
+        app.handle_key(key(KeyCode::Char('H')));
+        app.plays_selection = 9;
+
+        app.apply(Ok(Reply::History {
+            entries: vec![record(2, false), record(1, true)],
+        }));
+
+        assert_eq!(app.plays.len(), 2);
+        assert_eq!(app.plays_selection, 1, "cursor stays inside the list");
+        assert!(!app.plays_loading);
+    }
+
+    #[test]
+    fn movement_stays_inside_the_history() {
+        let mut app = App::new();
+        app.handle_key(key(KeyCode::Char('H')));
+        app.apply(Ok(Reply::History {
+            entries: vec![record(2, false), record(1, true)],
+        }));
+
+        app.handle_key(key(KeyCode::Char('j')));
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(app.plays_selection, 1);
+        app.handle_key(key(KeyCode::Char('g')));
+        assert_eq!(app.plays_selection, 0);
+        app.handle_key(key(KeyCode::Char('G')));
+        assert_eq!(app.plays_selection, 1);
+    }
+
+    #[test]
+    fn enter_replays_the_selected_play_and_closes_the_pane() {
+        let mut app = App::new();
+        app.handle_key(key(KeyCode::Char('H')));
+        app.apply(Ok(Reply::History {
+            entries: vec![record(2, false), record(1, true)],
+        }));
+
+        match app.handle_key(key(KeyCode::Enter)) {
+            Action::Call(Command::Play {
+                target: PlayTarget::Tracks { ids },
+            }) => assert_eq!(ids, vec![TrackId::from(2_u64)]),
+            other => panic!("unexpected {other:?}"),
+        }
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn enter_on_an_empty_history_does_nothing() {
+        let mut app = App::new();
+        app.handle_key(key(KeyCode::Char('H')));
+
+        assert!(matches!(app.handle_key(key(KeyCode::Enter)), Action::None));
+        assert_eq!(app.mode, Mode::History);
+    }
+
+    #[test]
+    fn r_refreshes_without_leaving_the_pane() {
+        let mut app = App::new();
+        app.handle_key(key(KeyCode::Char('H')));
+
+        assert!(matches!(
+            app.handle_key(key(KeyCode::Char('r'))),
+            Action::Call(Command::History { .. })
+        ));
+        assert_eq!(app.mode, Mode::History);
     }
 }

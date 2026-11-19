@@ -14,11 +14,11 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use lekima_config::{Config, FileCredentials, Paths, PlaybackStore, SavedPlayback};
+use lekima_config::{Config, FileCredentials, HistoryStore, Paths, PlaybackStore, SavedPlayback};
 use lekima_core::{PlayRequest, Player};
 use lekima_domain::{
-    CredentialsStore, PlaybackState, PlaybackStatus, QueueKind, SearchKind, Track, TrackId,
-    sanitize_line,
+    CredentialsStore, HistoryLog, PlaybackState, PlaybackStatus, QueueKind, SearchKind, Track,
+    TrackId, sanitize_line,
 };
 use lekima_ipc::{
     ApiError, Command, Event, EventFrame, Handled, PlayTarget, Reply, Request, Response,
@@ -101,6 +101,11 @@ pub async fn run(paths: &Paths, config: &Config, socket: &Path, _detached: bool)
     let hub = Arc::new(EventHub::new());
     let sleep_until = Arc::new(StdMutex::new(None));
     let preloaded = Arc::new(AtomicBool::new(false));
+    let history_store = HistoryStore::new(paths.history_file());
+    let history = Arc::new(StdMutex::new(load_history(
+        &history_store,
+        config.history.capacity,
+    )));
     let controls = lekima_platform::controls().await;
     tracing::debug!(backend = controls.backend(), "media integration ready");
     let notifier = lekima_platform::notifier();
@@ -117,6 +122,8 @@ pub async fn run(paths: &Paths, config: &Config, socket: &Path, _detached: bool)
         track_notifications: StdMutex::new(TrackNotifications::new(
             config.notifications.on_track_change,
         )),
+        history,
+        history_store,
         playback_store: playback_store.clone(),
     });
 
@@ -133,6 +140,7 @@ pub async fn run(paths: &Paths, config: &Config, socket: &Path, _detached: bool)
     spawn_persister(Arc::clone(&player), playback_store.clone());
     spawn_preloader(Arc::clone(&daemon));
     spawn_platform(Arc::clone(&daemon));
+    spawn_history(Arc::clone(&daemon));
 
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .context("failed to install the SIGTERM handler")?;
@@ -167,6 +175,7 @@ pub async fn run(paths: &Paths, config: &Config, socket: &Path, _detached: bool)
 
     tracing::info!("shutting down");
     persist_playback(&daemon.player, &daemon.playback_store).await;
+    persist_history(&daemon).await;
     let _ = daemon.player.stop().await;
     drop(listener);
     let _ = fs::remove_file(socket);
@@ -184,6 +193,9 @@ struct Daemon {
     notifications: NotifierHandle,
     /// Which track changes are worth announcing.
     track_notifications: StdMutex<TrackNotifications>,
+    /// Finished plays, appended as tracks stop being current.
+    history: Arc<StdMutex<HistoryLog>>,
+    history_store: HistoryStore,
     playback_store: PlaybackStore,
 }
 
@@ -444,12 +456,21 @@ impl Daemon {
                 seq: self.hub.seq.load(Ordering::SeqCst),
                 capabilities: [
                     "events", "daily", "fm", "like", "toplists", "cloud", "lyrics", "comments",
+                    "history",
                 ]
                 .iter()
                 .map(|capability| (*capability).to_owned())
                 .collect(),
             }),
             Command::Status => Ok(self.status().await),
+            Command::History { limit } => {
+                let limit = limit.unwrap_or(50).min(500);
+                let entries = self
+                    .history
+                    .lock()
+                    .map_or_else(|_| Vec::new(), |log| log.recent(limit));
+                Ok(Reply::History { entries })
+            }
             Command::Play { target } => {
                 self.play(target).await?;
                 Ok(self.status().await)
@@ -1045,6 +1066,83 @@ async fn playback_snapshot(player: &Player) -> Option<SavedPlayback> {
         quality: state.quality,
         kind: state.queue_kind,
     })
+}
+
+/// Loads the history, degrading to an empty log when the file is unreadable.
+///
+/// A corrupt file is reported but not deleted: the operator can inspect it, and
+/// the daemon keeps working.
+fn load_history(store: &HistoryStore, capacity: usize) -> HistoryLog {
+    match store.load(capacity) {
+        Ok(log) => log,
+        Err(error) => {
+            tracing::warn!(%error, "ignoring an unreadable history file");
+            HistoryLog::new(capacity)
+        }
+    }
+}
+
+/// Records one snapshot, returning whether the log changed enough to persist.
+fn observe_history(daemon: &Daemon, state: &PlaybackState, now_ms: i64) -> bool {
+    daemon
+        .history
+        .lock()
+        .is_ok_and(|mut log| log.observe(state, now_ms))
+}
+
+/// Closes the track that is playing right now and returns the whole log.
+///
+/// Returns `None` when there is nothing worth writing, so a first run does not
+/// create an empty file and an unreadable file is left for the operator to
+/// inspect rather than being overwritten with nothing.
+fn close_history(daemon: &Daemon) -> Option<Vec<lekima_domain::PlayRecord>> {
+    let mut log = daemon.history.lock().ok()?;
+    log.finish();
+    (!log.records().is_empty()).then(|| log.records().iter().cloned().collect())
+}
+
+/// Writes the history on shutdown, including the track that was playing.
+async fn persist_history(daemon: &Daemon) {
+    let state = daemon.player.snapshot().await;
+    let _ = observe_history(daemon, &state, now_ms());
+    let Some(records) = close_history(daemon) else {
+        return;
+    };
+    if let Err(error) = daemon.history_store.save_records(&records) {
+        tracing::warn!(%error, "failed to save the listening history");
+    }
+}
+
+/// Appends finished plays to the history once a second.
+///
+/// Writes happen only when a play starts or ends, so a long track does not
+/// rewrite the file on every tick.
+fn spawn_history(daemon: Arc<Daemon>) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
+        loop {
+            interval.tick().await;
+            let state = daemon.player.snapshot().await;
+            if !observe_history(&daemon, &state, now_ms()) {
+                continue;
+            }
+            let records: Vec<_> = daemon.history.lock().map_or_else(
+                |_| Vec::new(),
+                |log| log.records().iter().cloned().collect(),
+            );
+            if let Err(error) = daemon.history_store.save_records(&records) {
+                tracing::warn!(%error, "failed to save the listening history");
+            }
+        }
+    });
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| {
+            i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)
+        })
 }
 
 async fn persist_playback(player: &Player, store: &PlaybackStore) {

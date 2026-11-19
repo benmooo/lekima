@@ -6,9 +6,9 @@
 //! agents all speak the same language.
 
 use lekima_domain::{
-    AlbumDetail, AlbumId, ArtistAlbums, ArtistDetail, ArtistId, Comments, Lyrics, PlaybackState,
-    Playlist, PlaylistId, Quality, RepeatMode, SearchKind, SearchResults, Toplist, Track, TrackId,
-    UserProfile,
+    AlbumDetail, AlbumId, ArtistAlbums, ArtistDetail, ArtistId, Comments, Lyrics, PlayRecord,
+    PlaybackState, Playlist, PlaylistId, Quality, RepeatMode, SearchKind, SearchResults, Toplist,
+    Track, TrackId, UserProfile,
 };
 use serde::{Deserialize, Serialize};
 
@@ -95,6 +95,10 @@ pub enum Command {
     Like {
         id: Option<TrackId>,
         liked: bool,
+    },
+    /// Listening history, newest first. `limit` defaults to 50.
+    History {
+        limit: Option<usize>,
     },
     /// Public comments for a track (defaults to the current track).
     Comments {
@@ -287,6 +291,10 @@ pub enum Reply {
         tracks: Vec<Track>,
         index: Option<usize>,
     },
+    /// Finished plays, newest first.
+    History {
+        entries: Vec<PlayRecord>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -379,6 +387,19 @@ mod tests {
         let response = Response::ok(1, Reply::Ack);
         assert!(response.is_ok());
         assert!(serde_json::to_string(&response).unwrap().contains("ack"));
+    }
+
+    #[test]
+    fn history_round_trips_and_defaults_to_the_daemon_limit() {
+        let encoded = serde_json::to_string(&Command::History { limit: Some(5) }).unwrap();
+        assert_eq!(encoded, r#"{"type":"history","limit":5}"#);
+
+        let decoded: Command = serde_json::from_str(r#"{"type":"history"}"#).unwrap();
+        assert!(matches!(decoded, Command::History { limit: None }));
+
+        let reply = Reply::History { entries: vec![] };
+        let encoded = serde_json::to_string(&reply).unwrap();
+        assert_eq!(encoded, r#"{"type":"history","entries":[]}"#);
     }
 
     #[test]

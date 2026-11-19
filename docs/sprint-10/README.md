@@ -20,17 +20,21 @@ order that epic sets — *strengthen the daily-driver loop first*.
 | Slice | Linear | Contents | Exit criteria |
 | --- | --- | --- | --- |
 | A. Notifications | AKA-144 | Desktop notification on track change, opt-in, per OS backend | Design note, `doctor` reports the backend, unit tests for payload and detection |
-| B. Listening history | AKA-147 | Durable play log with timestamps and completion, readable from CLI and TUI | Survives restart, no unbounded growth, JSON contract test |
-| C. Profiles | AKA-148 | `--profile` / `LEKIMA_PROFILE` select separate config, session, cache and socket | Two profiles play without sharing cookies or a socket; flat layout migrates to `default` |
-| D. Release | — | Docs, changelog, 0.10.0 binaries | Green workspace, published release |
+| B. Listening history | AKA-147 | Durable play log with timestamps and completion, readable from CLI, MCP, HTTP and TUI | Survives restart, bounded by `[history] capacity`, JSON contract test |
+| C. Release | — | Docs, changelog, 0.10.0 binaries | Green workspace, published release |
+
+Dropped: **profiles** (AKA-148) — closed by product decision. lekima serves
+one person on one machine, so multi-account isolation solves a problem this
+product does not have; `LEKIMA_CONFIG_DIR` already relocates all state for
+scripts and tests.
 
 Deferred out of this sprint, with their Linear state unchanged:
 
 - **Scrobbling** (AKA-143) — needs external credentials and a scrobble policy;
   own design note.
-- **Hook design** (AKA-148/149 overlap) — plugin hooks are the requirement and
-  WASM (AKA-146, now a research spike) is one possible substrate; sequence the
-  spike first.
+- **Hook design** (AKA-149) — plugin hooks are the requirement and WASM
+  (AKA-146, now a research spike) is one possible substrate; sequence the spike
+  first.
 - **Windows** (AKA-145 canceled, AKA-152 open) — decision outstanding.
 - The three open design questions (AKA-150, AKA-151, AKA-153).
 
@@ -38,6 +42,8 @@ Deferred out of this sprint, with their Linear state unchanged:
 
 - [`notifications.md`](./notifications.md) — slice A: payload, backends,
   failure modes, config surface.
+- [`history.md`](./history.md) — slice B: record shape, what counts as a play,
+  retention, persistence, and the agent surface.
 
 ## Definition of done
 

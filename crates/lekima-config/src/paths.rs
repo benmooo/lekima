@@ -67,6 +67,12 @@ impl Paths {
         crate::playback::playback_path(&self.cache_dir())
     }
 
+    /// Durable listening history written by the daemon.
+    #[must_use]
+    pub fn history_file(&self) -> PathBuf {
+        self.root.join("history.json")
+    }
+
     /// Bearer token for the HTTP control server.
     #[must_use]
     pub fn http_token_file(&self) -> PathBuf {

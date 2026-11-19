@@ -150,6 +150,12 @@ fn build_command(name: &str, args: &Value) -> Result<Command, String> {
             level: (number_arg(args, "level").unwrap_or(70.0) / 100.0).clamp(0.0, 1.0) as f32,
         },
         "queue_list" => Command::Queue,
+        "history" => Command::History {
+            limit: args
+                .get("limit")
+                .and_then(Value::as_u64)
+                .map(|limit| limit as usize),
+        },
         "sleep" => Command::Sleep {
             minutes: args
                 .get("minutes")
@@ -326,6 +332,7 @@ fn summary(reply: &Reply) -> String {
         Reply::Queue { tracks, index } => {
             format!("queue of {} (index {index:?})", tracks.len())
         }
+        Reply::History { entries } => format!("{} plays", entries.len()),
         Reply::Like { id, liked } => {
             format!("{} {id}", if *liked { "liked" } else { "unliked" })
         }
@@ -464,6 +471,15 @@ fn tools() -> Vec<Value> {
             false,
         ),
         tool("queue_list", "List the playback queue.", none.clone(), true),
+        tool(
+            "history",
+            "List finished plays, newest first. Each entry has track, started_at (Unix ms), played_ms and completed.",
+            json!({
+                "type": "object",
+                "properties": { "limit": { "type": "integer", "minimum": 1, "maximum": 500 } }
+            }),
+            true,
+        ),
         tool(
             "queue_album",
             "Append every track of an album to the queue, or insert after the current track.",
@@ -604,6 +620,7 @@ mod tests {
             "previous",
             "set_volume",
             "queue_list",
+            "history",
             "queue_add",
             "queue_remove",
             "queue_move",

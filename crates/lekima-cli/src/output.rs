@@ -114,6 +114,7 @@ pub fn print_reply(reply: &Reply, json: bool) {
         Reply::Album { detail } => print_album(detail),
         Reply::Playlists { playlists } => print_playlists(playlists),
         Reply::Queue { tracks, index } => print_queue(tracks, *index),
+        Reply::History { entries } => print_history(entries),
         Reply::User { user } => match user {
             Some(user) => crate::say!("{} ({})", sanitize_line(&user.nickname), user.id),
             None => crate::say!("not signed in"),
@@ -404,6 +405,49 @@ fn print_queue(tracks: &[Track], index: Option<usize>) {
             sanitize_line(&track.artist_names())
         );
     }
+}
+
+fn print_history(entries: &[lekima_domain::PlayRecord]) {
+    if entries.is_empty() {
+        crate::say!("no plays yet · start with `lekima play <query>`");
+        return;
+    }
+    let now = now_ms();
+    for entry in entries {
+        crate::say!(
+            "{:>8}  {} — {}  {:>5}  {}",
+            format_age(entry.started_at, now),
+            sanitize_line(&entry.track.name),
+            sanitize_line(&entry.track.artist_names()),
+            entry.played_label(),
+            if entry.completed { "✓" } else { " " }
+        );
+    }
+}
+
+/// Relative age of a Unix-millisecond timestamp.
+///
+/// Relative rather than absolute so the output needs no timezone database and
+/// stays readable in a terminal; agents read `started_at` from `--json`.
+fn format_age(started_at_ms: i64, now_ms: i64) -> String {
+    let elapsed = now_ms.saturating_sub(started_at_ms);
+    if elapsed < 60_000 {
+        "just now".to_owned()
+    } else if elapsed < 3_600_000 {
+        format!("{}m ago", elapsed / 60_000)
+    } else if elapsed < 86_400_000 {
+        format!("{}h ago", elapsed / 3_600_000)
+    } else {
+        format!("{}d ago", elapsed / 86_400_000)
+    }
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| {
+            i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)
+        })
 }
 
 fn format_clock(ms: u64) -> String {
