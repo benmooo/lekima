@@ -2,7 +2,7 @@
 
 > NetEase Cloud Music in your terminal. Vim-first, agent-native.
 
-Status: **Living document** — shipped through 0.9.2 · Owner: @benmooo · Rewrite
+Status: **Living document** — shipped through 0.10.0 · Owner: @benmooo · Rewrite
 of the archived Go project [`benmooo/lekima`](https://github.com/benmooo/lekima)
 
 ---
@@ -139,10 +139,19 @@ wordmark with key hints.
 Album and artist search, artist pages with albums, album pages with tracks, and
 album play/queue across the TUI, CLI, MCP and HTTP.
 
+### v0.10 — “daily-driver loop” (shipped in 0.10.0)
+
+> Detailed specification: [`sprint-10/`](./sprint-10/).
+
+Desktop notifications when the track changes, and a durable listening history:
+`lekima history`, an MCP tool, `GET /v1/history`, and an `H` pane that replays
+what you select. The log is bounded by `[history] capacity` and records each
+play once, including repeat-one loops.
+
 ### Later
 
-Desktop notifications, Last.fm scrobbling, multiple profiles, plugin hooks,
-Windows native support, WASM/embedded agent tooling.
+Last.fm scrobbling, plugin hooks, Windows native support, WASM/embedded agent
+tooling.
 
 ### Explicit non-goals
 
@@ -369,6 +378,7 @@ token.
 | **M11 Control + hardening** (done, 0.7.x) | HTTP control, phone remote, preview truth, restart UX, null-safe comments | 0.7.1 shipped |
 | **M12 Console surfaces** (done, 0.8.0) | Comments feed, alert panels, empty-state wordmark | 0.8.0 shipped |
 | **M13 Catalogue depth** (done, 0.9.0/0.9.1) | Album/artist search, artist and album pages, album play/queue, error/search/history hardening | 0.9.1 released |
+| **M14 Daily-driver loop** (done, 0.10.0) | Desktop notifications, durable listening history across CLI/MCP/HTTP/TUI | 0.10.0 released |
 
 ## 9. Risks & mitigations
 

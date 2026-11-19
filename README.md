@@ -58,6 +58,11 @@ $ lekima status --json
 
 ## Status
 
+`0.10.0` starts the daily-driver loop: desktop notifications on track change
+(opt in with `[notifications] on_track_change = true`) and a durable listening
+history — `lekima history`, MCP `history`, `GET /v1/history` and an `H` pane in
+the TUI. See [`docs/sprint-10/`](docs/sprint-10/).
+
 `0.9.2` adds the MCP `queue_album` tool and catalogue preview modes.
 
 `0.9.1` hardens catalogue depth: provider 404s are `not_found`, search

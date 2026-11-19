@@ -3,6 +3,36 @@
 All notable changes to lekima are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## 0.10.0 — 2026-11-20
+
+### Added
+
+- Desktop notifications when the track changes. Opt in with
+  `[notifications] on_track_change = true`; the daemon uses `osascript` on macOS
+  and `notify-send` on Linux, never blocks playback on a slow helper, and
+  degrades to a no-op when neither exists. `lekima doctor` reports the backend.
+- Listening history: `lekima history [--limit N] [--json]`, an MCP `history`
+  tool, `GET /v1/history?limit=N`, and an `H` pane in the TUI where `enter`
+  replays a play. Records carry the track, start time, played time and a
+  completion flag, and are bounded by `[history] capacity` (default 1000) in
+  `<state>/history.json`.
+- `lekima doctor` reports the history file, capacity, entry count and any load
+  error, so a corrupt file is visible without reading logs.
+
+### Changed
+
+- `status --json` gains `generation`, the player's stream counter. Clients can
+  use it to tell two plays of the same track apart; repeat-one and replay now
+  produce separate history records because of it.
+- A play is recorded when the track stops being current, and only if audio was
+  actually heard, so a restored queue no longer invents 0 ms entries.
+
+### Fixed
+
+- A corrupt `history.json` is reported and left untouched instead of being
+  rewritten as empty at startup; a newer on-disk format version is rejected
+  rather than downgraded.
+
 ## 0.9.2 — 2026-11-18
 
 ### Added

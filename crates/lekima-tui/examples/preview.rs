@@ -13,6 +13,15 @@ use lekima_tui::app::{AlbumState, App, ArtistState, CommentsState, LyricsState, 
 use lekima_tui::ui::draw;
 use ratatui::{Terminal, backend::TestBackend};
 
+/// Wall clock in Unix milliseconds, so preview ages look current.
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| {
+            i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)
+        })
+}
+
 fn track(id: u64, name: &str, artist: &str, duration: u64) -> Track {
     Track {
         id: id.into(),
@@ -135,7 +144,7 @@ fn main() {
                 println!(
                     "usage: preview [--width N] [--height N] [--theme NAME] \
                      [--glyphs unicode|ascii] [--density compact|comfortable] \
-                     [--mode normal|queue|help|settings|comments|search|artist|album] [--long-title] \
+                     [--mode normal|queue|help|settings|comments|history|search|artist|album] [--long-title] \
                      [--buffered] [--empty] [--no-lyrics] [--toast-error]"
                 );
                 return;
@@ -244,6 +253,32 @@ fn main() {
             },
         }));
     }
+    if mode == "history" {
+        let played =
+            |id: u64, name: &str, artist: &str, age_ms: i64, played_ms: u64, done: bool| {
+                lekima_domain::PlayRecord {
+                    track: track(id, name, artist, 240_000),
+                    started_at: now_ms() - age_ms,
+                    played_ms,
+                    completed: done,
+                    kind: lekima_domain::QueueKind::Manual,
+                }
+            };
+        app.plays = vec![
+            played(2, "Teardrop", "Massive Attack", 4 * 60_000, 330_000, true),
+            played(3, "Mota", "Russian Circles", 22 * 60_000, 392_000, true),
+            played(4, "Late night", "LoMo", 3 * 3_600_000, 61_000, false),
+            played(
+                5,
+                "Bohemian Rhapsody",
+                "Queen",
+                2 * 86_400_000,
+                355_000,
+                true,
+            ),
+        ];
+        app.plays_selection = 1;
+    }
     if mode == "artist" {
         app.view = View::Artist;
         app.artist = ArtistState {
@@ -330,6 +365,7 @@ fn main() {
         "queue" => lekima_tui::app::Mode::Queue,
         "help" => lekima_tui::app::Mode::Help,
         "comments" => lekima_tui::app::Mode::Comments,
+        "history" => lekima_tui::app::Mode::History,
         "settings" => {
             app.settings_selection = 3;
             lekima_tui::app::Mode::Settings

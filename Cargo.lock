@@ -1635,7 +1635,7 @@ dependencies = [
 
 [[package]]
 name = "lekima"
-version = "0.9.2"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1668,7 +1668,7 @@ dependencies = [
 
 [[package]]
 name = "lekima-audio"
-version = "0.9.2"
+version = "0.10.0"
 dependencies = [
  "async-trait",
  "lekima-domain",
@@ -1683,7 +1683,7 @@ dependencies = [
 
 [[package]]
 name = "lekima-config"
-version = "0.9.2"
+version = "0.10.0"
 dependencies = [
  "directories",
  "lekima-domain",
@@ -1696,7 +1696,7 @@ dependencies = [
 
 [[package]]
 name = "lekima-core"
-version = "0.9.2"
+version = "0.10.0"
 dependencies = [
  "async-trait",
  "lekima-domain",
@@ -1707,7 +1707,7 @@ dependencies = [
 
 [[package]]
 name = "lekima-domain"
-version = "0.9.2"
+version = "0.10.0"
 dependencies = [
  "async-trait",
  "serde",
@@ -1717,7 +1717,7 @@ dependencies = [
 
 [[package]]
 name = "lekima-ipc"
-version = "0.9.2"
+version = "0.10.0"
 dependencies = [
  "lekima-domain",
  "serde",
@@ -1728,7 +1728,7 @@ dependencies = [
 
 [[package]]
 name = "lekima-ncm"
-version = "0.9.2"
+version = "0.10.0"
 dependencies = [
  "async-trait",
  "lekima-domain",
@@ -1741,7 +1741,7 @@ dependencies = [
 
 [[package]]
 name = "lekima-platform"
-version = "0.9.2"
+version = "0.10.0"
 dependencies = [
  "block2",
  "mpris-server",
@@ -1757,7 +1757,7 @@ dependencies = [
 
 [[package]]
 name = "lekima-tui"
-version = "0.9.2"
+version = "0.10.0"
 dependencies = [
  "crossterm",
  "lekima-domain",

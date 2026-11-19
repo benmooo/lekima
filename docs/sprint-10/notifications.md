@@ -1,6 +1,6 @@
 # Sprint 10 · Slice A — Desktop notifications on track change
 
-Status: **Implemented, unreleased** · Linear AKA-144
+Status: **Shipped in 0.10.0** · Linear AKA-144
 
 ## 1. Problem
 

@@ -1,6 +1,6 @@
 # Sprint 10 — Daily-driver loop
 
-Status: **In progress** · Started 2026-11-19 · Linear milestone
+Status: **Shipped in 0.10.0** · Started 2026-11-19 · Linear milestone
 `Sprint 10 · v0.10+ — Next`
 
 The player can find and play music (0.9.x). What it cannot do is follow the

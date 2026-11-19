@@ -2071,10 +2071,10 @@ fn draw_history(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         .plays
         .iter()
         .map(|entry| {
-            let marker = if entry.completed {
-                theme.glyphs.active
-            } else {
-                " "
+            let marker = match (entry.completed, theme.glyphs.ascii) {
+                (true, false) => "✓",
+                (true, true) => "*",
+                (false, _) => " ",
             };
             ListItem::new(Line::from(vec![
                 Span::styled(
@@ -3309,6 +3309,61 @@ mod tests {
             album: None,
             duration_ms: 300_000,
         }
+    }
+
+    fn play(name: &str, completed: bool) -> lekima_domain::PlayRecord {
+        lekima_domain::PlayRecord {
+            track: track(name),
+            started_at: now_ms() - 90_000,
+            played_ms: if completed { 300_000 } else { 30_000 },
+            completed,
+            kind: lekima_domain::QueueKind::Manual,
+        }
+    }
+
+    fn now_ms() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| {
+                i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)
+            })
+    }
+
+    #[test]
+    fn history_pane_lists_plays_and_marks_completion() {
+        let mut app = App::new();
+        app.mode = Mode::History;
+        app.plays = vec![play("Teardrop", true), play("Mota", false)];
+
+        let screen = render(&mut app, 100, 24);
+
+        assert!(screen.contains("HISTORY"));
+        assert!(screen.contains("Teardrop"));
+        assert!(screen.contains("Mota"));
+        assert!(screen.contains('✓'), "completed plays are marked");
+        assert!(screen.contains("1m"), "the age column is rendered");
+    }
+
+    #[test]
+    fn history_pane_explains_an_empty_log() {
+        let mut app = App::new();
+        app.mode = Mode::History;
+
+        let screen = render(&mut app, 100, 24);
+        assert!(screen.contains("no plays yet"));
+    }
+
+    #[test]
+    fn history_error_is_visible_and_sanitized() {
+        let mut app = App::new();
+        app.mode = Mode::History;
+        app.plays_error = Some("boom\u{1b}[31m".to_owned());
+
+        let screen = render(&mut app, 100, 24);
+
+        assert!(screen.contains("could not load history"));
+        assert!(screen.contains("r to retry"));
+        assert!(!screen.contains('\u{1b}'));
     }
 
     #[test]

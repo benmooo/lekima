@@ -1,6 +1,6 @@
 # Sprint 10 · Slice B — Listening history
 
-Status: **Implemented, unreleased** · Linear AKA-147
+Status: **Shipped in 0.10.0** · Linear AKA-147
 
 ## 1. Problem
 
