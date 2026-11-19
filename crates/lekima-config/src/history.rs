@@ -56,15 +56,29 @@ impl HistoryStore {
     /// Returns [`io::ErrorKind::InvalidData`] when the file exists but is not a
     /// valid history document.
     pub fn load(&self, capacity: usize) -> io::Result<HistoryLog> {
+        self.load_pruned(capacity).map(|(log, _)| log)
+    }
+
+    /// Loads the log and reports whether records were dropped or trimmed.
+    ///
+    /// The caller rewrites the file when `true`, so the on-disk capacity and the
+    /// zero-played filter are enforced at load time rather than lingering until
+    /// the next play.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`io::ErrorKind::InvalidData`] when the file exists but is not a
+    /// valid history document.
+    pub fn load_pruned(&self, capacity: usize) -> io::Result<(HistoryLog, bool)> {
         let contents = match fs::read_to_string(&self.path) {
             Ok(contents) => contents,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                return Ok(HistoryLog::new(capacity));
+                return Ok((HistoryLog::new(capacity), false));
             }
             Err(error) => return Err(error),
         };
         if contents.trim().is_empty() {
-            return Ok(HistoryLog::new(capacity));
+            return Ok((HistoryLog::new(capacity), false));
         }
         let file: HistoryFile = serde_json::from_str(&contents)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
@@ -77,7 +91,15 @@ impl HistoryStore {
                 ),
             ));
         }
-        Ok(HistoryLog::from_records(file.entries, capacity))
+        let stored = file.entries.len();
+        let usable = file
+            .entries
+            .iter()
+            .filter(|record| record.played_ms > 0)
+            .count();
+        let log = HistoryLog::from_records(file.entries, capacity);
+        let pruned = usable > log.len() || usable != stored;
+        Ok((log, pruned))
     }
 
     /// Writes the log atomically with `0600` permissions.
@@ -138,15 +160,28 @@ mod tests {
         }
     }
 
-    fn log(ids: &[u64]) -> lekima_domain::HistoryLog {
-        let records = ids.iter().map(|id| lekima_domain::PlayRecord {
-            track: track(*id),
+    fn stale_record(id: u64) -> lekima_domain::PlayRecord {
+        lekima_domain::PlayRecord {
+            track: track(id),
+            started_at: 0,
+            played_ms: 0,
+            completed: false,
+            kind: QueueKind::Manual,
+        }
+    }
+
+    fn record(id: u64) -> lekima_domain::PlayRecord {
+        lekima_domain::PlayRecord {
+            track: track(id),
             started_at: 1_700_000_000_000,
             played_ms: 60_000,
             completed: true,
             kind: QueueKind::Manual,
-        });
-        lekima_domain::HistoryLog::from_records(records, 100)
+        }
+    }
+
+    fn log(ids: &[u64]) -> lekima_domain::HistoryLog {
+        lekima_domain::HistoryLog::from_records(ids.iter().copied().map(record), 100)
     }
 
     #[test]
@@ -179,6 +214,40 @@ mod tests {
         let loaded = store.load(50).unwrap();
         assert_eq!(loaded.capacity(), 50);
         assert!(loaded.is_empty());
+    }
+
+    #[test]
+    fn load_reports_when_it_pruned() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = HistoryStore::new(dir.path().join("history.json"));
+        // Written by hand: `save` already filters zero-played records.
+        std::fs::write(
+            store.path(),
+            serde_json::to_vec(&serde_json::json!({
+                "version": 1,
+                "entries": [stale_record(7), record(1)],
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let (loaded, pruned) = store.load_pruned(100).unwrap();
+        assert_eq!(loaded.len(), 1, "the zero-played record is filtered");
+        assert!(pruned);
+    }
+
+    #[test]
+    fn load_reports_trimming_by_capacity() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = HistoryStore::new(dir.path().join("history.json"));
+        store.save(&log(&[1, 2, 3, 4])).unwrap();
+
+        let (loaded, pruned) = store.load_pruned(2).unwrap();
+        assert_eq!(loaded.len(), 2);
+        assert!(pruned);
+
+        let (_, untouched) = store.load_pruned(10).unwrap();
+        assert!(!untouched, "a file that fits is not rewritten");
     }
 
     #[test]

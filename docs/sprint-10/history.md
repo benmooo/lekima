@@ -84,7 +84,10 @@ Decisions:
   play.
 - **Written only when the log changed.** Starting a play does not touch the
   file, so a daemon that is merely running — or restarting with a restored
-  queue — never rewrites history.
+  queue — never rewrites history. The one exception is a file that is over
+  capacity or contains zero-played rows from an older build: it is rewritten
+  once at load, so the on-disk bound matches memory and a later capacity
+  increase cannot resurrect records the running build dropped.
 - **A corrupt or future-versioned file is reported, not deleted.** The daemon
   logs a warning, starts empty, and leaves the file alone until a real play is
   recorded. `lekima doctor` shows the error. Silently wiping a user's history

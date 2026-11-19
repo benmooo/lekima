@@ -102,8 +102,8 @@ pub async fn run(paths: &Paths, config: &Config, socket: &Path, _detached: bool)
     let sleep_until = Arc::new(StdMutex::new(None));
     let preloaded = Arc::new(AtomicBool::new(false));
     let history_store = HistoryStore::new(paths.history_file());
-    let loaded = load_history(&history_store, config.history.capacity);
-    let saved_revision = loaded.revision();
+    let (loaded, pruned) = load_history(&history_store, config.history.capacity);
+    let saved_revision = prune_history(&history_store, &loaded, pruned);
     let history = Arc::new(StdMutex::new(loaded));
     let controls = lekima_platform::controls().await;
     tracing::debug!(backend = controls.backend(), "media integration ready");
@@ -1075,14 +1075,34 @@ async fn playback_snapshot(player: &Player) -> Option<SavedPlayback> {
 ///
 /// A corrupt file is reported but not deleted: the operator can inspect it, and
 /// the daemon keeps working.
-fn load_history(store: &HistoryStore, capacity: usize) -> HistoryLog {
-    match store.load(capacity) {
-        Ok(log) => log,
+fn load_history(store: &HistoryStore, capacity: usize) -> (HistoryLog, bool) {
+    match store.load_pruned(capacity) {
+        Ok(loaded) => loaded,
         Err(error) => {
             tracing::warn!(%error, "ignoring an unreadable history file");
-            HistoryLog::new(capacity)
+            (HistoryLog::new(capacity), false)
         }
     }
+}
+
+/// Rewrites a log that was trimmed or filtered on load, and returns the
+/// revision now on disk.
+///
+/// Without this the file could stay over `[history] capacity` or keep
+/// zero-played rows until the next play, and a raised capacity would resurrect
+/// records the running build had already dropped. An all-filtered file is left
+/// alone: deleting the last trace of a user's history is worse than keeping
+/// junk that no surface shows.
+fn prune_history(store: &HistoryStore, log: &HistoryLog, pruned: bool) -> u64 {
+    if !pruned || log.is_empty() {
+        return log.revision();
+    }
+    let records: Vec<_> = log.records().iter().cloned().collect();
+    if let Err(error) = store.save_records(&records) {
+        tracing::warn!(%error, "failed to rewrite the pruned listening history");
+        return log.revision();
+    }
+    log.revision()
 }
 
 /// Records one snapshot, returning whether the log changed enough to persist.
@@ -1109,20 +1129,39 @@ fn save_history(daemon: &Daemon) {
             log.revision(),
         )
     };
+    write_if_newer(
+        &daemon.history_store,
+        &daemon.history_saved,
+        &records,
+        revision,
+    );
+}
+
+/// Writes `records` unless `revision` is not newer than what is already on disk.
+///
+/// Returns whether the file was written. Extracted from the daemon so the
+/// ordering rule can be tested without a player.
+fn write_if_newer(
+    store: &HistoryStore,
+    saved: &StdMutex<u64>,
+    records: &[lekima_domain::PlayRecord],
+    revision: u64,
+) -> bool {
     if records.is_empty() {
-        return;
+        return false;
     }
-    let Ok(mut saved) = daemon.history_saved.lock() else {
-        return;
+    let Ok(mut saved) = saved.lock() else {
+        return false;
     };
     if revision <= *saved {
-        return;
+        return false;
     }
-    if let Err(error) = daemon.history_store.save_records(&records) {
+    if let Err(error) = store.save_records(records) {
         tracing::warn!(%error, "failed to save the listening history");
-        return;
+        return false;
     }
     *saved = revision;
+    true
 }
 
 /// Writes the history on shutdown, including the track that was playing.
@@ -1370,6 +1409,45 @@ mod tests {
             revision: 0,
             generation: 0,
         }
+    }
+
+    #[test]
+    fn an_older_snapshot_never_overwrites_a_newer_save() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = lekima_config::HistoryStore::new(dir.path().join("history.json"));
+        let saved = std::sync::Mutex::new(0_u64);
+
+        let one = lekima_domain::PlayRecord {
+            track: track("Song", None, None),
+            started_at: 1,
+            played_ms: 1_000,
+            completed: false,
+            kind: QueueKind::Manual,
+        };
+        let two = lekima_domain::PlayRecord {
+            started_at: 2,
+            ..one.clone()
+        };
+
+        assert!(super::write_if_newer(
+            &store,
+            &saved,
+            std::slice::from_ref(&one),
+            1
+        ));
+        // A poller that cloned before the final play closed must not win.
+        assert!(!super::write_if_newer(&store, &saved, &[], 0));
+        assert!(!super::write_if_newer(
+            &store,
+            &saved,
+            std::slice::from_ref(&one),
+            1
+        ));
+        assert!(super::write_if_newer(&store, &saved, &[two], 2));
+
+        let loaded = store.load(10).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded.records()[0].started_at, 2);
     }
 
     #[test]

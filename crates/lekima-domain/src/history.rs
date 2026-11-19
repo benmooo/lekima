@@ -96,6 +96,9 @@ impl HistoryLog {
 
     /// Rebuilds a log from stored records, oldest first, dropping the oldest
     /// when they exceed `capacity`.
+    ///
+    /// Records with no played time are dropped: older builds could persist a
+    /// play that never produced audio.
     #[must_use]
     pub fn from_records(records: impl IntoIterator<Item = PlayRecord>, capacity: usize) -> Self {
         let mut log = Self::new(capacity);
