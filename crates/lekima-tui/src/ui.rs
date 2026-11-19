@@ -2031,8 +2031,6 @@ fn draw_history(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(area);
 
     let total = app.plays.len();
-    let visible = usize::from(content.height.saturating_sub(1)).max(1);
-    app.plays_view_height = u16::try_from(visible).unwrap_or(u16::MAX);
 
     frame.render_widget(
         Paragraph::new(Line::from(vec![
@@ -2047,15 +2045,19 @@ fn draw_history(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     );
 
     if app.plays.is_empty() {
+        let (text, colour) = match (&app.plays_error, app.plays_loading) {
+            (Some(error), _) => (
+                format!("could not load history: {error} - r to retry"),
+                theme.hot,
+            ),
+            (None, true) => ("loading plays…".to_owned(), theme.muted),
+            (None, false) => (
+                "no plays yet - play something and it will show up here".to_owned(),
+                theme.muted,
+            ),
+        };
         frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                if app.plays_loading {
-                    "loading plays…"
-                } else {
-                    "no plays yet - play something and it will show up here"
-                },
-                Style::new().fg(theme.muted),
-            ))),
+            Paragraph::new(Line::from(Span::styled(text, Style::new().fg(colour)))),
             content,
         );
         return;

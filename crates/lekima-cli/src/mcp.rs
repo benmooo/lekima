@@ -154,7 +154,7 @@ fn build_command(name: &str, args: &Value) -> Result<Command, String> {
             limit: args
                 .get("limit")
                 .and_then(Value::as_u64)
-                .map(|limit| limit as usize),
+                .map(|limit| (limit as usize).clamp(1, 500)),
         },
         "sleep" => Command::Sleep {
             minutes: args

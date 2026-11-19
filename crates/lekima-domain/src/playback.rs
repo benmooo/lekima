@@ -148,6 +148,11 @@ pub struct PlaybackState {
     /// Monotonic daemon revision; clients use it to ignore stale status polls.
     #[serde(default)]
     pub revision: u64,
+    /// Bumped whenever a new stream is loaded for the current track, including
+    /// repeat-one loops and replaying the same track. Clients that need to tell
+    /// two plays of one track apart key on `(track, generation)`.
+    #[serde(default)]
+    pub generation: u64,
 }
 
 const fn default_volume() -> f32 {
@@ -186,6 +191,7 @@ impl Default for PlaybackState {
             stream_duration_ms: None,
             buffered: Vec::new(),
             revision: 0,
+            generation: 0,
         }
     }
 }

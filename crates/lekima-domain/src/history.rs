@@ -13,7 +13,7 @@ use std::collections::VecDeque;
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::Track;
+use crate::model::{Track, TrackId};
 use crate::playback::{PlaybackState, PlaybackStatus, QueueKind};
 
 /// How much of a track must be heard before it counts as completed.
@@ -55,10 +55,15 @@ pub fn is_completed(played_ms: u64, duration_ms: u64) -> bool {
 /// The track currently accumulating play time.
 #[derive(Debug, Clone)]
 struct Active {
+    /// `(track, generation)` — a new stream for the same track is a new play,
+    /// which is how repeat-one and replay stay separate records.
+    key: (TrackId, u64),
     track: Track,
     started_at: i64,
     played_ms: u64,
     last_position_ms: u64,
+    /// Metadata duration, replaced by the decoded stream duration for previews.
+    duration_ms: u64,
     kind: QueueKind,
 }
 
@@ -125,9 +130,14 @@ impl HistoryLog {
 
     /// Feeds one snapshot into the log.
     ///
-    /// Returns `true` when a record was appended (or the active play changed),
-    /// which is the only thing worth persisting. Position updates mutate the
-    /// active play without asking for a write.
+    /// Returns `true` only when a finished play was appended — the one change
+    /// worth persisting. Starting or extending a play never asks for a write, so
+    /// a restored queue cannot rewrite the file and a long track does not
+    /// rewrite it every tick.
+    ///
+    /// A play starts only when audio is actually running. A restored queue, a
+    /// queue edit and a paused track are current without being plays, so they
+    /// never produce a record.
     ///
     /// Play time accumulates from position deltas, so a seek forward is counted
     /// as listened and a seek backwards is not counted twice.
@@ -136,43 +146,56 @@ impl HistoryLog {
             return self.close_active();
         };
 
-        let same_track = self
-            .active
-            .as_ref()
-            .is_some_and(|active| active.track.id == track.id);
-        if !same_track {
-            self.close_active();
-            self.active = Some(Active {
-                track: track.clone(),
-                started_at: now_ms,
-                played_ms: 0,
-                last_position_ms: state.position_ms,
-                kind: state.queue_kind,
-            });
-            // A new active play is state worth persisting, even though no
-            // record was appended yet.
-            return true;
+        let key = (track.id, state.generation);
+        if self.active.as_ref().is_some_and(|active| active.key == key) {
+            let Some(active) = self.active.as_mut() else {
+                return false;
+            };
+            // Previews are shorter than their metadata claims; believe the
+            // decoded stream once the engine reports it.
+            if let Some(stream_ms) = state.stream_duration_ms.filter(|duration| *duration > 0) {
+                active.duration_ms = stream_ms;
+            }
+            if state.status == PlaybackStatus::Playing {
+                active.played_ms = active
+                    .played_ms
+                    .saturating_add(state.position_ms.saturating_sub(active.last_position_ms));
+            }
+            active.last_position_ms = state.position_ms;
+            return false;
         }
 
-        let Some(active) = self.active.as_mut() else {
-            return false;
-        };
-        if state.status == PlaybackStatus::Playing {
-            active.played_ms = active
-                .played_ms
-                .saturating_add(state.position_ms.saturating_sub(active.last_position_ms));
+        let closed = self.close_active();
+        if state.status != PlaybackStatus::Playing {
+            return closed;
         }
-        active.last_position_ms = state.position_ms;
-        false
+        self.active = Some(Active {
+            key,
+            track: track.clone(),
+            started_at: now_ms,
+            played_ms: 0,
+            last_position_ms: state.position_ms,
+            duration_ms: state
+                .stream_duration_ms
+                .filter(|duration| *duration > 0)
+                .unwrap_or(track.duration_ms),
+            kind: state.queue_kind,
+        });
+        closed
     }
 
-    /// Appends the active play, if any.
+    /// Appends the active play, if anything was actually heard.
     fn close_active(&mut self) -> bool {
         let Some(active) = self.active.take() else {
             return false;
         };
+        // A track that was current but never played (a restored queue, a skip
+        // inside the polling interval) is not a play.
+        if active.played_ms == 0 {
+            return false;
+        }
         self.push(PlayRecord {
-            completed: is_completed(active.played_ms, active.track.duration_ms),
+            completed: is_completed(active.played_ms, active.duration_ms),
             track: active.track,
             started_at: active.started_at,
             played_ms: active.played_ms,
@@ -197,7 +220,7 @@ impl HistoryLog {
 
 #[cfg(test)]
 mod tests {
-    use crate::model::{Quality, Track, TrackId};
+    use crate::model::{Track, TrackId};
     use crate::playback::{PlaybackState, PlaybackStatus};
 
     use super::{COMPLETION_PERCENT, HistoryLog, PlayRecord, is_completed};
@@ -212,33 +235,42 @@ mod tests {
         }
     }
 
-    fn state(id: u64, duration_ms: u64, position_ms: u64, playing: bool) -> PlaybackState {
+    /// A snapshot of `track(id)` at `position_ms`.
+    ///
+    /// `status` decides whether this is a play; `generation` separates two plays
+    /// of the same track.
+    fn state(
+        id: u64,
+        duration_ms: u64,
+        position_ms: u64,
+        status: PlaybackStatus,
+        generation: u64,
+    ) -> PlaybackState {
         PlaybackState {
-            status: if playing {
-                PlaybackStatus::Playing
-            } else {
-                PlaybackStatus::Paused
-            },
+            status,
             track: Some(track(id, duration_ms)),
             position_ms,
-            volume: 0.7,
-            muted: false,
-            repeat: crate::playback::RepeatMode::Off,
-            shuffle: false,
-            queue_length: 1,
-            queue_index: Some(0),
-            queue_kind: crate::playback::QueueKind::Manual,
-            liked: false,
-            loading: false,
-            buffering: false,
-            cached: false,
-            quality: Quality::Exhigh,
-            sleep_remaining_ms: None,
-            wave: Vec::new(),
-            stream_duration_ms: None,
-            buffered: Vec::new(),
-            revision: 0,
+            generation,
+            ..PlaybackState::default()
         }
+    }
+
+    fn playing(id: u64, duration_ms: u64, position_ms: u64, generation: u64) -> PlaybackState {
+        state(
+            id,
+            duration_ms,
+            position_ms,
+            PlaybackStatus::Playing,
+            generation,
+        )
+    }
+
+    fn paused(id: u64, duration_ms: u64, position_ms: u64) -> PlaybackState {
+        state(id, duration_ms, position_ms, PlaybackStatus::Paused, 0)
+    }
+
+    fn stopped(id: u64, duration_ms: u64) -> PlaybackState {
+        state(id, duration_ms, 0, PlaybackStatus::Stopped, 0)
     }
 
     #[test]
@@ -256,16 +288,19 @@ mod tests {
     fn a_track_is_recorded_when_the_next_one_starts() {
         let mut log = HistoryLog::new(10);
 
-        assert!(log.observe(&state(1, 100_000, 0, true), 1_000));
+        assert!(
+            !log.observe(&playing(1, 100_000, 0, 0), 1_000),
+            "starting a play is not a durable change"
+        );
         assert_eq!(log.len(), 0, "the current track is not finished yet");
 
         assert!(
-            !log.observe(&state(1, 100_000, 30_000, true), 2_000),
+            !log.observe(&playing(1, 100_000, 30_000, 0), 2_000),
             "a position update is not worth persisting"
         );
         assert_eq!(log.len(), 0);
 
-        assert!(log.observe(&state(2, 100_000, 0, true), 3_000));
+        assert!(log.observe(&playing(2, 100_000, 0, 1), 3_000));
         assert_eq!(log.len(), 1);
         let record = &log.records()[0];
         assert_eq!(record.track.id, TrackId::from(1_u64));
@@ -275,49 +310,121 @@ mod tests {
     }
 
     #[test]
-    fn play_time_accumulates_only_while_playing() {
+    fn a_restored_queue_is_not_a_play() {
         let mut log = HistoryLog::new(10);
-        log.observe(&state(1, 100_000, 0, true), 0);
-        log.observe(&state(1, 100_000, 10_000, true), 10_000);
-        log.observe(&state(1, 100_000, 10_000, false), 11_000);
-        log.observe(&state(1, 100_000, 10_000, false), 20_000);
-        log.observe(&state(2, 100_000, 0, true), 30_000);
+
+        assert!(!log.observe(&stopped(7, 100_000), 0));
+        assert!(!log.finish());
+        assert!(log.is_empty(), "a queue that never played has no history");
+    }
+
+    #[test]
+    fn a_stopped_track_is_not_announced_until_it_plays() {
+        let mut log = HistoryLog::new(10);
+
+        assert!(!log.observe(&stopped(1, 100_000), 0));
+        assert!(!log.observe(&playing(1, 100_000, 0, 1), 1_000));
+        assert!(!log.observe(&playing(1, 100_000, 5_000, 1), 2_000));
+        assert!(log.observe(&playing(2, 100_000, 0, 2), 3_000));
+
+        assert_eq!(log.len(), 1);
+        assert_eq!(log.records()[0].played_ms, 5_000);
+    }
+
+    #[test]
+    fn a_paused_track_is_not_a_new_play() {
+        let mut log = HistoryLog::new(10);
+        log.observe(&playing(1, 100_000, 0, 0), 0);
+        log.observe(&playing(1, 100_000, 10_000, 0), 10_000);
+
+        assert!(!log.observe(&paused(1, 100_000, 10_000), 11_000));
+        assert!(!log.observe(&paused(1, 100_000, 10_000), 20_000));
+        assert!(log.observe(&playing(2, 0, 0, 1), 30_000));
 
         assert_eq!(log.records()[0].played_ms, 10_000);
     }
 
     #[test]
-    fn a_seek_backwards_does_not_double_count() {
+    fn play_time_counts_position_deltas_across_seeks() {
         let mut log = HistoryLog::new(10);
-        log.observe(&state(1, 100_000, 0, true), 0);
-        log.observe(&state(1, 100_000, 20_000, true), 1_000);
-        log.observe(&state(1, 100_000, 5_000, true), 2_000);
-        log.observe(&state(1, 100_000, 15_000, true), 3_000);
-        log.observe(&state(2, 0, 0, true), 4_000);
+        log.observe(&playing(1, 100_000, 0, 0), 0);
+        log.observe(&playing(1, 100_000, 20_000, 0), 1_000);
+        log.observe(&playing(1, 100_000, 5_000, 0), 2_000);
+        log.observe(&playing(1, 100_000, 15_000, 0), 3_000);
+        log.observe(&playing(2, 0, 0, 1), 4_000);
 
+        // 0→20 s then 5→15 s: thirty seconds were heard, twenty of them new.
         assert_eq!(log.records()[0].played_ms, 30_000);
+    }
+
+    #[test]
+    fn repeat_one_records_each_loop() {
+        let mut log = HistoryLog::new(10);
+        log.observe(&playing(1, 100_000, 0, 1), 0);
+        log.observe(&playing(1, 100_000, 100_000, 1), 100_000);
+
+        // A repeat reloads the same id with a new generation.
+        assert!(log.observe(&playing(1, 100_000, 0, 2), 101_000));
+        assert_eq!(log.len(), 1);
+        assert_eq!(log.records()[0].played_ms, 100_000);
+        assert!(log.records()[0].completed);
+
+        log.observe(&playing(1, 100_000, 50_000, 2), 151_000);
+        assert!(log.finish());
+        assert_eq!(log.len(), 2);
+        assert_eq!(log.records()[1].played_ms, 50_000);
+    }
+
+    #[test]
+    fn replaying_the_same_track_records_a_new_play() {
+        let mut log = HistoryLog::new(10);
+        log.observe(&playing(1, 100_000, 0, 1), 0);
+        log.observe(&playing(1, 100_000, 100_000, 1), 100_000);
+
+        assert!(log.observe(&playing(1, 100_000, 0, 2), 200_000));
+        assert_eq!(log.len(), 1);
+        assert_eq!(log.records()[0].started_at, 0);
+
+        log.observe(&playing(1, 100_000, 30_000, 2), 230_000);
+        assert!(log.finish());
+        assert_eq!(log.len(), 2);
+        assert_eq!(log.records()[1].started_at, 200_000);
+        assert_eq!(log.records()[1].played_ms, 30_000);
     }
 
     #[test]
     fn a_track_played_to_the_end_is_completed() {
         let mut log = HistoryLog::new(10);
-        log.observe(&state(1, 100_000, 0, true), 0);
-        log.observe(&state(1, 100_000, 99_000, true), 99_000);
-        log.observe(&state(2, 0, 0, true), 100_000);
+        log.observe(&playing(1, 100_000, 0, 0), 0);
+        log.observe(&playing(1, 100_000, 99_000, 0), 99_000);
+        log.observe(&playing(2, 0, 0, 1), 100_000);
 
         assert!(log.records()[0].completed);
     }
 
     #[test]
+    fn a_preview_completes_on_the_stream_duration() {
+        let mut log = HistoryLog::new(10);
+        let mut preview = playing(1, 300_000, 0, 0);
+        preview.stream_duration_ms = Some(30_000);
+        log.observe(&preview, 0);
+        preview.position_ms = 29_000;
+        log.observe(&preview, 29_000);
+        log.observe(&playing(2, 0, 0, 1), 30_000);
+
+        assert!(log.records()[0].completed, "{:?}", log.records()[0]);
+    }
+
+    #[test]
     fn clearing_the_queue_finishes_the_current_track() {
         let mut log = HistoryLog::new(10);
-        log.observe(&state(1, 100_000, 0, true), 0);
-        log.observe(&state(1, 100_000, 5_000, true), 1_000);
+        log.observe(&playing(1, 100_000, 0, 0), 0);
+        log.observe(&playing(1, 100_000, 5_000, 0), 1_000);
 
-        let mut cleared = state(1, 100_000, 0, true);
-        cleared.track = None;
-        cleared.queue_length = 0;
-        cleared.queue_index = None;
+        let cleared = PlaybackState {
+            track: None,
+            ..PlaybackState::default()
+        };
 
         assert!(log.observe(&cleared, 6_000));
         assert_eq!(log.len(), 1);
@@ -331,7 +438,8 @@ mod tests {
     #[test]
     fn finish_records_the_playing_track_once() {
         let mut log = HistoryLog::new(10);
-        log.observe(&state(1, 100_000, 4_000, true), 0);
+        log.observe(&playing(1, 100_000, 0, 0), 0);
+        log.observe(&playing(1, 100_000, 4_000, 0), 4_000);
 
         assert!(log.finish());
         assert_eq!(log.len(), 1);
@@ -340,10 +448,20 @@ mod tests {
     }
 
     #[test]
+    fn a_play_with_no_audio_is_dropped() {
+        let mut log = HistoryLog::new(10);
+        // Observed once at position 0 and immediately replaced: nothing was heard.
+        log.observe(&playing(1, 100_000, 0, 0), 0);
+        assert!(!log.observe(&playing(2, 100_000, 0, 1), 10));
+        assert!(log.is_empty());
+    }
+
+    #[test]
     fn capacity_drops_the_oldest_records() {
         let mut log = HistoryLog::new(2);
         for id in 1..=4 {
-            log.observe(&state(id, 1_000, 0, true), id as i64);
+            log.observe(&playing(id, 1_000, 0, id), id as i64);
+            log.observe(&playing(id, 1_000, 900, id), id as i64 * 10);
         }
         log.finish();
 
@@ -361,7 +479,8 @@ mod tests {
     fn recent_returns_newest_first() {
         let mut log = HistoryLog::new(10);
         for id in 1..=3 {
-            log.observe(&state(id, 1_000, 0, true), id as i64);
+            log.observe(&playing(id, 1_000, 0, id), id as i64);
+            log.observe(&playing(id, 1_000, 500, id), id as i64 * 10);
         }
         log.finish();
 

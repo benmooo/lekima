@@ -50,8 +50,8 @@ Deferred out of this sprint, with their Linear state unchanged:
 - `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D
   warnings`, `cargo test --workspace` green.
 - Every new user-visible setting is documented and visible in `lekima doctor`.
-- No new I/O in `lekima-domain`; no new source of state mutation outside
-  `Player`.
+- No new I/O in `lekima-domain`; no new source of playback or queue mutation
+  outside `Player` (a listening log is a separate record, not player state).
 - Independent verification pass (subagent) against the slice exit criteria
   before the release is cut.
 

@@ -7,7 +7,7 @@ use std::{
 };
 
 use clap::CommandFactory;
-use lekima_config::{Config, FileCredentials, Paths};
+use lekima_config::{Config, FileCredentials, HistoryStore, Paths};
 use lekima_domain::{CredentialsStore, MusicService, PlaybackState};
 use lekima_ipc::{
     Command, ErrorCode, EventKind, FmAction, PlayTarget, Reply, call, is_running, watch,
@@ -1137,6 +1137,20 @@ async fn doctor(socket: &Path, paths: &Paths, config: &Config, json: bool) -> Re
     )
     .stats();
 
+    let history_file = paths.history_file();
+    let (history_entries, history_error) =
+        match HistoryStore::new(&history_file).load(config.history.capacity) {
+            Ok(log) => (log.len(), None),
+            Err(error) => (0, Some(error.to_string())),
+        };
+    let history = serde_json::json!({
+        "file": history_file,
+        "capacity": config.history.capacity,
+        "entries": history_entries,
+        "ok": history_error.is_none(),
+        "error": history_error,
+    });
+
     let report = serde_json::json!({
         "version": env!("CARGO_PKG_VERSION"),
         "socket": { "path": socket, "daemon_running": daemon_running },
@@ -1145,6 +1159,7 @@ async fn doctor(socket: &Path, paths: &Paths, config: &Config, json: bool) -> Re
         "audio": audio,
         "media": media,
         "notifications": notifications,
+        "history": history,
         "provider": provider,
         "cache": cache,
         "log": paths.log_file(),
@@ -1188,6 +1203,15 @@ async fn doctor(socket: &Path, paths: &Paths, config: &Config, json: bool) -> Re
             "on track change"
         } else {
             "off"
+        }
+    );
+    crate::say!(
+        "history  {} plays / {} ({})",
+        history_entries,
+        config.history.capacity,
+        match &history_error {
+            Some(error) => error.as_str(),
+            None => history_file.to_str().unwrap_or("history.json"),
         }
     );
     crate::say!(

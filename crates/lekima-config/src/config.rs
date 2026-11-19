@@ -143,7 +143,8 @@ pub struct NotificationsConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct HistoryConfig {
-    /// Number of finished plays kept. Oldest records are dropped first.
+    /// Number of finished plays kept. Oldest records are dropped first; values
+    /// below 1 are treated as 1.
     pub capacity: usize,
 }
 

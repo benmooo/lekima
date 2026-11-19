@@ -345,7 +345,7 @@ pub struct App {
     pub plays: Vec<lekima_domain::PlayRecord>,
     pub plays_selection: usize,
     pub plays_loading: bool,
-    pub plays_view_height: u16,
+    pub plays_error: Option<String>,
     pub mode: Mode,
     pub focus: Focus,
     pub input: String,
@@ -415,7 +415,7 @@ impl Default for App {
             plays: Vec::new(),
             plays_selection: 0,
             plays_loading: false,
-            plays_view_height: 0,
+            plays_error: None,
             mode: Mode::Normal,
             focus: Focus::Main,
             input: String::new(),
@@ -2145,6 +2145,7 @@ impl App {
                     Reply::History { entries } => {
                         self.plays = entries;
                         self.plays_loading = false;
+                        self.plays_error = None;
                         self.plays_selection =
                             self.plays_selection.min(self.plays.len().saturating_sub(1));
                     }
@@ -2237,6 +2238,10 @@ impl App {
                 if self.view == View::Search && self.search.loading {
                     self.search.loading = false;
                     self.search.error = Some(error_message(&error));
+                }
+                if self.plays_loading {
+                    self.plays_loading = false;
+                    self.plays_error = Some(error_message(&error));
                 }
                 if let LyricsState::Loading { track } = self.lyrics_state {
                     self.lyrics_state = LyricsState::Error {

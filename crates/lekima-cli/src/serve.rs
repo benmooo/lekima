@@ -8,7 +8,9 @@ use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
 use axum::{
     Json, Router,
-    extract::{DefaultBodyLimit, Query, State, rejection::JsonRejection},
+    extract::{
+        DefaultBodyLimit, Query, State, rejection::JsonRejection, rejection::QueryRejection,
+    },
     http::{
         HeaderMap, HeaderName, HeaderValue, StatusCode,
         header::{
@@ -241,11 +243,21 @@ struct HistoryQuery {
 async fn history(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Query(query): Query<HistoryQuery>,
+    query: Result<Query<HistoryQuery>, QueryRejection>,
 ) -> Response {
     if let Some(response) = authorize(&headers, &state) {
         return response;
     }
+    // A malformed query is answered only after authorisation, so an
+    // unauthenticated caller learns nothing and every error keeps the
+    // documented JSON envelope.
+    let Ok(Query(query)) = query else {
+        return error(
+            StatusCode::BAD_REQUEST,
+            ErrorCode::BadRequest,
+            "`limit` must be a whole number".to_owned(),
+        );
+    };
     forward(&state, Command::History { limit: query.limit }).await
 }
 
@@ -562,6 +574,30 @@ mod tests {
         // No daemon in this test, so reaching the forward path is the assertion.
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(body["error"]["code"], "daemon");
+    }
+
+    #[tokio::test]
+    async fn a_malformed_history_limit_is_rejected_after_authorisation() {
+        let (status, body) = call(
+            Request::builder()
+                .uri("/v1/history?limit=abc")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(body["error"]["code"], "unauthorized");
+
+        let (status, body) = call(
+            Request::builder()
+                .uri("/v1/history?limit=abc")
+                .header("authorization", "Bearer test-token-0123456789")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error"]["code"], "bad_request");
     }
 
     #[tokio::test]

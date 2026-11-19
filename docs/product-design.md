@@ -388,5 +388,6 @@ token.
    start in a single-pane “just the queue” mode?
 2. **Windows.** WSL only, or native named pipes and SMTC in a later release?
 3. **Next theme.** Catalogue depth shipped in 0.9.0 and was hardened in 0.9.1.
-   Desktop notifications, scrobbling, listening history and multiple profiles
-   remain candidates.
+   Desktop notifications and listening history ship in 0.10.0; scrobbling
+   remains a candidate, and multiple profiles were closed as unnecessary for a
+   single-person player.

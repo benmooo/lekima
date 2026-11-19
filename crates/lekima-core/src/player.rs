@@ -178,6 +178,7 @@ impl Player {
             stream_duration_ms: self.audio.stream_duration_ms(),
             buffered: self.audio.buffered_ranges(duration_ms),
             revision: 0,
+            generation: inner.generation,
         }
     }
 

@@ -68,6 +68,15 @@ impl HistoryStore {
         }
         let file: HistoryFile = serde_json::from_str(&contents)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        if file.version > VERSION {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "history format version {} is newer than this build understands ({VERSION})",
+                    file.version
+                ),
+            ));
+        }
         Ok(HistoryLog::from_records(file.entries, capacity))
     }
 
@@ -188,6 +197,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = HistoryStore::new(dir.path().join("history.json"));
         std::fs::write(store.path(), b"{not json").unwrap();
+
+        let error = store.load(10).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn a_future_format_is_rejected_instead_of_rewritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = HistoryStore::new(dir.path().join("history.json"));
+        std::fs::write(store.path(), br#"{"version":99,"entries":[]}"#).unwrap();
 
         let error = store.load(10).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);

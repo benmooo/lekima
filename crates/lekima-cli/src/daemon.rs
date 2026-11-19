@@ -124,6 +124,7 @@ pub async fn run(paths: &Paths, config: &Config, socket: &Path, _detached: bool)
         )),
         history,
         history_store,
+        history_write: StdMutex::new(()),
         playback_store: playback_store.clone(),
     });
 
@@ -196,6 +197,9 @@ struct Daemon {
     /// Finished plays, appended as tracks stop being current.
     history: Arc<StdMutex<HistoryLog>>,
     history_store: HistoryStore,
+    /// Serialises history writes: the poller and the shutdown path share one
+    /// temp file.
+    history_write: StdMutex<()>,
     playback_store: PlaybackStore,
 }
 
@@ -464,7 +468,7 @@ impl Daemon {
             }),
             Command::Status => Ok(self.status().await),
             Command::History { limit } => {
-                let limit = limit.unwrap_or(50).min(500);
+                let limit = limit.unwrap_or(50).clamp(1, 500);
                 let entries = self
                     .history
                     .lock()
@@ -1101,6 +1105,17 @@ fn close_history(daemon: &Daemon) -> Option<Vec<lekima_domain::PlayRecord>> {
     (!log.records().is_empty()).then(|| log.records().iter().cloned().collect())
 }
 
+/// Writes history under the shared write lock, so the poller and shutdown can
+/// never interleave their temp-file writes.
+fn save_history(daemon: &Daemon, records: &[lekima_domain::PlayRecord]) {
+    let Ok(_guard) = daemon.history_write.lock() else {
+        return;
+    };
+    if let Err(error) = daemon.history_store.save_records(records) {
+        tracing::warn!(%error, "failed to save the listening history");
+    }
+}
+
 /// Writes the history on shutdown, including the track that was playing.
 async fn persist_history(daemon: &Daemon) {
     let state = daemon.player.snapshot().await;
@@ -1108,9 +1123,7 @@ async fn persist_history(daemon: &Daemon) {
     let Some(records) = close_history(daemon) else {
         return;
     };
-    if let Err(error) = daemon.history_store.save_records(&records) {
-        tracing::warn!(%error, "failed to save the listening history");
-    }
+    save_history(daemon, &records);
 }
 
 /// Appends finished plays to the history once a second.
@@ -1119,7 +1132,10 @@ async fn persist_history(daemon: &Daemon) {
 /// rewrite the file on every tick.
 fn spawn_history(daemon: Arc<Daemon>) {
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(1));
+        // Four samples a second keeps a short track's play time within 250 ms of
+        // the truth; a single snapshot per second could miss a transition or
+        // undercount a track shorter than the interval.
+        let mut interval = tokio::time::interval(Duration::from_millis(250));
         loop {
             interval.tick().await;
             let state = daemon.player.snapshot().await;
@@ -1130,9 +1146,7 @@ fn spawn_history(daemon: Arc<Daemon>) {
                 |_| Vec::new(),
                 |log| log.records().iter().cloned().collect(),
             );
-            if let Err(error) = daemon.history_store.save_records(&records) {
-                tracing::warn!(%error, "failed to save the listening history");
-            }
+            save_history(&daemon, &records);
         }
     });
 }
@@ -1352,6 +1366,7 @@ mod tests {
             stream_duration_ms: None,
             buffered: Vec::new(),
             revision: 0,
+            generation: 0,
         }
     }
 
