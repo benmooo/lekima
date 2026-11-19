@@ -87,7 +87,9 @@ Decisions:
   queue — never rewrites history. The one exception is a file that is over
   capacity or contains zero-played rows from an older build: it is rewritten
   once at load, so the on-disk bound matches memory and a later capacity
-  increase cannot resurrect records the running build dropped.
+  increase cannot resurrect records the running build dropped. A file whose
+  every record was unusable is left in place rather than deleted: keeping junk
+  no surface shows is better than destroying the last trace of a history.
 - **A corrupt or future-versioned file is reported, not deleted.** The daemon
   logs a warning, starts empty, and leaves the file alone until a real play is
   recorded. `lekima doctor` shows the error. Silently wiping a user's history

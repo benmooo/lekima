@@ -1099,8 +1099,10 @@ fn prune_history(store: &HistoryStore, log: &HistoryLog, pruned: bool) -> u64 {
     }
     let records: Vec<_> = log.records().iter().cloned().collect();
     if let Err(error) = store.save_records(&records) {
+        // The file still holds the unpruned records, so do not claim this
+        // revision: the next save (shutdown, or a real play) retries.
         tracing::warn!(%error, "failed to rewrite the pruned listening history");
-        return log.revision();
+        return log.revision().saturating_sub(1);
     }
     log.revision()
 }
@@ -1435,19 +1437,53 @@ mod tests {
             std::slice::from_ref(&one),
             1
         ));
-        // A poller that cloned before the final play closed must not win.
-        assert!(!super::write_if_newer(&store, &saved, &[], 0));
+        // A poller that cloned before the final play closed must not win, even
+        // with a non-empty (older) snapshot.
         assert!(!super::write_if_newer(
             &store,
             &saved,
             std::slice::from_ref(&one),
             1
         ));
-        assert!(super::write_if_newer(&store, &saved, &[two], 2));
+        assert!(!super::write_if_newer(&store, &saved, &[], 2));
+        let both = [one.clone(), two.clone()];
+        assert!(super::write_if_newer(&store, &saved, &both, 2));
+        assert!(!super::write_if_newer(
+            &store,
+            &saved,
+            std::slice::from_ref(&one),
+            1
+        ));
+        assert!(!super::write_if_newer(&store, &saved, &both, 2));
 
         let loaded = store.load(10).unwrap();
-        assert_eq!(loaded.len(), 1);
-        assert_eq!(loaded.records()[0].started_at, 2);
+        assert_eq!(loaded.len(), 2, "the stale one-record snapshot lost");
+        assert_eq!(loaded.records()[1].started_at, 2);
+    }
+
+    #[test]
+    fn a_failed_prune_does_not_claim_the_disk_revision() {
+        let dir = tempfile::tempdir().unwrap();
+        // A regular file where the store expects a directory makes every write
+        // fail.
+        let blocker = dir.path().join("blocked");
+        std::fs::write(&blocker, b"not a directory").unwrap();
+        let store = lekima_config::HistoryStore::new(blocker.join("history.json"));
+
+        let record = lekima_domain::PlayRecord {
+            track: track("Song", None, None),
+            started_at: 1,
+            played_ms: 1_000,
+            completed: false,
+            kind: QueueKind::Manual,
+        };
+        let log = lekima_domain::HistoryLog::from_records([record], 1);
+
+        let baseline = super::prune_history(&store, &log, true);
+        assert_eq!(
+            baseline, 0,
+            "a failed rewrite must stay below the log revision so a later save retries"
+        );
     }
 
     #[test]
