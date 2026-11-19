@@ -19,7 +19,9 @@ no clock and no filesystem:
   and a paused track are current without being plays, so they never produce a
   record (and cannot invent a 0 ms entry).
 - A record is **appended when a play ends**: another track starts, the queue is
-  cleared, or the daemon shuts down.
+  cleared, playback is stopped, or the daemon shuts down. `stop` ends the play —
+  it resets position and the next resume starts from zero, so it is not treated
+  like a pause.
 - A play is identified by **`(track id, generation)`**. `PlaybackState.generation`
   is bumped by the player whenever a new stream is loaded, so repeat-one loops
   and replaying the same track are separate plays rather than one inflated
@@ -75,17 +77,21 @@ Decisions:
   `1`) drops the oldest records. A JSON array of at most 1000 small objects is a
   few hundred KiB; an unbounded journal would need compaction, rotation and a
   file format nobody asked for.
-- **Daemon is the only writer.** Same rule as playback persistence: the CLI and
-  TUI read through IPC, never off disk. Two paths write (the poller and
-  shutdown), so they share a write lock.
-- **Written only when a play ends.** Starting a play does not touch the file, so
-  a daemon that is merely running never rewrites history.
+- **Daemon is the only writer.** The CLI, TUI, MCP and HTTP read through IPC,
+  never off disk; `lekima doctor` is the one diagnostic exception, and it only
+  reads. Two paths write (the poller and shutdown): the log revision decides
+  whose snapshot is newer, so a stale poller clone cannot overwrite the final
+  play.
+- **Written only when the log changed.** Starting a play does not touch the
+  file, so a daemon that is merely running — or restarting with a restored
+  queue — never rewrites history.
 - **A corrupt or future-versioned file is reported, not deleted.** The daemon
   logs a warning, starts empty, and leaves the file alone until a real play is
   recorded. `lekima doctor` shows the error. Silently wiping a user's history
   would hide the bug that produced it.
-- **A crash loses at most the current track**, because it is not written until it
-  stops being current. Shutdown closes it explicitly.
+- **A crash can lose the current play**, and — rarely — the play that ended
+  within the last 250 ms sampling window. Shutdown closes the active play
+  explicitly, so a clean stop never does.
 
 ## 5. Surface
 

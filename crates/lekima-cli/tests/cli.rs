@@ -289,4 +289,7 @@ fn doctor_always_returns_a_report() {
         serde_json::from_slice(&output.stdout).expect("valid json envelope");
     assert_eq!(json["data"]["version"], env!("CARGO_PKG_VERSION"));
     assert!(json["data"]["session"]["present"].is_boolean());
+    assert_eq!(json["data"]["history"]["capacity"], 1000);
+    assert_eq!(json["data"]["history"]["entries"], 0);
+    assert_eq!(json["data"]["history"]["ok"], true);
 }

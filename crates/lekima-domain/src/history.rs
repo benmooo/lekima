@@ -73,6 +73,9 @@ pub struct HistoryLog {
     entries: VecDeque<PlayRecord>,
     active: Option<Active>,
     capacity: usize,
+    /// Counts appended records. Persisters use it to avoid writing a stale
+    /// snapshot over a newer one.
+    revision: u64,
 }
 
 impl HistoryLog {
@@ -87,6 +90,7 @@ impl HistoryLog {
             active: None,
             // A zero capacity would silently disable the feature.
             capacity: capacity.max(1),
+            revision: 0,
         }
     }
 
@@ -96,9 +100,18 @@ impl HistoryLog {
     pub fn from_records(records: impl IntoIterator<Item = PlayRecord>, capacity: usize) -> Self {
         let mut log = Self::new(capacity);
         for record in records {
-            log.push(record);
+            // Older builds could persist a play that never produced audio.
+            if record.played_ms > 0 {
+                log.push(record);
+            }
         }
         log
+    }
+
+    /// Monotonic count of appended records.
+    #[must_use]
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     /// Finished plays, oldest first.
@@ -211,6 +224,7 @@ impl HistoryLog {
     }
 
     fn push(&mut self, record: PlayRecord) {
+        self.revision = self.revision.wrapping_add(1);
         self.entries.push_back(record);
         while self.entries.len() > self.capacity {
             self.entries.pop_front();
@@ -493,13 +507,26 @@ mod tests {
         let records = (1..=3).map(|id| PlayRecord {
             track: track(id, 1_000),
             started_at: 0,
-            played_ms: 0,
-            completed: false,
+            played_ms: 1_000,
+            completed: true,
             kind: crate::playback::QueueKind::Manual,
         });
         let log = HistoryLog::from_records(records, 2);
 
         let ids: Vec<u64> = log.records().iter().map(|r| r.track.id.get()).collect();
         assert_eq!(ids, vec![2, 3]);
+        assert_eq!(log.revision(), 3, "every append counts, trimmed or not");
+    }
+
+    #[test]
+    fn stored_plays_with_no_audio_are_dropped_on_load() {
+        let stale = PlayRecord {
+            track: track(9, 1_000),
+            started_at: 0,
+            played_ms: 0,
+            completed: false,
+            kind: crate::playback::QueueKind::Manual,
+        };
+        assert!(HistoryLog::from_records([stale], 10).is_empty());
     }
 }

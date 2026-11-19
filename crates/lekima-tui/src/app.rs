@@ -1729,6 +1729,7 @@ impl App {
         self.mode = Mode::History;
         self.plays_selection = 0;
         self.plays_loading = true;
+        self.plays_error = None;
         Action::Call(Command::History { limit: Some(200) })
     }
 
@@ -1766,6 +1767,7 @@ impl App {
             }
             KeyCode::Char('r') => {
                 self.plays_loading = true;
+                self.plays_error = None;
                 Action::Call(Command::History { limit: Some(200) })
             }
             KeyCode::Char(' ') => Action::Call(Command::Toggle),
@@ -3388,6 +3390,23 @@ mod history_tests {
 
         assert!(matches!(app.handle_key(key(KeyCode::Enter)), Action::None));
         assert_eq!(app.mode, Mode::History);
+    }
+
+    #[test]
+    fn a_failed_request_is_visible_and_retryable() {
+        let mut app = App::new();
+        app.handle_key(key(KeyCode::Char('H')));
+        app.apply(Err(lekima_ipc::IpcError::Remote {
+            code: lekima_ipc::ErrorCode::Daemon,
+            message: "boom".to_owned(),
+        }));
+
+        assert!(!app.plays_loading);
+        assert_eq!(app.plays_error.as_deref(), Some("daemon error: boom"));
+
+        app.handle_key(key(KeyCode::Char('r')));
+        assert!(app.plays_loading, "a retry goes back to loading");
+        assert!(app.plays_error.is_none(), "the old error is cleared");
     }
 
     #[test]

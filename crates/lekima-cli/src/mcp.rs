@@ -151,10 +151,15 @@ fn build_command(name: &str, args: &Value) -> Result<Command, String> {
         },
         "queue_list" => Command::Queue,
         "history" => Command::History {
-            limit: args
-                .get("limit")
-                .and_then(Value::as_u64)
-                .map(|limit| (limit as usize).clamp(1, 500)),
+            limit: match args.get("limit") {
+                None => None,
+                Some(value) => Some(
+                    value
+                        .as_u64()
+                        .ok_or("`limit` must be a whole number between 1 and 500")?
+                        .clamp(1, 500) as usize,
+                ),
+            },
         },
         "sleep" => Command::Sleep {
             minutes: args
@@ -600,6 +605,29 @@ fn tools() -> Vec<Value> {
 mod tests {
     use super::{build_command, tools};
     use lekima_ipc::Command;
+
+    #[test]
+    fn history_limit_is_validated_and_clamped() {
+        use serde_json::json;
+
+        assert!(matches!(
+            build_command("history", &json!({})).unwrap(),
+            Command::History { limit: None }
+        ));
+        assert!(matches!(
+            build_command("history", &json!({ "limit": 0 })).unwrap(),
+            Command::History { limit: Some(1) }
+        ));
+        assert!(matches!(
+            build_command("history", &json!({ "limit": 50 })).unwrap(),
+            Command::History { limit: Some(50) }
+        ));
+        assert!(matches!(
+            build_command("history", &json!({ "limit": 9999 })).unwrap(),
+            Command::History { limit: Some(500) }
+        ));
+        assert!(build_command("history", &json!({ "limit": -3 })).is_err());
+    }
 
     #[test]
     fn tool_list_includes_the_core_surface() {

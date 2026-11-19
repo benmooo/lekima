@@ -1145,7 +1145,7 @@ async fn doctor(socket: &Path, paths: &Paths, config: &Config, json: bool) -> Re
         };
     let history = serde_json::json!({
         "file": history_file,
-        "capacity": config.history.capacity,
+        "capacity": config.history.capacity.max(1),
         "entries": history_entries,
         "ok": history_error.is_none(),
         "error": history_error,
@@ -1208,7 +1208,7 @@ async fn doctor(socket: &Path, paths: &Paths, config: &Config, json: bool) -> Re
     crate::say!(
         "history  {} plays / {} ({})",
         history_entries,
-        config.history.capacity,
+        config.history.capacity.max(1),
         match &history_error {
             Some(error) => error.as_str(),
             None => history_file.to_str().unwrap_or("history.json"),

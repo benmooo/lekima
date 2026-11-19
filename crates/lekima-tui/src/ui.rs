@@ -2047,7 +2047,10 @@ fn draw_history(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     if app.plays.is_empty() {
         let (text, colour) = match (&app.plays_error, app.plays_loading) {
             (Some(error), _) => (
-                format!("could not load history: {error} - r to retry"),
+                format!(
+                    "could not load history: {} - r to retry",
+                    sanitize_line(error)
+                ),
                 theme.hot,
             ),
             (None, true) => ("loading plays…".to_owned(), theme.muted),
