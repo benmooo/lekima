@@ -54,6 +54,19 @@ pub struct Glyphs {
     pub repeat: &'static str,
     pub shuffle: &'static str,
     pub sleep: &'static str,
+    // Catalogue and pane identity. One glyph per concept, reused everywhere the
+    // concept appears (rail, sidebar, pane title, hints).
+    pub tracks: &'static str,
+    pub albums: &'static str,
+    pub artists: &'static str,
+    pub playlists: &'static str,
+    pub queue: &'static str,
+    pub lyrics: &'static str,
+    pub history: &'static str,
+    pub daily: &'static str,
+    pub fm: &'static str,
+    pub charts: &'static str,
+    pub cloud: &'static str,
 }
 
 impl Glyphs {
@@ -84,6 +97,17 @@ impl Glyphs {
         repeat: "⟲",
         shuffle: "⇄",
         sleep: "☾",
+        tracks: "♪",
+        albums: "▣",
+        artists: "☺",
+        playlists: "≡",
+        queue: "≣",
+        lyrics: "♫",
+        history: "↺",
+        daily: "☀",
+        fm: "◉",
+        charts: "▲",
+        cloud: "☁",
     };
 
     pub const ASCII: Self = Self {
@@ -113,6 +137,17 @@ impl Glyphs {
         repeat: "R",
         shuffle: "S",
         sleep: "Z",
+        tracks: "t",
+        albums: "a",
+        artists: "r",
+        playlists: "p",
+        queue: "q",
+        lyrics: "l",
+        history: "h",
+        daily: "d",
+        fm: "f",
+        charts: "c",
+        cloud: "o",
     };
 
     #[must_use]
@@ -574,6 +609,37 @@ mod tests {
         let no_color =
             Theme::resolve_with("light", "unicode", "compact", Some("light"), true, true);
         assert!(no_color.is_mono());
+    }
+
+    #[test]
+    fn concept_glyphs_are_single_cell_and_present() {
+        use unicode_width::UnicodeWidthStr;
+
+        for glyphs in [super::Glyphs::UNICODE, super::Glyphs::ASCII] {
+            let concepts = [
+                ("tracks", glyphs.tracks),
+                ("albums", glyphs.albums),
+                ("artists", glyphs.artists),
+                ("playlists", glyphs.playlists),
+                ("queue", glyphs.queue),
+                ("lyrics", glyphs.lyrics),
+                ("history", glyphs.history),
+                ("daily", glyphs.daily),
+                ("fm", glyphs.fm),
+                ("charts", glyphs.charts),
+                ("cloud", glyphs.cloud),
+                ("liked", glyphs.liked),
+            ];
+            for (name, glyph) in concepts {
+                assert!(!glyph.is_empty(), "{name} is empty");
+                assert_eq!(
+                    glyph.width(),
+                    1,
+                    "{name} = {glyph:?} is {} cells, which breaks the HUD",
+                    glyph.width()
+                );
+            }
+        }
     }
 
     #[test]

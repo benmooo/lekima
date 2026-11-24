@@ -100,6 +100,7 @@ fn main() {
     let mut glyphs = "unicode".to_owned();
     let mut density = "compact".to_owned();
     let mut mode = "normal".to_owned();
+    let mut filter = "all".to_owned();
 
     let mut arguments = std::env::args().skip(1);
     while let Some(argument) = arguments.next() {
@@ -120,6 +121,7 @@ fn main() {
             "--glyphs" => glyphs = arguments.next().unwrap_or(glyphs),
             "--density" => density = arguments.next().unwrap_or(density),
             "--mode" => mode = arguments.next().unwrap_or(mode),
+            "--filter" => filter = arguments.next().unwrap_or(filter),
             "--long-title" => {
                 if let Some(track) = app.status.track.as_mut() {
                     track.name =
@@ -144,13 +146,27 @@ fn main() {
                 println!(
                     "usage: preview [--width N] [--height N] [--theme NAME] \
                      [--glyphs unicode|ascii] [--density compact|comfortable] \
-                     [--mode normal|queue|help|settings|comments|history|search|artist|album] [--long-title] \
+                     [--mode normal|queue|help|settings|comments|history|search|results|artist|album] \
+                     [--filter all|tracks|albums|artists|playlists] [--long-title] \
                      [--buffered] [--empty] [--no-lyrics] [--toast-error]"
                 );
                 return;
             }
             other => theme_name = other.to_owned(),
         }
+    }
+
+    {
+        use lekima_tui::app::SearchFilter;
+
+        app.search.filter = match filter.as_str() {
+            "tracks" => SearchFilter::Tracks,
+            "albums" => SearchFilter::Albums,
+            "artists" => SearchFilter::Artists,
+            "playlists" => SearchFilter::Playlists,
+            _ => SearchFilter::All,
+        };
+        app.search.applied_filter = app.search.filter;
     }
 
     if mode == "comments" {
@@ -195,7 +211,7 @@ fn main() {
         };
     }
 
-    if mode == "search" {
+    if mode == "search" || mode == "results" {
         app.search.query = "mota".to_owned();
         app.search.applied_filter = lekima_tui::app::SearchFilter::All;
         app.search.loading = true;
@@ -361,11 +377,32 @@ fn main() {
         app.source = "album: Mota".to_owned();
     }
 
+    {
+        use lekima_tui::app::SearchFilter;
+
+        app.search.filter = match filter.as_str() {
+            "tracks" => SearchFilter::Tracks,
+            "albums" => SearchFilter::Albums,
+            "artists" => SearchFilter::Artists,
+            "playlists" => SearchFilter::Playlists,
+            _ => SearchFilter::All,
+        };
+        app.search.applied_filter = app.search.filter;
+    }
+
     app.mode = match mode.as_str() {
         "queue" => lekima_tui::app::Mode::Queue,
         "help" => lekima_tui::app::Mode::Help,
         "comments" => lekima_tui::app::Mode::Comments,
         "history" => lekima_tui::app::Mode::History,
+        "search" => {
+            app.input = "mota".to_owned();
+            app.cursor = app.input.len();
+            app.search.query = "mota".to_owned();
+            app.view = View::Search;
+            lekima_tui::app::Mode::Search
+        }
+        "results" => lekima_tui::app::Mode::Normal,
         "settings" => {
             app.settings_selection = 3;
             lekima_tui::app::Mode::Settings

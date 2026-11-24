@@ -950,6 +950,29 @@ impl App {
         self.cursor = self.input.len();
     }
 
+    /// Re-runs the current search with a different catalogue kind.
+    ///
+    /// Used from the results view, where the prompt (and its rail) is closed.
+    fn refilter(&mut self, filter: SearchFilter) -> Action {
+        self.search.filter = filter;
+        if self.search.query.is_empty() {
+            return Action::None;
+        }
+        self.search.applied_filter = filter;
+        self.search.loading = true;
+        self.search.error = None;
+        self.search.results = None;
+        self.search.entries.clear();
+        self.main_selection = 0;
+        self.source = format!("search: {}", self.search.query);
+        Action::Call(Command::Search {
+            query: self.search.query.clone(),
+            kind: filter.kind(),
+            limit: 40,
+            offset: 0,
+        })
+    }
+
     /// Minimal ex-style command line. Anything longer belongs in the CLI.
     fn run_command(&mut self, input: &str) -> Action {
         let (name, rest) = input.split_once(' ').unwrap_or((input, ""));
@@ -1250,6 +1273,15 @@ impl App {
 
     fn handle_normal_key(&mut self, key: KeyEvent) -> Action {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        // In the results view the rail is gone, so the kind stays changeable
+        // from here. Tab keeps cycling focus.
+        if ctrl
+            && self.view == View::Search
+            && let KeyCode::Char(digit @ '1'..='5') = key.code
+            && let Some(filter) = SearchFilter::from_index(digit as usize - '1' as usize)
+        {
+            return self.refilter(filter);
+        }
         if self.window_prefix {
             self.window_prefix = false;
             self.pending_count = None;
@@ -2353,7 +2385,7 @@ const fn code_label(code: ErrorCode) -> &'static str {
 mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-    use lekima_domain::Track;
+    use lekima_domain::{SearchKind, Track};
 
     use super::{
         Action, AlbumState, App, ArtistState, Focus, LyricsState, Mode, SearchEntry, SearchFilter,
@@ -3058,6 +3090,24 @@ mod tests {
             },
             tracks: vec![sample_track(1), sample_track(2)],
         }
+    }
+
+    #[test]
+    fn the_category_can_be_changed_from_the_results_view() {
+        let mut app = App::new();
+        app.view = View::Search;
+        app.search.query = "mota".to_owned();
+        app.search.applied_filter = SearchFilter::All;
+
+        match app.handle_key(KeyEvent::new(KeyCode::Char('3'), KeyModifiers::CONTROL)) {
+            Action::Call(lekima_ipc::Command::Search { kind, query, .. }) => {
+                assert_eq!(kind, SearchKind::Album);
+                assert_eq!(query, "mota");
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        assert_eq!(app.search.applied_filter, SearchFilter::Albums);
+        assert!(app.search.loading);
     }
 
     #[test]

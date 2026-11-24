@@ -83,11 +83,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, theme: &Theme) {
     .areas(area);
 
     draw_hud(frame, app, theme, hud);
-    if app.mode == Mode::Search {
-        draw_search_filters(frame, app, theme, rule);
-    } else {
-        draw_rule(frame, theme, rule);
-    }
+    draw_rule(frame, theme, rule);
     let lyrics = draw_body(frame, app, theme, body);
     draw_footer(frame, app, theme, footer);
     draw_toast(frame, app, theme, area, lyrics);
@@ -457,27 +453,46 @@ fn draw_sidebar(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     frame.render_widget(Paragraph::new(Line::from(title)), label);
 
     let keys = ["d", "F", "t", "c", theme.glyphs.liked];
+    let icons = [
+        theme.glyphs.daily,
+        theme.glyphs.fm,
+        theme.glyphs.charts,
+        theme.glyphs.cloud,
+        "",
+    ];
     let mut items: Vec<ListItem> = Vec::with_capacity(app.sidebar_len() + 2);
 
     for (index, name) in SIDEBAR_STATICS.iter().enumerate() {
         let selected = index == app.sidebar_selection;
         let marker = if selected { theme.glyphs.active } else { " " };
-        items.push(ListItem::new(Line::from(vec![
+        let mut row = vec![
             Span::styled(
                 marker,
                 Style::new().fg(if focused { theme.accent } else { theme.muted }),
             ),
-            Span::styled("[", Style::new().fg(theme.dim)),
             Span::styled(keys[index], Style::new().fg(theme.accent_alt)),
-            Span::styled("] ", Style::new().fg(theme.dim)),
-            Span::styled((*name).to_owned(), Style::new().fg(theme.text)),
-        ])));
+            Span::styled(" ", Style::new().fg(theme.dim)),
+        ];
+        if !icons[index].is_empty() {
+            row.push(Span::styled(
+                format!("{} ", icons[index]),
+                Style::new().fg(theme.muted),
+            ));
+        }
+        row.push(Span::styled(
+            (*name).to_owned(),
+            Style::new().fg(theme.text),
+        ));
+        items.push(ListItem::new(Line::from(row)));
     }
 
     items.push(ListItem::new(Line::from("")));
     items.push(ListItem::new(Line::from(vec![
         Span::styled("// ", Style::new().fg(theme.panel)),
-        Span::styled("PLAYLISTS", Style::new().fg(theme.muted)),
+        Span::styled(
+            format!("{} PLAYLISTS", theme.glyphs.playlists),
+            Style::new().fg(theme.muted),
+        ),
         Span::styled(
             format!(" {} {}", theme.glyphs.separator, app.playlists.len()),
             Style::new().fg(theme.accent_alt),
@@ -973,17 +988,33 @@ fn draw_toplists(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
 }
 
 /// Filter row shown in place of the rule while the search prompt is open.
-fn draw_search_filters(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
-    let mut spans = vec![Span::styled(" ", Style::new())];
+/// Glyph that names a catalogue kind, shared by the rail and the headers.
+const fn filter_glyph(filter: SearchFilter, theme: &Theme) -> &'static str {
+    match filter {
+        SearchFilter::All => "",
+        SearchFilter::Tracks => theme.glyphs.tracks,
+        SearchFilter::Albums => theme.glyphs.albums,
+        SearchFilter::Artists => theme.glyphs.artists,
+        SearchFilter::Playlists => theme.glyphs.playlists,
+    }
+}
+
+/// One glyph per catalogue kind; the active one is bracketed so the state does
+/// not depend on colour. `ALL` is the absence of a bracket.
+fn search_rail_spans(app: &App, theme: &Theme) -> Vec<Span<'static>> {
+    let mut spans = Vec::with_capacity(8);
     for filter in SearchFilter::ALL {
-        let active = filter == app.search.filter;
-        let label = if active {
-            format!("[{}]", filter.label())
-        } else {
-            format!(" {} ", filter.label())
-        };
+        if filter == SearchFilter::All {
+            continue;
+        }
+        let glyph = filter_glyph(filter, theme);
+        let active = app.search.filter == filter;
         spans.push(Span::styled(
-            label,
+            if active {
+                format!("[{glyph}]")
+            } else {
+                glyph.to_owned()
+            },
             if active {
                 Style::new()
                     .fg(theme.badge_fg)
@@ -993,14 +1024,9 @@ fn draw_search_filters(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) 
                 Style::new().fg(theme.muted)
             },
         ));
+        spans.push(Span::styled(" ", Style::new()));
     }
-    if area.width >= 72 {
-        spans.push(Span::styled(
-            format!("  tab cycles {} ctrl-1..5", theme.glyphs.separator),
-            Style::new().fg(theme.dim),
-        ));
-    }
-    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+    spans
 }
 
 fn section_line(label: &str, count: usize, theme: &Theme) -> Line<'static> {
@@ -1069,6 +1095,21 @@ fn draw_search(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
             Style::new().fg(theme.dim),
         ),
         Span::styled(format!("\"{query}\""), Style::new().fg(theme.text)),
+        Span::styled(
+            format!(" {} ", theme.glyphs.separator),
+            Style::new().fg(theme.dim),
+        ),
+        Span::styled(
+            {
+                let glyph = filter_glyph(app.search.applied_filter, theme);
+                if glyph.is_empty() {
+                    app.search.applied_filter.label().to_owned()
+                } else {
+                    format!("{glyph} {}", app.search.applied_filter.label())
+                }
+            },
+            Style::new().fg(theme.muted),
+        ),
         Span::styled(
             format!(" {} ", theme.glyphs.separator),
             Style::new().fg(theme.dim),
@@ -1644,7 +1685,7 @@ fn draw_lyrics(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     });
     let mut header_spans = vec![
         Span::styled(
-            "// LYRICS",
+            format!("// {} LYRICS", theme.glyphs.lyrics),
             Style::new().fg(theme.panel).add_modifier(Modifier::BOLD),
         ),
         Span::styled(lines_label, Style::new().fg(theme.muted)),
@@ -2035,7 +2076,10 @@ fn draw_history(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled("// ", Style::new().fg(theme.panel)),
-            Span::styled("HISTORY", Style::new().fg(theme.muted)),
+            Span::styled(
+                format!("{} HISTORY", theme.glyphs.history),
+                Style::new().fg(theme.muted),
+            ),
             Span::styled(
                 format!(" {} {}", theme.glyphs.separator, total),
                 Style::new().fg(theme.accent_alt),
@@ -2164,7 +2208,10 @@ fn draw_queue(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled("// ", Style::new().fg(theme.panel)),
-            Span::styled("QUEUE", Style::new().fg(theme.muted)),
+            Span::styled(
+                format!("{} QUEUE", theme.glyphs.queue),
+                Style::new().fg(theme.muted),
+            ),
             Span::styled(
                 format!(
                     " {} {}{}{}",
@@ -2666,9 +2713,23 @@ fn draw_footer(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         Span::styled(" ", Style::new()),
     ];
 
-    if matches!(app.mode, Mode::Search | Mode::Command) {
-        let prefix = if app.mode == Mode::Search { ">" } else { ":" };
-        spans.push(Span::styled(prefix, Style::new().fg(theme.accent)));
+    if app.mode == Mode::Search {
+        // The category rail sits between the badge and the query, so the
+        // filter is never more than one glance from the caret.
+        spans.extend(search_rail_spans(app, theme));
+        spans.push(Span::styled(
+            format!("{} ", theme.glyphs.divider),
+            Style::new().fg(theme.dim),
+        ));
+        spans.extend(prompt_spans(app, theme));
+        if area.width >= 104 {
+            spans.push(Span::styled(
+                format!("  tab filter {} ctrl-1..5", theme.glyphs.separator),
+                Style::new().fg(theme.muted),
+            ));
+        }
+    } else if app.mode == Mode::Command {
+        spans.push(Span::styled(":", Style::new().fg(theme.accent)));
         spans.extend(prompt_spans(app, theme));
         if area.width >= 90 {
             spans.push(Span::styled(
@@ -2697,7 +2758,7 @@ fn draw_footer(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         spans.push(Span::styled(hints, Style::new().fg(theme.muted)));
         if app.lyrics_open && area.width >= 80 {
             spans.push(Span::styled(
-                format!(" {} L close", theme.glyphs.separator),
+                format!(" {} {} close", theme.glyphs.separator, theme.glyphs.lyrics),
                 Style::new().fg(theme.muted),
             ));
         }
@@ -2709,13 +2770,17 @@ fn draw_footer(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
 fn normal_hints(app: &App, theme: &Theme, width: u16) -> String {
     let enter = theme.glyphs.enter;
     let sep = theme.glyphs.separator;
+    let q = theme.glyphs.queue;
     if app.view == View::Search {
-        return if width >= 80 {
+        let filter = "c-1..5 filter";
+        return if width >= 92 {
             format!(
-                "j/k {sep} {enter} open {sep} a queue {sep} / refine {sep} esc back {sep} ? keys"
+                "j/k {sep} {enter} open {sep} a queue {sep} / refine {sep} {filter} {sep} esc back {sep} ? keys"
             )
+        } else if width >= 72 {
+            format!("j/k {sep} {enter} {sep} a queue {sep} / refine {sep} {filter} {sep} esc")
         } else if width >= 52 {
-            format!("j/k {sep} {enter} {sep} a queue {sep} / {sep} esc")
+            format!("j/k {sep} {enter} {sep} / {sep} {filter} {sep} esc")
         } else {
             format!("j/k {sep} {enter} {sep} / {sep} esc")
         };
@@ -2744,12 +2809,12 @@ fn normal_hints(app: &App, theme: &Theme, width: u16) -> String {
     }
     if width >= 108 {
         format!(
-            "j/k {sep} {enter} play {sep} space {sep} Q queue {sep} S theme {sep} / search {sep} : cmd {sep} ctrl-o/i hist {sep} ? keys"
+            "j/k {sep} {enter} play {sep} space {sep} {q} queue {sep} S theme {sep} / search {sep} : cmd {sep} ctrl-o/i hist {sep} ? keys"
         )
     } else if width >= 80 {
-        format!("j/k {sep} {enter} play {sep} space {sep} / search {sep} Q queue {sep} ? keys")
+        format!("j/k {sep} {enter} play {sep} space {sep} / search {sep} {q} queue {sep} ? keys")
     } else if width >= 52 {
-        format!("j/k {sep} {enter} {sep} / {sep} Q {sep} ?")
+        format!("j/k {sep} {enter} {sep} / {sep} {q} {sep} ?")
     } else if app.pending_count.is_some() {
         "digits, then j/k or G".to_owned()
     } else {
@@ -3285,6 +3350,16 @@ mod tests {
         render_with(app, width, height, Theme::cyber())
     }
 
+    fn render_rows(app: &mut App, width: u16, height: u16, theme: Theme) -> Vec<String> {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| draw(frame, app, &theme)).unwrap();
+        let buffer = terminal.backend().buffer();
+        (0..height)
+            .map(|y| (0..width).map(|x| buffer[(x, y)].symbol()).collect())
+            .collect()
+    }
+
     fn render_with(app: &mut App, width: u16, height: u16, theme: Theme) -> String {
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -3522,8 +3597,8 @@ mod tests {
             owner: None,
         }];
         let screen = render(&mut app, 100, 30);
-        assert!(screen.contains("[d]"));
-        assert!(screen.contains("PLAYLISTS"));
+        assert!(screen.contains("d ☀ DAILY"), "key and concept glyph");
+        assert!(screen.contains("≡ PLAYLISTS"));
         assert!(screen.contains("Late night"));
         assert!(screen.contains("42"));
     }
@@ -4044,16 +4119,90 @@ mod tests {
     }
 
     #[test]
-    fn search_filters_render_above_the_prompt() {
+    fn the_search_rail_sits_beside_the_prompt() {
         let mut app = App::new();
         app.handle_key(crossterm::event::KeyEvent::new(
             KeyCode::Char('/'),
             KeyModifiers::NONE,
         ));
+        for character in "mota".chars() {
+            app.handle_key(crossterm::event::KeyEvent::new(
+                KeyCode::Char(character),
+                KeyModifiers::NONE,
+            ));
+        }
+
+        for width in [80, 120] {
+            let rows = render_rows(&mut app, width, 24, Theme::cyber());
+            let footer = &rows[rows.len() - 1];
+            for glyph in ["♪", "▣", "☺", "≡"] {
+                assert!(footer.contains(glyph), "{width} missing {glyph}: {footer}");
+            }
+            assert!(footer.contains("mota"), "{width} lost the query");
+            assert!(
+                !rows[1].contains('♪'),
+                "{width}: the rail must not replace the rule at the top"
+            );
+        }
+    }
+
+    #[test]
+    fn the_active_category_is_bracketed_and_all_has_none() {
+        let mut app = App::new();
+        app.handle_key(crossterm::event::KeyEvent::new(
+            KeyCode::Char('/'),
+            KeyModifiers::NONE,
+        ));
+        assert!(!render(&mut app, 100, 24).contains("[▣]"));
+
+        app.handle_key(crossterm::event::KeyEvent::new(
+            KeyCode::Char('3'),
+            KeyModifiers::CONTROL,
+        ));
         let screen = render(&mut app, 100, 24);
-        assert!(screen.contains("[ALL]"));
-        assert!(screen.contains("ALBUMS"));
-        assert!(screen.contains("ctrl-1..5"));
+        assert!(screen.contains("[▣]"), "albums are bracketed when active");
+        assert!(
+            !screen.contains("♪ ▣ ☺ ≡"),
+            "the inactive plain rail is gone"
+        );
+    }
+
+    #[test]
+    fn the_search_rail_has_an_ascii_form() {
+        let mut app = App::new();
+        app.handle_key(crossterm::event::KeyEvent::new(
+            KeyCode::Char('/'),
+            KeyModifiers::NONE,
+        ));
+        let screen = render_with(
+            &mut app,
+            100,
+            24,
+            Theme::resolve("cyber", "ascii", "compact"),
+        );
+        let footer = screen[screen.len() - 100..].to_owned();
+        for glyph in ["t", "a", "r", "p"] {
+            assert!(footer.contains(glyph), "missing {glyph}: {footer}");
+        }
+    }
+
+    #[test]
+    fn the_results_header_names_the_category() {
+        let mut app = App::new();
+        app.view = View::Search;
+        app.search.query = "mota".to_owned();
+        app.search.applied_filter = crate::app::SearchFilter::Albums;
+        app.apply(Ok(lekima_ipc::Reply::Search {
+            query: "mota".to_owned(),
+            kind: lekima_domain::SearchKind::Album,
+            results: search_results(),
+        }));
+
+        let screen = render(&mut app, 120, 30);
+        assert!(
+            screen.contains("▣ ALBUMS"),
+            "header should name the active category"
+        );
     }
 
     #[test]

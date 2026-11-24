@@ -230,6 +230,13 @@ Global — `q`/`Ctrl-c` quit, `?` help, `/` search, `:` command line,
 | `y` | Yank track URL/ID to clipboard (v0.2) |
 | `P` | Toggle provider panel? (removed — `P` in the original was play mode) |
 
+> Search categories are glyphs on the prompt line itself — `♪` tracks, `▣`
+> albums, `☺` artists, `≡` playlists — with the active one bracketed and `ALL`
+> meaning no bracket. `Tab`/`Ctrl-1..5` cycle them while typing, and
+> `Ctrl-1..5` re-runs the current query in the results view, where the header
+> names the category. The same glyphs label the sidebar, the queue, history,
+> lyrics and playlists headers.
+>
 > Compatibility note: the archived app used `o`/`Enter` to expand the playlist
 > tree. We keep `o` as “open” alias for muscle memory.
 >
