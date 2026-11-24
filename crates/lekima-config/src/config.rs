@@ -147,9 +147,11 @@ pub struct NotificationsConfig {
 /// sequenced events to its stdin and accepts the commands it is allowed to send
 /// back. Capabilities are command tags; see `lekima_ipc::HOOK_CAPABILITIES`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(default, deny_unknown_fields)]
 pub struct HookConfig {
-    /// Executable followed by its arguments. Must not be empty.
+    /// Executable followed by its arguments. An empty command is rejected per
+    /// hook by the daemon, so one bad table cannot stop every CLI command from
+    /// loading the configuration.
     pub command: Vec<String>,
     /// Event kinds to receive (`status`, `queue`, `like`, `resync`). Empty means
     /// every kind.
@@ -447,6 +449,15 @@ mod tests {
 
         let enabled: Config = toml::from_str("[notifications]\non_track_change = true\n").unwrap();
         assert!(enabled.notifications.on_track_change);
+    }
+
+    #[test]
+    fn a_hook_without_a_command_still_parses() {
+        // The daemon rejects it per hook; parsing must not fail for every
+        // command that loads the config.
+        let config: Config = toml::from_str("[hooks.broken]\nevents = [\"status\"]\n").unwrap();
+        assert!(config.hooks["broken"].command.is_empty());
+        assert_eq!(config.hooks["broken"].events, vec!["status".to_owned()]);
     }
 
     #[test]

@@ -107,7 +107,7 @@ pub async fn run(paths: &Paths, config: &Config, socket: &Path, _detached: bool)
     let (loaded, pruned) = load_history(&history_store, config.history.capacity);
     let saved_revision = prune_history(&history_store, &loaded, pruned);
     let history = Arc::new(StdMutex::new(loaded));
-    let (hook_commands, hook_receiver) = mpsc::unbounded_channel();
+    let (hook_commands, hook_receiver) = mpsc::channel(hooks::COMMAND_QUEUE);
     let running_hooks = hooks::start(&config.hooks, hub.sender.clone(), hook_commands);
     let controls = lekima_platform::controls().await;
     tracing::debug!(backend = controls.backend(), "media integration ready");
@@ -882,14 +882,19 @@ fn spawn_ticker(
 ///
 /// Capability checks happen in `hooks`; by the time a command reaches this
 /// queue it was declared in the hook's configuration.
-fn spawn_hook_commands(
-    daemon: Arc<Daemon>,
-    mut commands: mpsc::UnboundedReceiver<(String, Command)>,
-) {
+fn spawn_hook_commands(daemon: Arc<Daemon>, mut commands: mpsc::Receiver<(String, Command)>) {
     tokio::spawn(async move {
         while let Some((hook, command)) = commands.recv().await {
+            // Same pre/post handling as a client command: a hook must not leave
+            // the preloader flag or the event revision behind.
+            if invalidates_preload(&command) {
+                daemon.preloaded.store(false, Ordering::SeqCst);
+            }
             match daemon.execute(command.clone()).await {
-                Ok(reply) => daemon.publish(&command, &reply).await,
+                Ok(mut reply) => {
+                    daemon.stamp_revision(&mut reply);
+                    daemon.publish(&command, &reply).await;
+                }
                 Err(error) => tracing::debug!(%hook, error = ?error, "hook command failed"),
             }
         }

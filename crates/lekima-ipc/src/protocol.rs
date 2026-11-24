@@ -234,11 +234,13 @@ impl Command {
 
 /// Command tags a hook may be granted.
 ///
-/// Session and lifecycle commands are deliberately absent: a hook cannot log
-/// in, log out or stop the daemon, and `subscribe`/`hello`/`ping` are transport
-/// concerns a hook never needs to send.
+/// Only commands with a player-visible effect appear here. Read-only commands
+/// are absent because a hook cannot receive a reply on its command stream; it
+/// reads state from events, from the public state files, or by connecting to the
+/// socket like any other client. Session and lifecycle commands (`login`,
+/// `logout`, `shutdown`) are absent so a mistaken hook cannot take over the
+/// account or stop the daemon.
 pub const HOOK_CAPABILITIES: &[&str] = &[
-    "status",
     "play",
     "jump",
     "pause",
@@ -253,31 +255,18 @@ pub const HOOK_CAPABILITIES: &[&str] = &[
     "cycle_repeat",
     "set_repeat",
     "set_shuffle",
-    "queue",
     "queue_remove",
     "queue_move",
     "enqueue",
     "clear_queue",
     "daily",
     "fm",
-    "toplists",
     "cloud",
     "like",
-    "history",
-    "comments",
-    "liked",
     "sleep",
     "set_quality",
-    "search",
-    "playlists",
-    "playlist_tracks",
-    "artist",
-    "artist_albums",
-    "album",
     "queue_album",
     "queue_playlist",
-    "lyrics",
-    "whoami",
 ];
 
 /// Whether `tag` names a capability a hook may declare.
@@ -508,11 +497,31 @@ mod tests {
             assert_eq!(*tag, tag.to_ascii_lowercase(), "wire tags are snake_case");
             assert!(super::is_hook_capability(tag));
         }
-        for forbidden in ["login", "logout", "shutdown", "subscribe", "hello", "ping"] {
+        // Lifecycle, session and read-only commands are never grantable.
+        for forbidden in [
+            "login",
+            "logout",
+            "shutdown",
+            "subscribe",
+            "hello",
+            "ping",
+            "status",
+            "queue",
+            "history",
+            "search",
+            "lyrics",
+            "whoami",
+        ] {
             assert!(
                 !super::is_hook_capability(forbidden),
                 "{forbidden} must not be grantable to a hook"
             );
+        }
+
+        // No duplicates, and every entry is a real command tag.
+        let mut seen = std::collections::HashSet::new();
+        for tag in super::HOOK_CAPABILITIES {
+            assert!(seen.insert(*tag), "duplicate capability {tag}");
         }
 
         assert_eq!(Command::Pause.tag(), "pause");

@@ -70,7 +70,8 @@ capabilities = ["pause"]
 
 The daemon writes a hello frame and then sequenced event frames to the hook's
 stdin, and accepts the commands its `capabilities` declare on stdout. An
-undeclared command is refused. `lekima doctor` lists every hook and any config
+undeclared command is refused. The command stream has no replies: a hook reads
+state from events or from the state files. `lekima doctor` lists every hook and any config
 error. See [sprint-11/hooks.md](sprint-11/hooks.md).
 
 ## HTTP control

@@ -428,7 +428,7 @@ capacity = 1000           # finished plays kept on disk
 [hooks.nowplaying]        # one table per hook, named by you
 command = ["/Users/me/bin/nowplaying"]
 events = ["status"]       # status | queue | like | resync (default: all)
-capabilities = ["pause"]  # command tags or a hook may not send any
+capabilities = ["pause"]  # command tags a hook may send; empty = read-only
 ```
 
 Precedence: defaults → file → environment (`LEKIMA_CONFIG_DIR`,

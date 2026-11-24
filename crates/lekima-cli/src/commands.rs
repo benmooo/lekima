@@ -1058,11 +1058,15 @@ async fn daemon_command(
             .await
             .map_err(|error| Failure::internal(error.to_string())),
         DaemonCommand::Logs { lines } => {
-            let raw = std::fs::read_to_string(paths.log_file()).unwrap_or_default();
-            let tail: Vec<_> = raw
+            // Lossy and sanitized: a hook's stderr ends up in this file, and it
+            // must never paint a terminal or make the whole view unreadable.
+            let raw = std::fs::read(paths.log_file()).unwrap_or_default();
+            let text = String::from_utf8_lossy(&raw);
+            let tail: Vec<String> = text
                 .lines()
                 .rev()
                 .take(lines)
+                .map(lekima_domain::sanitize_line)
                 .collect::<Vec<_>>()
                 .into_iter()
                 .rev()
@@ -1222,16 +1226,22 @@ async fn doctor(socket: &Path, paths: &Paths, config: &Config, json: bool) -> Re
             "off"
         }
     );
-    let hook_names: Vec<&str> = config.hooks.keys().map(String::as_str).collect();
-    crate::say!(
-        "hooks    {} configured{}",
-        hook_names.len(),
-        if hook_names.is_empty() {
-            String::new()
-        } else {
-            format!(" ({})", hook_names.join(", "))
+    crate::say!("hooks    {} configured", config.hooks.len());
+    for (name, config) in &config.hooks {
+        match crate::hooks::HookSpec::from_config(name, config) {
+            Ok(spec) => crate::say!(
+                "  {name:<16} {} {} {}",
+                if crate::hooks::is_executable(&spec) {
+                    "ok"
+                } else {
+                    "not found"
+                },
+                spec.event_names().join(","),
+                spec.capability_names().join(",")
+            ),
+            Err(error) => crate::say!("  {name:<16} invalid: {error}"),
         }
-    );
+    }
     crate::say!(
         "history  {} plays / {} ({})",
         history_entries,
