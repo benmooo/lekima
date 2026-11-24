@@ -28,14 +28,18 @@ one person on one machine, so multi-account isolation solves a problem this
 product does not have; `LEKIMA_CONFIG_DIR` already relocates all state for
 scripts and tests.
 
-Deferred out of this sprint, with their Linear state unchanged:
+Deferred out of this sprint, and later closed by product decision:
 
-- **Scrobbling** (AKA-143) — needs external credentials and a scrobble policy;
-  own design note.
-- **Hook design** (AKA-149) — plugin hooks are the requirement and WASM
-  (AKA-146, now a research spike) is one possible substrate; sequence the spike
-  first.
-- **Windows** (AKA-145 canceled, AKA-152 open) — decision outstanding.
+- **Scrobbling** (AKA-143) — canceled. Listening history stays on this machine;
+  nothing is uploaded to an external account (ADR-014).
+- **WASM spike** (AKA-146) — canceled. No in-process plugin runtime; extensions
+  stay out-of-process (ADR-015).
+- **Windows** (AKA-145, AKA-152) — canceled. macOS and Linux only (ADR-013).
+
+Still open from the milestone:
+
+- **Hook design** (AKA-149) — plugin hooks as external processes; needs its own
+  design note.
 - The three open design questions (AKA-150, AKA-151, AKA-153).
 
 ## Design documents

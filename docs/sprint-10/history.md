@@ -154,7 +154,8 @@ unit level instead.
 
 ## 8. Non-goals
 
-- Scrobbling (AKA-143) — separate design note and external credentials.
+- Scrobbling (AKA-143) — closed: the log never leaves this machine (ADR-014).
+  A user who wants remote play-counts can consume `lekima history` from outside.
 - Statistics, charts, "year in review", or aggregation by artist/album.
 - Editing or deleting individual records.
 - Syncing history between machines.

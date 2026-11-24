@@ -16,7 +16,7 @@ Status: **Living document** — up to date through 0.9.0 · Companion to
 | Small blast radius | One writer of playback state; adapters are replaceable |
 | Safe by construction | `unsafe` forbidden in first-party crates; secrets off argv/logs; strings sanitized |
 
-Hard constraints: Rust 2024 edition, MSRV 1.98, macOS + Linux first-class,
+Hard constraints: Rust 2024 edition, MSRV 1.98, macOS + Linux only (ADR-013),
 single static binary, no mandatory system audio libraries beyond what rodio
 needs (CoreAudio on macOS; ALSA/Pulse on Linux).
 
@@ -546,6 +546,9 @@ account.
 | 010 | Poll status in v0.1, push events in v0.2 | Correctness first; protocol already supports unsolicited frames |
 | 011 | HTTP control as a frontend, not a second daemon | Reuses the IPC contract; one writer, no state duplication |
 | 012 | Assisted login through the official web player | The web login carries Yidun/WebGL checks; driving a real browser avoids mimicking an anti-bot SDK |
+| 013 | macOS and Linux only | Two OS integrations are already the maintenance budget; Windows would need named pipes, SMTC and a CI runner this project does not have |
+| 014 | Listening history is local only | It is a personal log, not a public profile: no external account, no network egress, no deletion semantics to design |
+| 015 | No in-process plugin runtime | A sandbox plus a host ABI is a second product; external processes keep the trust boundary, the versioning story and the crash isolation simple |
 
 ## 17. Failure modes
 

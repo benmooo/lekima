@@ -150,12 +150,22 @@ play once, including repeat-one loops.
 
 ### Later
 
-Last.fm scrobbling, plugin hooks, Windows native support, WASM/embedded agent
-tooling.
+Plugin hooks, as external processes only (see ADR-015). The other candidates
+from this bucket were closed by product decision:
+
+- **Scrobbling / cloud listening history** — the history is a personal log on
+  this machine; nothing is uploaded to an external account (ADR-014).
+- **Windows** — macOS and Linux are the supported platforms (ADR-013).
+- **WASM / embedded agent tooling** — no in-process plugin runtime (ADR-015).
 
 ### Explicit non-goals
 
 - GUI/TUI parity with the web player’s social features.
+- Uploading listening history anywhere: no scrobbling, no Last.fm, no cloud
+  profile.
+- Windows support, native or through WSL.
+- An in-process plugin runtime or a WASM sandbox; extensions are external
+  processes.
 - Downloading copyrighted tracks for redistribution.
 - Bypassing regional or VIP restrictions.
 - Reimplementing the NetEase recommendation stack.
@@ -358,7 +368,8 @@ token.
 - `lekima play … --json` works headless (no TTY) with the daemon running.
 - Zero panics on malformed provider payloads (fuzz/property tests on mapping).
 - Clean `cargo clippy -D warnings`, no `unsafe` (`#![forbid(unsafe_code)]`).
-- Runs on macOS (arm64) and Linux (x86_64, Wayland/X11); Windows is best-effort.
+- Runs on macOS (arm64) and Linux (x86_64, Wayland/X11). Those are the only
+  supported platforms; Windows is not supported.
 
 ## 8. Milestones
 
@@ -396,8 +407,6 @@ token.
 
 1. **Default UI density.** Do we keep the original’s always-visible sidebar, or
    start in a single-pane “just the queue” mode?
-2. **Windows.** WSL only, or native named pipes and SMTC in a later release?
-3. **Next theme.** Catalogue depth shipped in 0.9.0 and was hardened in 0.9.1.
-   Desktop notifications and listening history ship in 0.10.0; scrobbling
-   remains a candidate, and multiple profiles were closed as unnecessary for a
-   single-person player.
+2. **Next theme.** Desktop notifications and listening history shipped in
+   0.10.0. Plugin hooks are the only remaining candidate from the “Later”
+   bucket; scrobbling, Windows and in-process sandboxing are closed.
