@@ -3,6 +3,29 @@
 All notable changes to lekima are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## 0.10.1 — 2026-11-25
+
+### Added
+
+- The search category now sits on the prompt line as icons — `♪` tracks, `▣`
+  albums, `☺` artists, `≡` playlists — with the active one bracketed and `ALL`
+  meaning no bracket. It used to live in a row at the top of the screen, far
+  from the caret, and vanished once results arrived.
+- The results header names the category (`▣ ALBUMS`) instead of only a count,
+  and `Ctrl-1..5` re-runs the current query from the results view.
+- One glyph per concept across the interface: sidebar (`d ☀ DAILY`), queue
+  (`≣ QUEUE`), history (`↺ HISTORY`), lyrics (`♫ LYRICS`), playlists
+  (`≡ PLAYLISTS`) and the queue/lyrics footer hints. Every glyph has an ASCII
+  twin for `--glyphs ascii`.
+- `preview` gains `--mode search|results` and `--filter` so the search surfaces
+  can be reviewed without a daemon or an account.
+
+### Changed
+
+- Product decisions recorded as ADRs 013–015: macOS and Linux only, listening
+  history never leaves the machine (no scrobbling), no in-process plugin
+  runtime. The roadmap list now reflects them.
+
 ## 0.10.0 — 2026-11-20
 
 ### Added

@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.10.0"
+version = "0.10.1"
 edition = "2024"
 rust-version = "1.98"
 license = "MIT"
@@ -12,14 +12,14 @@ authors = ["benmooo"]
 
 [workspace.dependencies]
 # internal
-lekima-domain = { path = "crates/lekima-domain", version = "0.10.0" }
-lekima-core = { path = "crates/lekima-core", version = "0.10.0" }
-lekima-config = { path = "crates/lekima-config", version = "0.10.0" }
-lekima-ipc = { path = "crates/lekima-ipc", version = "0.10.0" }
-lekima-ncm = { path = "crates/lekima-ncm", version = "0.10.0" }
-lekima-audio = { path = "crates/lekima-audio", version = "0.10.0" }
-lekima-platform = { path = "crates/lekima-platform", version = "0.10.0" }
-lekima-tui = { path = "crates/lekima-tui", version = "0.10.0" }
+lekima-domain = { path = "crates/lekima-domain", version = "0.10.1" }
+lekima-core = { path = "crates/lekima-core", version = "0.10.1" }
+lekima-config = { path = "crates/lekima-config", version = "0.10.1" }
+lekima-ipc = { path = "crates/lekima-ipc", version = "0.10.1" }
+lekima-ncm = { path = "crates/lekima-ncm", version = "0.10.1" }
+lekima-audio = { path = "crates/lekima-audio", version = "0.10.1" }
+lekima-platform = { path = "crates/lekima-platform", version = "0.10.1" }
+lekima-tui = { path = "crates/lekima-tui", version = "0.10.1" }
 
 # external
 anyhow = "1"

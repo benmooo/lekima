@@ -58,6 +58,11 @@ $ lekima status --json
 
 ## Status
 
+`0.10.1` moves the search category onto the prompt line as icons (`♪ ▣ ☺ ≡`),
+names it in the results header, and re-runs the query when `Ctrl-1..5` changes
+it. The same glyphs now label the sidebar and the queue, history and lyrics
+panes, with ASCII twins for `--glyphs ascii`.
+
 `0.10.0` starts the daily-driver loop: desktop notifications on track change
 (opt in with `[notifications] on_track_change = true`) and a durable listening
 history — `lekima history`, MCP `history`, `GET /v1/history` and an `H` pane in
