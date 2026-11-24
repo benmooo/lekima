@@ -1157,6 +1157,7 @@ async fn doctor(socket: &Path, paths: &Paths, config: &Config, json: bool) -> Re
                     "command": spec.command,
                     "events": spec.event_names(),
                     "capabilities": spec.capability_names(),
+                    "found": crate::hooks::is_executable(&spec),
                     "ok": true,
                 }),
                 Err(error) => serde_json::json!({ "name": name, "ok": false, "error": error }),

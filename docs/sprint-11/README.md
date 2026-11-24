@@ -43,4 +43,4 @@ Out of scope:
 - Hooks are not plugins in the "install a package" sense: the user writes the
   process, the daemon only starts it.
 - Hooks do not get a second copy of player state; they see events and send
-  commands like any other client.
+  action commands. The command stream carries no replies.

@@ -43,7 +43,8 @@ use tokio::{
 /// Version of the hook contract carried in the hello frame.
 pub const PROTOCOL: u16 = 1;
 
-/// How many commands may wait for the daemon before a hook's sends are dropped.
+/// Commands that may wait for the daemon, shared by every hook. A hook that
+/// floods the queue can crowd the others; that is preferred to unbounded memory.
 pub const COMMAND_QUEUE: usize = 64;
 
 /// Longest accepted output line, matching the socket frame limit.
@@ -153,11 +154,18 @@ impl HookSpec {
 pub fn is_executable(spec: &HookSpec) -> bool {
     let program = &spec.command[0];
     if program.contains('/') {
-        return std::path::Path::new(program).is_file();
+        return runnable(std::path::Path::new(program));
     }
     std::env::var_os("PATH").is_some_and(|paths| {
-        std::env::split_paths(&paths).any(|directory| directory.join(program).is_file())
+        std::env::split_paths(&paths).any(|directory| runnable(&directory.join(program)))
     })
+}
+
+fn runnable(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+
+    path.metadata()
+        .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
 }
 
 /// A running hook process.
@@ -325,7 +333,8 @@ async fn read_commands(
     let mut lines = LineBuffer::default();
     let mut complete = Vec::new();
     let mut utf8_warned = false;
-    let mut rejected = 0;
+    let mut limit_warned = false;
+    let mut denied: HashSet<&'static str> = HashSet::new();
 
     loop {
         match reader.read(&mut chunk).await {
@@ -333,8 +342,8 @@ async fn read_commands(
             Ok(read) => {
                 complete.clear();
                 lines.feed(&chunk[..read], &mut complete);
-                if lines.rejected > rejected {
-                    rejected = lines.rejected;
+                if lines.rejected > 0 && !limit_warned {
+                    limit_warned = true;
                     tracing::warn!(
                         hook = %spec.name,
                         limit = MAX_LINE,
@@ -349,7 +358,7 @@ async fn read_commands(
                         }
                         continue;
                     };
-                    handle_line(&spec, text.trim(), &commands);
+                    handle_line(&spec, text.trim(), &commands, &mut denied);
                 }
             }
             Err(error) => {
@@ -359,10 +368,25 @@ async fn read_commands(
         }
     }
 
+    // A one-shot hook may write its last command without a trailing newline.
+    if let Some(raw) = lines.finish() {
+        match std::str::from_utf8(&raw) {
+            Ok(text) => handle_line(&spec, text.trim(), &commands, &mut denied),
+            Err(_) if !utf8_warned => {
+                tracing::warn!(hook = %spec.name, "hook output is not valid utf-8");
+            }
+            Err(_) => {}
+        }
+    }
     tracing::info!(hook = %spec.name, "hook output closed");
 }
 
-fn handle_line(spec: &HookSpec, line: &str, commands: &mpsc::Sender<(String, Command)>) {
+fn handle_line(
+    spec: &HookSpec,
+    line: &str,
+    commands: &mpsc::Sender<(String, Command)>,
+    denied: &mut HashSet<&'static str>,
+) {
     if line.is_empty() {
         return;
     }
@@ -374,11 +398,17 @@ fn handle_line(spec: &HookSpec, line: &str, commands: &mpsc::Sender<(String, Com
         }
     };
     if !spec.allows(&command) {
-        tracing::warn!(
-            hook = %spec.name,
-            command = command.tag(),
-            "hook command denied: capability not declared"
-        );
+        // Warn once per tag: a hostile or buggy hook must not fill the log.
+        let tag = command.tag();
+        if denied.insert(tag) {
+            tracing::warn!(
+                hook = %spec.name,
+                command = tag,
+                "hook command denied: capability not declared"
+            );
+        } else {
+            tracing::debug!(hook = %spec.name, command = tag, "repeat denied command");
+        }
         return;
     }
     match commands.try_send((spec.name.clone(), command)) {
@@ -414,6 +444,13 @@ async fn pump_stderr(spec: Arc<HookSpec>, stderr: ChildStderr) {
             Err(_) => break,
         }
     }
+    if let Some(raw) = lines.finish() {
+        let text = String::from_utf8_lossy(&raw);
+        let line = sanitize_line(text.trim_end_matches('\r'));
+        if !line.is_empty() {
+            tracing::warn!(hook = %spec.name, "{line}");
+        }
+    }
 }
 
 /// Splits a byte stream into newline-delimited lines with a hard size cap.
@@ -429,6 +466,14 @@ struct LineBuffer {
 }
 
 impl LineBuffer {
+    /// Returns the unterminated final line, if the stream ended mid-line.
+    fn finish(&mut self) -> Option<Vec<u8>> {
+        if self.discarding || self.line.is_empty() {
+            return None;
+        }
+        Some(std::mem::take(&mut self.line))
+    }
+
     fn feed(&mut self, chunk: &[u8], complete: &mut Vec<Vec<u8>>) {
         for &byte in chunk {
             if self.discarding {
@@ -569,6 +614,26 @@ mod tests {
         buffer.feed(b"\n{\"type\":\"pause\"}\n", &mut complete);
         assert_eq!(complete.len(), 1);
         assert_eq!(complete[0], b"{\"type\":\"pause\"}");
+    }
+
+    #[test]
+    fn an_unterminated_final_line_is_flushed_at_eof() {
+        let mut buffer = LineBuffer::default();
+        let mut complete = Vec::new();
+
+        buffer.feed(b"{\"type\":\"pause\"}", &mut complete);
+        assert!(complete.is_empty());
+        assert_eq!(buffer.finish(), Some(b"{\"type\":\"pause\"}".to_vec()));
+        assert!(buffer.finish().is_none(), "flushing twice yields nothing");
+    }
+
+    #[test]
+    fn an_unterminated_line_over_the_limit_is_not_flushed() {
+        let mut buffer = LineBuffer::default();
+        let mut complete = Vec::new();
+
+        buffer.feed(&vec![b'x'; MAX_FRAME_BYTES + 1], &mut complete);
+        assert!(buffer.finish().is_none());
     }
 
     #[test]

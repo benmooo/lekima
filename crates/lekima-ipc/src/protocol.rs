@@ -234,10 +234,12 @@ impl Command {
 
 /// Command tags a hook may be granted.
 ///
-/// Only commands with a player-visible effect appear here. Read-only commands
-/// are absent because a hook cannot receive a reply on its command stream; it
-/// reads state from events, from the public state files, or by connecting to the
-/// socket like any other client. Session and lifecycle commands (`login`,
+/// Only commands that change playback or start work appear here. Read-only
+/// commands are absent because a hook cannot receive a reply on its command
+/// stream; it reads state from events, from the public state files, or by
+/// connecting to the socket like any other client. (`daily` and `cloud` are
+/// listed for their play variants; their list variants return a reply the hook
+/// never sees and are therefore no-ops.) Session and lifecycle commands (`login`,
 /// `logout`, `shutdown`) are absent so a mistaken hook cannot take over the
 /// account or stop the daemon.
 pub const HOOK_CAPABILITIES: &[&str] = &[

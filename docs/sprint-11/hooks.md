@@ -61,10 +61,10 @@ command = ["/Users/me/bin/nowplaying"]
 events = ["status"]            # default: every kind
 capabilities = ["pause"]       # default: none, so read-only
 
-[hooks.history-sync]
-command = ["/Users/me/bin/sync-history", "--to", "my-server"]
-events = ["status", "queue"]
-capabilities = ["history"]
+[hooks.scrobble-bridge]
+command = ["/Users/me/bin/scrobble-bridge"]
+events = ["status"]
+capabilities = []              # read history.json and post it yourself
 ```
 
 - The table name is the hook's identity in logs and `doctor`.
@@ -88,9 +88,9 @@ capabilities = ["history"]
 | Hook stops reading stdin | Its writer task blocks; other hooks and playback are unaffected; events for that hook are dropped |
 | Hook lags | One `resync` frame per lag episode, warning once then debug |
 | Hook sends invalid JSON or non-UTF-8 | Logged, line ignored; the stream keeps working |
-| Hook sends a line over 1 MiB | Line dropped, the stream resynchronizes at the next newline |
-| Hook floods commands | The 64-command queue drops the excess; the daemon stays responsive |
-| Hook sends an undeclared command | Logged at warn, command dropped |
+| Hook sends a line over 1 MiB | Line dropped, the stream resynchronizes at the next newline; one warning per connection |
+| Hook floods commands | The shared 64-command queue drops the excess (a busy hook can crowd others); the daemon stays responsive |
+| Hook sends an undeclared command | Warned once per tag, then debug; command dropped |
 | Daemon shuts down | Hook stdin closes and the **direct child** is killed. A hook that leaves grandchildren behind must `exec` its final process |
 
 Hooks run as independent tasks on the daemon's runtime, so a slow or wedged hook
@@ -132,9 +132,11 @@ startup, so a hook that is slow to start delays daemon start, not playback.
 The human output repeats the same facts per hook, including `invalid: …` for a
 bad table and `not found` for a valid table pointing at a missing program.
 
-The daemon log records `hook started`, `hook command denied`, `hook lagged`,
-`hook exited` and `hook process exited` at info, and `hook stopped` at debug
-when the daemon shuts a hook down.
+The daemon log records `hook started`, `hook output closed`, `hook process
+exited` and `hook lagged` at info, `hook command denied` once per rejected tag,
+and `hook stopped` at debug when the daemon shuts a hook down. Everything a hook
+writes to stderr is forwarded at warn, so the volume is the hook's own
+responsibility.
 
 ## 7. Tests
 
