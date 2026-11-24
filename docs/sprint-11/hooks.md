@@ -132,9 +132,10 @@ startup, so a hook that is slow to start delays daemon start, not playback.
 The human output repeats the same facts per hook, including `invalid: …` for a
 bad table and `not found` for a valid table pointing at a missing program.
 
-The daemon log records `hook started`, `hook output closed`, `hook process
-exited` and `hook lagged` at info, `hook command denied` once per rejected tag,
-and `hook stopped` at debug when the daemon shuts a hook down. Everything a hook
+The daemon log records `hook started`, `hook output closed` and `hook process
+exited` at info, `hook lagged` once per connection at warn (then debug),
+`hook command denied` once per rejected tag, and `hook stopped` at debug when
+the daemon shuts a hook down. Everything a hook
 writes to stderr is forwarded at warn, so the volume is the hook's own
 responsibility.
 

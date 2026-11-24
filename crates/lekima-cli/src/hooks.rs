@@ -284,7 +284,6 @@ async fn write_events(
     loop {
         match events.recv().await {
             Ok(frame) => {
-                lag_warned = false;
                 if !spec.wants(&frame.event) {
                     continue;
                 }
@@ -335,10 +334,14 @@ async fn read_commands(
     let mut utf8_warned = false;
     let mut limit_warned = false;
     let mut denied: HashSet<&'static str> = HashSet::new();
+    let mut eof = false;
 
     loop {
         match reader.read(&mut chunk).await {
-            Ok(0) => break,
+            Ok(0) => {
+                eof = true;
+                break;
+            }
             Ok(read) => {
                 complete.clear();
                 lines.feed(&chunk[..read], &mut complete);
@@ -369,7 +372,8 @@ async fn read_commands(
     }
 
     // A one-shot hook may write its last command without a trailing newline.
-    if let Some(raw) = lines.finish() {
+    // Only at a clean EOF: a partial line after an I/O error is not trustworthy.
+    if eof && let Some(raw) = lines.finish() {
         match std::str::from_utf8(&raw) {
             Ok(text) => handle_line(&spec, text.trim(), &commands, &mut denied),
             Err(_) if !utf8_warned => {
@@ -426,10 +430,14 @@ async fn pump_stderr(spec: Arc<HookSpec>, stderr: ChildStderr) {
     let mut chunk = [0_u8; 4096];
     let mut lines = LineBuffer::default();
     let mut complete = Vec::new();
+    let mut eof = false;
 
     loop {
         match reader.read(&mut chunk).await {
-            Ok(0) => break,
+            Ok(0) => {
+                eof = true;
+                break;
+            }
             Ok(read) => {
                 complete.clear();
                 lines.feed(&chunk[..read], &mut complete);
@@ -444,7 +452,7 @@ async fn pump_stderr(spec: Arc<HookSpec>, stderr: ChildStderr) {
             Err(_) => break,
         }
     }
-    if let Some(raw) = lines.finish() {
+    if eof && let Some(raw) = lines.finish() {
         let text = String::from_utf8_lossy(&raw);
         let line = sanitize_line(text.trim_end_matches('\r'));
         if !line.is_empty() {
