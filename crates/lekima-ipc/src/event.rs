@@ -16,6 +16,28 @@ pub enum EventKind {
     Resync,
 }
 
+impl EventKind {
+    /// Every kind, in a stable order.
+    pub const ALL: [Self; 4] = [Self::Status, Self::Queue, Self::Like, Self::Resync];
+
+    /// Wire name, also the name used in a hook's `events` list.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Status => "status",
+            Self::Queue => "queue",
+            Self::Like => "like",
+            Self::Resync => "resync",
+        }
+    }
+
+    /// Parses a wire name, returning `None` for an unknown kind.
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.as_str() == name)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
@@ -56,6 +78,14 @@ pub struct EventFrame {
 #[cfg(test)]
 mod tests {
     use super::{Event, EventFrame, EventKind};
+
+    #[test]
+    fn kind_names_round_trip() {
+        for kind in EventKind::ALL {
+            assert_eq!(EventKind::from_name(kind.as_str()), Some(kind));
+        }
+        assert_eq!(EventKind::from_name("track_change"), None);
+    }
 
     #[test]
     fn frames_are_flat_json_objects() {

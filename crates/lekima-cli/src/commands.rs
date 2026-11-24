@@ -1143,6 +1143,22 @@ async fn doctor(socket: &Path, paths: &Paths, config: &Config, json: bool) -> Re
             Ok(log) => (log.len(), None),
             Err(error) => (0, Some(error.to_string())),
         };
+    let hooks: Vec<serde_json::Value> = config
+        .hooks
+        .iter()
+        .map(
+            |(name, config)| match crate::hooks::HookSpec::from_config(name, config) {
+                Ok(spec) => serde_json::json!({
+                    "name": name,
+                    "command": spec.command,
+                    "events": spec.event_names(),
+                    "capabilities": spec.capability_names(),
+                    "ok": true,
+                }),
+                Err(error) => serde_json::json!({ "name": name, "ok": false, "error": error }),
+            },
+        )
+        .collect();
     let history = serde_json::json!({
         "file": history_file,
         "capacity": config.history.capacity.max(1),
@@ -1160,6 +1176,7 @@ async fn doctor(socket: &Path, paths: &Paths, config: &Config, json: bool) -> Re
         "media": media,
         "notifications": notifications,
         "history": history,
+        "hooks": hooks,
         "provider": provider,
         "cache": cache,
         "log": paths.log_file(),
@@ -1203,6 +1220,16 @@ async fn doctor(socket: &Path, paths: &Paths, config: &Config, json: bool) -> Re
             "on track change"
         } else {
             "off"
+        }
+    );
+    let hook_names: Vec<&str> = config.hooks.keys().map(String::as_str).collect();
+    crate::say!(
+        "hooks    {} configured{}",
+        hook_names.len(),
+        if hook_names.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", hook_names.join(", "))
         }
     );
     crate::say!(

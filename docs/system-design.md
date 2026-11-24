@@ -424,6 +424,11 @@ on_track_change = false   # opt-in; `lekima doctor` reports the backend
 
 [history]
 capacity = 1000           # finished plays kept on disk
+
+[hooks.nowplaying]        # one table per hook, named by you
+command = ["/Users/me/bin/nowplaying"]
+events = ["status"]       # status | queue | like | resync (default: all)
+capabilities = ["pause"]  # command tags or a hook may not send any
 ```
 
 Precedence: defaults → file → environment (`LEKIMA_CONFIG_DIR`,
@@ -549,6 +554,7 @@ account.
 | 013 | macOS and Linux only | Two OS integrations are already the maintenance budget; Windows would need named pipes, SMTC and a CI runner this project does not have |
 | 014 | Listening history is local only | It is a personal log, not a public profile: no external account, no network egress, no deletion semantics to design |
 | 015 | No in-process plugin runtime | A sandbox plus a host ABI is a second product; external processes keep the trust boundary, the versioning story and the crash isolation simple |
+| 016 | Hooks are clients with a declared capability set | Reuses the event stream and `Command` instead of inventing an ABI; an undeclared command is refused, and `login`/`logout`/`shutdown` are never grantable |
 
 ## 17. Failure modes
 

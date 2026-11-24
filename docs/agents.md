@@ -57,6 +57,22 @@ JSON-RPC over stdio. Tools: `player_status`, `search`, `artist`,
 `search` accepts `kind` (`all`, `track`, `album`, `artist`, `playlist`) and
 `play` accepts `query`, `ids`, `playlist` or `album`.
 
+## Hooks
+
+A hook is a process you configure, not a package you install:
+
+```toml
+[hooks.nowplaying]
+command = ["/Users/me/bin/nowplaying"]
+events = ["status"]
+capabilities = ["pause"]
+```
+
+The daemon writes a hello frame and then sequenced event frames to the hook's
+stdin, and accepts the commands its `capabilities` declare on stdout. An
+undeclared command is refused. `lekima doctor` lists every hook and any config
+error. See [sprint-11/hooks.md](sprint-11/hooks.md).
+
 ## HTTP control
 
 For agents that cannot reach the Unix socket, `lekima serve --http` exposes the

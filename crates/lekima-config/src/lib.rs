@@ -14,7 +14,7 @@ mod session;
 mod token;
 
 pub use config::{
-    AudioConfig, CacheConfig, Config, DaemonConfig, HistoryConfig, NotificationsConfig,
+    AudioConfig, CacheConfig, Config, DaemonConfig, HistoryConfig, HookConfig, NotificationsConfig,
     PlaybackConfig, ProviderConfig, UiConfig,
 };
 pub use history::HistoryStore;

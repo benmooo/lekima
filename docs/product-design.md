@@ -148,10 +148,17 @@ Desktop notifications when the track changes, and a durable listening history:
 what you select. The log is bounded by `[history] capacity` and records each
 play once, including repeat-one loops.
 
-### Later
+### v0.11 — “extensions” (implemented, awaiting release)
 
-Plugin hooks, as external processes only (see ADR-015). The other candidates
-from this bucket were closed by product decision:
+> Detailed specification: [`sprint-11/`](./sprint-11/).
+
+Plugin hooks: a user process the daemon starts, with sequenced events on stdin
+and a declared set of commands back on stdout. Hooks stay out of process
+(ADR-015) and are guarded by capabilities (ADR-016).
+
+### Closed candidates
+
+The roadmap bucket is now empty. Closed by product decision:
 
 - **Scrobbling / cloud listening history** — the history is a personal log on
   this machine; nothing is uploaded to an external account (ADR-014).
@@ -415,5 +422,5 @@ token.
 1. **Default UI density.** Do we keep the original’s always-visible sidebar, or
    start in a single-pane “just the queue” mode?
 2. **Next theme.** Desktop notifications and listening history shipped in
-   0.10.0. Plugin hooks are the only remaining candidate from the “Later”
-   bucket; scrobbling, Windows and in-process sandboxing are closed.
+   0.10.0, and plugin hooks are implemented. The “Later” bucket is empty:
+   scrobbling, Windows and in-process sandboxing are closed.

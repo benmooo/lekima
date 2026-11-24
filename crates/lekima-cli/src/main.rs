@@ -6,6 +6,7 @@ mod browser_login;
 mod cli;
 mod commands;
 mod daemon;
+mod hooks;
 mod mcp;
 mod output;
 mod serve;

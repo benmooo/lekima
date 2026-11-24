@@ -38,8 +38,8 @@ Deferred out of this sprint, and later closed by product decision:
 
 Still open from the milestone:
 
-- **Hook design** (AKA-149) — plugin hooks as external processes; needs its own
-  design note.
+- **Hook design** (AKA-149) — implemented in Sprint 11; see
+  [`../sprint-11/`](../sprint-11/).
 - The three open design questions (AKA-150, AKA-151, AKA-153).
 
 ## Design documents

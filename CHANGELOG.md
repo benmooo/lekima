@@ -3,6 +3,16 @@
 All notable changes to lekima are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## Unreleased
+
+### Added
+
+- Plugin hooks: `[hooks.<name>]` starts an external process with a hello frame
+  and sequenced events on stdin, and accepts the commands it declares in
+  `capabilities` on stdout. Undeclared commands are refused; `lekima doctor`
+  reports every hook and config error. Session and lifecycle commands are never
+  grantable. See `docs/sprint-11/hooks.md`.
+
 ## 0.10.1 — 2026-11-25
 
 ### Added

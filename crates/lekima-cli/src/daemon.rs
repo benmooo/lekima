@@ -28,8 +28,10 @@ use lekima_ncm::{NcmMusicService, NcmOptions};
 use lekima_platform::{MediaCommand, MediaControls, Notification, Notifier, NowPlaying};
 use tokio::{
     net::UnixListener,
-    sync::{Notify, broadcast},
+    sync::{Notify, broadcast, mpsc},
 };
+
+use crate::hooks;
 
 use crate::output::Failure;
 
@@ -105,6 +107,8 @@ pub async fn run(paths: &Paths, config: &Config, socket: &Path, _detached: bool)
     let (loaded, pruned) = load_history(&history_store, config.history.capacity);
     let saved_revision = prune_history(&history_store, &loaded, pruned);
     let history = Arc::new(StdMutex::new(loaded));
+    let (hook_commands, hook_receiver) = mpsc::unbounded_channel();
+    let running_hooks = hooks::start(&config.hooks, hub.sender.clone(), hook_commands);
     let controls = lekima_platform::controls().await;
     tracing::debug!(backend = controls.backend(), "media integration ready");
     let notifier = lekima_platform::notifier();
@@ -125,8 +129,10 @@ pub async fn run(paths: &Paths, config: &Config, socket: &Path, _detached: bool)
         history_store,
         history_saved: StdMutex::new(saved_revision),
         playback_store: playback_store.clone(),
+        hooks: running_hooks,
     });
 
+    tracing::info!(hooks = daemon.hooks.len(), "hook processes started");
     {
         let likes = Arc::clone(&player);
         tokio::spawn(async move { likes.load_likes().await });
@@ -141,6 +147,7 @@ pub async fn run(paths: &Paths, config: &Config, socket: &Path, _detached: bool)
     spawn_preloader(Arc::clone(&daemon));
     spawn_platform(Arc::clone(&daemon));
     spawn_history(Arc::clone(&daemon));
+    spawn_hook_commands(Arc::clone(&daemon), hook_receiver);
 
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .context("failed to install the SIGTERM handler")?;
@@ -200,6 +207,9 @@ struct Daemon {
     /// newer one.
     history_saved: StdMutex<u64>,
     playback_store: PlaybackStore,
+    /// Live hook processes; dropping the daemon closes their stdin and kills
+    /// them.
+    hooks: Vec<hooks::RunningHook>,
 }
 
 /// Delivers notifications off the async runtime.
@@ -863,6 +873,24 @@ fn spawn_ticker(
                 hub.publish(Event::Status {
                     state: Box::new(player.snapshot().await),
                 });
+            }
+        }
+    });
+}
+
+/// Runs commands a hook asked for, through the same path as media keys.
+///
+/// Capability checks happen in `hooks`; by the time a command reaches this
+/// queue it was declared in the hook's configuration.
+fn spawn_hook_commands(
+    daemon: Arc<Daemon>,
+    mut commands: mpsc::UnboundedReceiver<(String, Command)>,
+) {
+    tokio::spawn(async move {
+        while let Some((hook, command)) = commands.recv().await {
+            match daemon.execute(command.clone()).await {
+                Ok(reply) => daemon.publish(&command, &reply).await,
+                Err(error) => tracing::debug!(%hook, error = ?error, "hook command failed"),
             }
         }
     });

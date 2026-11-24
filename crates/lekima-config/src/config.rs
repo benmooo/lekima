@@ -1,6 +1,6 @@
 //! The `config.toml` schema.
 
-use std::path::Path;
+use std::{collections::BTreeMap, path::Path};
 
 use lekima_domain::Quality;
 use serde::{Deserialize, Serialize};
@@ -18,6 +18,8 @@ pub struct Config {
     pub cache: CacheConfig,
     pub notifications: NotificationsConfig,
     pub history: HistoryConfig,
+    /// External hook processes, keyed by name (config section `[hooks.<name>]`).
+    pub hooks: BTreeMap<String, HookConfig>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -137,6 +139,25 @@ impl Default for CacheConfig {
 pub struct NotificationsConfig {
     /// Show a notification when the playing track changes.
     pub on_track_change: bool,
+}
+
+/// One external hook process.
+///
+/// Hooks are configured, never compiled in: the daemon starts `command`, writes
+/// sequenced events to its stdin and accepts the commands it is allowed to send
+/// back. Capabilities are command tags; see `lekima_ipc::HOOK_CAPABILITIES`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HookConfig {
+    /// Executable followed by its arguments. Must not be empty.
+    pub command: Vec<String>,
+    /// Event kinds to receive (`status`, `queue`, `like`, `resync`). Empty means
+    /// every kind.
+    #[serde(default)]
+    pub events: Vec<String>,
+    /// Commands the hook may send back. Empty means read-only.
+    #[serde(default)]
+    pub capabilities: Vec<String>,
 }
 
 /// Listening history retained on disk.

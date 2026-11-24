@@ -174,6 +174,118 @@ pub enum Command {
     Shutdown,
 }
 
+impl Command {
+    /// Wire tag for this command.
+    ///
+    /// The tag is also the capability name a hook must declare before the
+    /// daemon will run the command for it, so the two cannot drift.
+    #[must_use]
+    pub const fn tag(&self) -> &'static str {
+        match self {
+            Self::Ping => "ping",
+            Self::Status => "status",
+            Self::Play { .. } => "play",
+            Self::Jump { .. } => "jump",
+            Self::Pause => "pause",
+            Self::Resume => "resume",
+            Self::Toggle => "toggle",
+            Self::Stop => "stop",
+            Self::Next => "next",
+            Self::Prev => "prev",
+            Self::Seek { .. } => "seek",
+            Self::SetVolume { .. } => "set_volume",
+            Self::ToggleMute => "toggle_mute",
+            Self::CycleRepeat => "cycle_repeat",
+            Self::SetRepeat { .. } => "set_repeat",
+            Self::SetShuffle { .. } => "set_shuffle",
+            Self::Queue => "queue",
+            Self::QueueRemove { .. } => "queue_remove",
+            Self::QueueMove { .. } => "queue_move",
+            Self::Enqueue { .. } => "enqueue",
+            Self::ClearQueue => "clear_queue",
+            Self::Daily { .. } => "daily",
+            Self::Fm { .. } => "fm",
+            Self::Toplists => "toplists",
+            Self::Cloud { .. } => "cloud",
+            Self::Like { .. } => "like",
+            Self::History { .. } => "history",
+            Self::Comments { .. } => "comments",
+            Self::Liked { .. } => "liked",
+            Self::Hello { .. } => "hello",
+            Self::Sleep { .. } => "sleep",
+            Self::SetQuality { .. } => "set_quality",
+            Self::Subscribe { .. } => "subscribe",
+            Self::Search { .. } => "search",
+            Self::Playlists => "playlists",
+            Self::PlaylistTracks { .. } => "playlist_tracks",
+            Self::Artist { .. } => "artist",
+            Self::ArtistAlbums { .. } => "artist_albums",
+            Self::Album { .. } => "album",
+            Self::QueueAlbum { .. } => "queue_album",
+            Self::QueuePlaylist { .. } => "queue_playlist",
+            Self::Lyrics { .. } => "lyrics",
+            Self::Whoami => "whoami",
+            Self::Login { .. } => "login",
+            Self::Logout => "logout",
+            Self::Shutdown => "shutdown",
+        }
+    }
+}
+
+/// Command tags a hook may be granted.
+///
+/// Session and lifecycle commands are deliberately absent: a hook cannot log
+/// in, log out or stop the daemon, and `subscribe`/`hello`/`ping` are transport
+/// concerns a hook never needs to send.
+pub const HOOK_CAPABILITIES: &[&str] = &[
+    "status",
+    "play",
+    "jump",
+    "pause",
+    "resume",
+    "toggle",
+    "stop",
+    "next",
+    "prev",
+    "seek",
+    "set_volume",
+    "toggle_mute",
+    "cycle_repeat",
+    "set_repeat",
+    "set_shuffle",
+    "queue",
+    "queue_remove",
+    "queue_move",
+    "enqueue",
+    "clear_queue",
+    "daily",
+    "fm",
+    "toplists",
+    "cloud",
+    "like",
+    "history",
+    "comments",
+    "liked",
+    "sleep",
+    "set_quality",
+    "search",
+    "playlists",
+    "playlist_tracks",
+    "artist",
+    "artist_albums",
+    "album",
+    "queue_album",
+    "queue_playlist",
+    "lyrics",
+    "whoami",
+];
+
+/// Whether `tag` names a capability a hook may declare.
+#[must_use]
+pub fn is_hook_capability(tag: &str) -> bool {
+    HOOK_CAPABILITIES.contains(&tag)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum FmAction {
@@ -387,6 +499,34 @@ mod tests {
         let response = Response::ok(1, Reply::Ack);
         assert!(response.is_ok());
         assert!(serde_json::to_string(&response).unwrap().contains("ack"));
+    }
+
+    #[test]
+    fn hook_capabilities_are_command_tags_without_session_commands() {
+        for tag in super::HOOK_CAPABILITIES {
+            assert!(!tag.is_empty());
+            assert_eq!(*tag, tag.to_ascii_lowercase(), "wire tags are snake_case");
+            assert!(super::is_hook_capability(tag));
+        }
+        for forbidden in ["login", "logout", "shutdown", "subscribe", "hello", "ping"] {
+            assert!(
+                !super::is_hook_capability(forbidden),
+                "{forbidden} must not be grantable to a hook"
+            );
+        }
+
+        assert_eq!(Command::Pause.tag(), "pause");
+        assert_eq!(Command::SetVolume { level: 0.5 }.tag(), "set_volume");
+        assert_eq!(Command::History { limit: None }.tag(), "history");
+        assert_eq!(
+            Command::QueueAlbum {
+                id: 1.into(),
+                next: true
+            }
+            .tag(),
+            "queue_album"
+        );
+        assert_eq!(Command::Shutdown.tag(), "shutdown");
     }
 
     #[test]
