@@ -25,11 +25,16 @@ disable font smoothing/thickness changes while testing density.
 
 ```toml
 [ui]
-theme = "cyber"          # cyber | amber | mono
+theme = "cyber"          # cyber | amber | mono | … (see the theme table)
 glyphs = "unicode"       # unicode | ascii
 density = "compact"      # compact | comfortable
+motion = "auto"          # auto | full | reduced
 ```
 
+- `lekima ui --json` prints the effective set; the same flags
+  (`--theme`, `--glyphs`, `--density`, `--motion`, `--translation`) write it
+  through the same config the TUI saves, so scripts and agents can set a
+  preference without editing TOML.
 - `glyphs = "ascii"` swaps block glyphs for `# - | > []` — for terminals or
   fonts where `█ ░ ▌ ▶` render unevenly.
 - `density = "comfortable"` inserts a blank row between track rows.

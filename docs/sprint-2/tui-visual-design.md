@@ -48,6 +48,13 @@ Alternates: `amber` (VT220 phosphor), `light` for light terminals, and `mono`
 (`NO_COLOR`, no RGB at all). Configure with `[ui] theme = …`; `LEKIMA_THEME`
 accepts a palette name, `light`, `dark` or `auto`, and `NO_COLOR` forces mono.
 
+The palette is a contract, not a mood board: twelve semantic roles measured
+against the palette's own `ground` (the design background, which is not painted
+unless a solid ground is requested), with WCAG floors for content and marker
+text. `lekima ui --json` reports the effective set; the reference palettes
+`cyber` and `light` are asserted in `theme.rs` tests, and the remaining palettes
+are brought up to the same floors in the identity slice.
+
 Colour is never the only signal:
 
 - playing `▶`, paused `‖`, stopped `■`

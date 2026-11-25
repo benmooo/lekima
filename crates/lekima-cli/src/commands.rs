@@ -46,6 +46,7 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
                     &preferences.theme,
                     &preferences.glyphs,
                     &preferences.density,
+                    &config.ui.motion,
                     preferences.lyrics_translation,
                 )
             {
@@ -663,6 +664,74 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
                     let marker = if theme == config.ui.theme { "*" } else { " " };
                     crate::say!("{marker} {theme}");
                 }
+            }
+            Ok(())
+        }
+
+        TopCommand::Ui {
+            theme,
+            glyphs,
+            density,
+            motion,
+            translation,
+        } => {
+            let mut ui = config.ui.clone();
+            let changed = theme.is_some()
+                || glyphs.is_some()
+                || density.is_some()
+                || motion.is_some()
+                || translation.is_some();
+            if let Some(value) = theme {
+                let mut allowed = lekima_tui::THEMES.to_vec();
+                allowed.push("auto");
+                ui.theme = ui_choice("theme", &value, &allowed)?;
+            }
+            if let Some(value) = glyphs {
+                ui.glyphs = ui_choice("glyph set", &value, &["unicode", "ascii"])?;
+            }
+            if let Some(value) = density {
+                ui.density = ui_choice("density", &value, &["compact", "comfortable"])?;
+            }
+            if let Some(value) = motion {
+                ui.motion = ui_choice("motion", &value, &["auto", "full", "reduced"])?;
+            }
+            if let Some(value) = translation {
+                ui.lyrics_translation = matches!(
+                    ui_choice("translation", &value, &["on", "off"])?.as_str(),
+                    "on"
+                );
+            }
+            if changed {
+                lekima_config::save_ui(
+                    &paths.config_file(),
+                    &ui.theme,
+                    &ui.glyphs,
+                    &ui.density,
+                    &ui.motion,
+                    ui.lyrics_translation,
+                )?;
+            }
+            if json {
+                output::emit_json(
+                    true,
+                    Some(serde_json::json!({
+                        "theme": ui.theme,
+                        "glyphs": ui.glyphs,
+                        "density": ui.density,
+                        "motion": ui.motion,
+                        "lyrics_translation": ui.lyrics_translation,
+                    })),
+                    None,
+                );
+            } else {
+                crate::say!(
+                    "theme {} · glyphs {} · density {} · motion {} · translation {}",
+                    ui.theme,
+                    ui.glyphs,
+                    ui.density,
+                    ui.motion,
+                    if ui.lyrics_translation { "on" } else { "off" }
+                );
             }
             Ok(())
         }
@@ -1289,6 +1358,19 @@ fn command_tree(command: &clap::Command) -> serde_json::Value {
 }
 
 /// Parses `off`, `30m`, `1h`, `90s` or a bare number of minutes.
+/// Validates a UI preference choice and returns its canonical spelling.
+fn ui_choice(name: &str, value: &str, allowed: &[&str]) -> Result<String, Failure> {
+    let normalized = value.trim().to_ascii_lowercase();
+    if allowed.contains(&normalized.as_str()) {
+        return Ok(normalized);
+    }
+    Err(Failure::usage(format!(
+        "unknown {name} `{}`; choose one of {}",
+        value.trim(),
+        allowed.join(", ")
+    )))
+}
+
 fn parse_sleep(spec: &str) -> Result<Option<u32>, Failure> {
     let spec = spec.trim().to_ascii_lowercase();
     if spec == "off" || spec == "0" {

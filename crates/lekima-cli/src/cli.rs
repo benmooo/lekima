@@ -280,6 +280,32 @@ pub enum TopCommand {
     /// List the available colour themes.
     Themes,
 
+    /// Show or change interface preferences.
+    ///
+    /// Reports the effective theme, glyph set, density, motion policy and
+    /// translation flag. Flags write through the same config as the TUI.
+    Ui {
+        /// Theme name from `lekima themes`, or `auto`.
+        #[arg(long, value_name = "NAME")]
+        theme: Option<String>,
+
+        /// Glyph set: `unicode` or `ascii`.
+        #[arg(long, value_name = "SET")]
+        glyphs: Option<String>,
+
+        /// Row rhythm: `compact` or `comfortable`.
+        #[arg(long, value_name = "MODE")]
+        density: Option<String>,
+
+        /// Animation policy: `auto`, `full` or `reduced`.
+        #[arg(long, value_name = "MODE")]
+        motion: Option<String>,
+
+        /// Translated lyrics under the original: `on` or `off`.
+        #[arg(long, value_name = "on|off")]
+        translation: Option<String>,
+    },
+
     /// Run an MCP (Model Context Protocol) server over stdio.
     Mcp,
 

@@ -23,6 +23,8 @@ lekima artist show 6452 --json
 lekima artist albums 6452 --limit 20 --json
 lekima album show 242091487 --json
 lekima album queue 242091487 --next --json
+lekima ui --json
+lekima ui --theme amber --density comfortable --motion reduced --json
 lekima history --limit 20 --json
 ```
 

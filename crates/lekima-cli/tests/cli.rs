@@ -293,3 +293,84 @@ fn doctor_always_returns_a_report() {
     assert_eq!(json["data"]["history"]["entries"], 0);
     assert_eq!(json["data"]["history"]["ok"], true);
 }
+
+#[test]
+fn ui_reports_the_effective_preferences() {
+    let dir = hermetic("ui-report");
+    let output = binary()
+        .env("LEKIMA_CONFIG_DIR", &dir)
+        .args(["ui", "--json"])
+        .output()
+        .expect("run lekima");
+
+    assert!(output.status.success(), "{output:?}");
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("valid json envelope");
+    assert_eq!(json["ok"], true);
+    assert_eq!(json["data"]["theme"], "cyber");
+    assert_eq!(json["data"]["glyphs"], "unicode");
+    assert_eq!(json["data"]["density"], "compact");
+    assert_eq!(json["data"]["motion"], "auto");
+    assert_eq!(json["data"]["lyrics_translation"], false);
+}
+
+#[test]
+fn ui_writes_preferences_through_the_tui_config() {
+    let dir = hermetic("ui-write");
+    let output = binary()
+        .env("LEKIMA_CONFIG_DIR", &dir)
+        .args([
+            "ui",
+            "--theme",
+            "amber",
+            "--glyphs",
+            "ascii",
+            "--density",
+            "comfortable",
+            "--motion",
+            "reduced",
+            "--translation",
+            "on",
+            "--json",
+        ])
+        .output()
+        .expect("run lekima");
+
+    assert!(output.status.success(), "{output:?}");
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("valid json envelope");
+    assert_eq!(json["data"]["theme"], "amber");
+    assert_eq!(json["data"]["density"], "comfortable");
+    assert_eq!(json["data"]["motion"], "reduced");
+    assert_eq!(json["data"]["lyrics_translation"], true);
+
+    let config = fs::read_to_string(dir.join("config.toml")).expect("config was written");
+    assert!(config.contains("theme = \"amber\""), "{config}");
+    assert!(config.contains("motion = \"reduced\""), "{config}");
+
+    let again = binary()
+        .env("LEKIMA_CONFIG_DIR", &dir)
+        .args(["ui", "--json"])
+        .output()
+        .expect("run lekima");
+    let json: serde_json::Value =
+        serde_json::from_slice(&again.stdout).expect("valid json envelope");
+    assert_eq!(json["data"]["glyphs"], "ascii");
+    assert_eq!(json["data"]["lyrics_translation"], true);
+}
+
+#[test]
+fn ui_rejects_an_unknown_choice_as_a_usage_error() {
+    let dir = hermetic("ui-usage");
+    let output = binary()
+        .env("LEKIMA_CONFIG_DIR", &dir)
+        .args(["ui", "--theme", "neon", "--json"])
+        .output()
+        .expect("run lekima");
+
+    assert_eq!(output.status.code(), Some(2));
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("valid json envelope");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "bad_request");
+}

@@ -75,6 +75,8 @@ pub struct UiConfig {
     pub glyphs: String,
     /// `compact` (default) or `comfortable` row rhythm.
     pub density: String,
+    /// `auto` (default), `full` or `reduced` animation policy.
+    pub motion: String,
     /// Show translated lyrics under the original when available.
     pub lyrics_translation: bool,
     /// `true` keeps the terminal contents when the TUI exits.
@@ -88,6 +90,7 @@ impl Default for UiConfig {
             theme: "cyber".to_owned(),
             glyphs: "unicode".to_owned(),
             density: "compact".to_owned(),
+            motion: "auto".to_owned(),
             lyrics_translation: false,
             alternate_screen: true,
             show_help_on_start: false,
@@ -289,6 +292,7 @@ pub fn save_ui(
     theme: &str,
     glyphs: &str,
     density: &str,
+    motion: &str,
     lyrics_translation: bool,
 ) -> Result<(), PathError> {
     let mut root: toml::Value = match std::fs::read_to_string(path) {
@@ -321,6 +325,7 @@ pub fn save_ui(
         "density".to_owned(),
         toml::Value::String(density.to_owned()),
     );
+    ui.insert("motion".to_owned(), toml::Value::String(motion.to_owned()));
     ui.insert(
         "lyrics_translation".to_owned(),
         toml::Value::Boolean(lyrics_translation),
@@ -432,7 +437,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("config.toml");
         std::fs::write(&path, "[playback]\nvolume = 0.25\n").unwrap();
-        save_ui(&path, "amber", "ascii", "comfortable", true).unwrap();
+        save_ui(&path, "amber", "ascii", "comfortable", "reduced", true).unwrap();
         let config = super::load(&path).unwrap();
         assert_eq!(config.ui.theme, "amber");
         assert_eq!(config.ui.glyphs, "ascii");

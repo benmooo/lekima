@@ -191,6 +191,9 @@ pub struct Theme {
     pub text: Color,
     pub muted: Color,
     pub dim: Color,
+    /// The palette's design background. Not painted unless the user opts into
+    /// a solid ground; it exists so contrast is measurable in tests.
+    pub ground: Color,
     /// Selected row background/foreground.
     pub selection_bg: Color,
     pub selection_fg: Color,
@@ -208,6 +211,39 @@ pub struct Theme {
     pub density: Density,
 }
 
+/// WCAG 2.x relative luminance of an 8-bit RGB colour.
+fn relative_luminance(red: u8, green: u8, blue: u8) -> f64 {
+    fn channel(value: u8) -> f64 {
+        let value = f64::from(value) / 255.0;
+        if value <= 0.040_45 {
+            value / 12.92
+        } else {
+            ((value + 0.055) / 1.055).powf(2.4)
+        }
+    }
+    0.212_6 * channel(red) + 0.715_2 * channel(green) + 0.072_2 * channel(blue)
+}
+
+/// WCAG 2.x contrast ratio between two colours.
+///
+/// Returns `None` for palette-independent colours such as [`Color::Reset`],
+/// whose real value depends on the terminal. The theme contract is therefore
+/// checked against [`Theme::ground`] rather than the screen.
+#[must_use]
+pub fn contrast_ratio(foreground: Color, background: Color) -> Option<f64> {
+    let (Color::Rgb(fr, fg, fb), Color::Rgb(br, bg, bb)) = (foreground, background) else {
+        return None;
+    };
+    let foreground = relative_luminance(fr, fg, fb);
+    let background = relative_luminance(br, bg, bb);
+    let (lighter, darker) = if foreground >= background {
+        (foreground, background)
+    } else {
+        (background, foreground)
+    };
+    Some((lighter + 0.05) / (darker + 0.05))
+}
+
 impl Theme {
     /// Spring-green / cyan / magenta, on the terminal's own background.
     #[must_use]
@@ -220,6 +256,7 @@ impl Theme {
             text: Color::Rgb(200, 214, 229),
             muted: Color::Rgb(110, 125, 140),
             dim: Color::Rgb(45, 55, 64),
+            ground: Color::Rgb(5, 7, 10),
             selection_bg: Color::Rgb(0, 62, 52),
             selection_fg: Color::Rgb(210, 255, 240),
             panel: Color::Rgb(0, 122, 100),
@@ -244,6 +281,7 @@ impl Theme {
             text: Color::Rgb(226, 206, 170),
             muted: Color::Rgb(140, 118, 82),
             dim: Color::Rgb(58, 48, 34),
+            ground: Color::Rgb(12, 8, 4),
             selection_bg: Color::Rgb(66, 44, 0),
             selection_fg: Color::Rgb(255, 236, 190),
             panel: Color::Rgb(184, 128, 0),
@@ -268,6 +306,7 @@ impl Theme {
             text: Color::White,
             muted: Color::Gray,
             dim: Color::DarkGray,
+            ground: Color::Reset,
             selection_bg: Color::Reset,
             selection_fg: Color::White,
             panel: Color::Gray,
@@ -292,6 +331,7 @@ impl Theme {
             text: Color::Rgb(26, 32, 39),
             muted: Color::Rgb(82, 96, 109),
             dim: Color::Rgb(138, 148, 160),
+            ground: Color::Rgb(255, 255, 255),
             selection_bg: Color::Rgb(204, 232, 226),
             selection_fg: Color::Rgb(11, 31, 27),
             panel: Color::Rgb(0, 105, 92),
@@ -316,6 +356,7 @@ impl Theme {
             text: Color::Rgb(248, 248, 242),
             muted: Color::Rgb(98, 114, 164),
             dim: Color::Rgb(68, 71, 90),
+            ground: Color::Rgb(40, 42, 54),
             selection_bg: Color::Rgb(68, 71, 90),
             selection_fg: Color::Rgb(248, 248, 242),
             panel: Color::Rgb(189, 147, 249),
@@ -340,6 +381,7 @@ impl Theme {
             text: Color::Rgb(235, 219, 178),
             muted: Color::Rgb(168, 153, 132),
             dim: Color::Rgb(80, 73, 69),
+            ground: Color::Rgb(40, 40, 40),
             selection_bg: Color::Rgb(60, 56, 54),
             selection_fg: Color::Rgb(251, 241, 199),
             panel: Color::Rgb(215, 153, 33),
@@ -364,6 +406,7 @@ impl Theme {
             text: Color::Rgb(216, 222, 233),
             muted: Color::Rgb(129, 161, 193),
             dim: Color::Rgb(76, 86, 106),
+            ground: Color::Rgb(46, 52, 64),
             selection_bg: Color::Rgb(67, 76, 94),
             selection_fg: Color::Rgb(236, 239, 244),
             panel: Color::Rgb(94, 129, 172),
@@ -388,6 +431,7 @@ impl Theme {
             text: Color::Rgb(240, 230, 255),
             muted: Color::Rgb(157, 123, 216),
             dim: Color::Rgb(59, 42, 90),
+            ground: Color::Rgb(26, 11, 46),
             selection_bg: Color::Rgb(42, 27, 74),
             selection_fg: Color::Rgb(255, 255, 255),
             panel: Color::Rgb(185, 103, 255),
@@ -412,6 +456,7 @@ impl Theme {
             text: Color::Rgb(184, 255, 192),
             muted: Color::Rgb(77, 143, 90),
             dim: Color::Rgb(18, 61, 28),
+            ground: Color::Rgb(0, 0, 0),
             selection_bg: Color::Rgb(10, 61, 24),
             selection_fg: Color::Rgb(216, 255, 221),
             panel: Color::Rgb(0, 170, 51),
@@ -436,6 +481,7 @@ impl Theme {
             text: Color::Rgb(147, 161, 161),
             muted: Color::Rgb(101, 123, 131),
             dim: Color::Rgb(7, 54, 66),
+            ground: Color::Rgb(0, 43, 54),
             selection_bg: Color::Rgb(7, 54, 66),
             selection_fg: Color::Rgb(238, 232, 213),
             panel: Color::Rgb(38, 139, 210),
@@ -460,6 +506,7 @@ impl Theme {
             text: Color::Rgb(192, 202, 245),
             muted: Color::Rgb(86, 95, 137),
             dim: Color::Rgb(41, 46, 66),
+            ground: Color::Rgb(26, 27, 38),
             selection_bg: Color::Rgb(47, 53, 73),
             selection_fg: Color::Rgb(192, 202, 245),
             panel: Color::Rgb(187, 154, 247),
@@ -484,6 +531,7 @@ impl Theme {
             text: Color::Rgb(205, 214, 244),
             muted: Color::Rgb(127, 132, 156),
             dim: Color::Rgb(49, 50, 68),
+            ground: Color::Rgb(30, 30, 46),
             selection_bg: Color::Rgb(69, 71, 90),
             selection_fg: Color::Rgb(205, 214, 244),
             panel: Color::Rgb(203, 166, 247),
@@ -650,5 +698,70 @@ mod tests {
             accents.insert(format!("{:?}", theme.accent));
         }
         assert_eq!(accents.len(), super::THEMES.len());
+    }
+
+    #[test]
+    fn reference_palettes_meet_the_contrast_floors() {
+        use super::contrast_ratio;
+
+        for (name, theme) in [("cyber", Theme::cyber()), ("light", Theme::light())] {
+            let ground = theme.ground;
+            let ratio = |color| {
+                contrast_ratio(color, ground)
+                    .unwrap_or_else(|| panic!("{name}: ground must be an RGB colour"))
+            };
+            assert!(
+                ratio(theme.text) >= 7.0,
+                "{name}: text {:.2}",
+                ratio(theme.text)
+            );
+            assert!(
+                ratio(theme.muted) >= 4.5,
+                "{name}: muted {:.2}",
+                ratio(theme.muted)
+            );
+            // `cyber`'s current panel is 3.81:1; the identity slice brightens it
+            // to the 4.5:1 label floor. Until then the contract records the
+            // marker floor so the test cannot silently get worse.
+            assert!(
+                ratio(theme.panel) >= 3.0,
+                "{name}: panel {:.2}",
+                ratio(theme.panel)
+            );
+            assert!(
+                ratio(theme.accent_alt) >= 4.5,
+                "{name}: accent_alt {:.2}",
+                ratio(theme.accent_alt)
+            );
+            // `light` warn is 3.79:1 until the identity slice darkens it to
+            // `#B34700`; the contract tracks the marker floor meanwhile.
+            assert!(
+                ratio(theme.warn) >= 3.0,
+                "{name}: warn {:.2}",
+                ratio(theme.warn)
+            );
+            assert!(
+                ratio(theme.hot) >= 4.5,
+                "{name}: hot {:.2}",
+                ratio(theme.hot)
+            );
+            assert!(
+                contrast_ratio(theme.selection_fg, theme.selection_bg)
+                    .is_some_and(|ratio| ratio >= 4.5),
+                "{name}: selection pair"
+            );
+            assert!(
+                contrast_ratio(theme.badge_fg, theme.badge_bg).is_some_and(|ratio| ratio >= 4.5),
+                "{name}: badge pair"
+            );
+        }
+    }
+
+    #[test]
+    fn mono_has_no_measurable_ground() {
+        assert_eq!(
+            super::contrast_ratio(Theme::mono().text, Theme::mono().ground),
+            None
+        );
     }
 }
