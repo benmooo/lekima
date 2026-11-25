@@ -248,13 +248,13 @@ impl ColorMode {
     /// terminal falls back to mono.
     #[must_use]
     pub fn from_env() -> Self {
+        if std::env::var_os("NO_COLOR").is_some() {
+            return Self::Mono;
+        }
         if let Ok(value) = std::env::var("LEKIMA_COLOR")
             && let Some(mode) = Self::from_name(&value)
         {
             return mode;
-        }
-        if std::env::var_os("NO_COLOR").is_some() {
-            return Self::Mono;
         }
         let colorterm = std::env::var("COLORTERM")
             .unwrap_or_default()

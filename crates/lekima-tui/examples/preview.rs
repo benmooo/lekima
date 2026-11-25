@@ -103,6 +103,7 @@ fn main() {
     let mut filter = "all".to_owned();
     let mut color = "truecolor".to_owned();
     let mut motion = "auto".to_owned();
+    let mut ansi = false;
 
     let mut arguments = std::env::args().skip(1);
     while let Some(argument) = arguments.next() {
@@ -125,6 +126,7 @@ fn main() {
             "--mode" | "--screen" => mode = arguments.next().unwrap_or(mode),
             "--color" => color = arguments.next().unwrap_or(color),
             "--motion" => motion = arguments.next().unwrap_or(motion),
+            "--ansi" => ansi = true,
             "--filter" => filter = arguments.next().unwrap_or(filter),
             "--long-title" => {
                 if let Some(track) = app.status.track.as_mut() {
@@ -151,7 +153,7 @@ fn main() {
                     "usage: preview [--width N] [--height N] [--theme NAME] \
                      [--glyphs unicode|ascii] [--density compact|comfortable] \
                      [--screen|--mode normal|queue|help|settings|comments|history|search|results|artist|album] \
-                     [--color truecolor|256|16|mono] [--motion auto|full|reduced] \
+                     [--color truecolor|256|16|mono] [--motion auto|full|reduced] [--ansi] \
                      [--filter all|tracks|albums|artists|playlists] [--long-title] \
                      [--buffered] [--empty] [--no-lyrics] [--toast-error]"
                 );
@@ -425,6 +427,70 @@ fn main() {
         .expect("draw");
 
     let buffer = terminal.backend().buffer();
+    if ansi {
+        use ratatui::style::{Color, Modifier};
+
+        fn sgr(color: Color, background: bool) -> Option<String> {
+            let base = if background { 10 } else { 0 };
+            Some(match color {
+                Color::Reset => return None,
+                Color::Black => format!("{}", 30 + base),
+                Color::Red => format!("{}", 31 + base),
+                Color::Green => format!("{}", 32 + base),
+                Color::Yellow => format!("{}", 33 + base),
+                Color::Blue => format!("{}", 34 + base),
+                Color::Magenta => format!("{}", 35 + base),
+                Color::Cyan => format!("{}", 36 + base),
+                Color::Gray => format!("{}", 37 + base),
+                Color::DarkGray => format!("{}", 90 + base),
+                Color::LightRed => format!("{}", 91 + base),
+                Color::LightGreen => format!("{}", 92 + base),
+                Color::LightYellow => format!("{}", 93 + base),
+                Color::LightBlue => format!("{}", 94 + base),
+                Color::LightMagenta => format!("{}", 95 + base),
+                Color::LightCyan => format!("{}", 96 + base),
+                Color::White => format!("{}", 97 + base),
+                Color::Indexed(index) => {
+                    if background {
+                        format!("48;5;{index}")
+                    } else {
+                        format!("38;5;{index}")
+                    }
+                }
+                Color::Rgb(red, green, blue) => {
+                    if background {
+                        format!("48;2;{red};{green};{blue}")
+                    } else {
+                        format!("38;2;{red};{green};{blue}")
+                    }
+                }
+            })
+        }
+
+        for y in 0..height {
+            let mut line = String::new();
+            for x in 0..width {
+                let cell = &buffer[(x, y)];
+                let mut codes = Vec::new();
+                if let Some(code) = sgr(cell.fg, false) {
+                    codes.push(code);
+                }
+                if let Some(code) = sgr(cell.bg, true) {
+                    codes.push(code);
+                }
+                if cell.modifier.contains(Modifier::BOLD) {
+                    codes.push("1".to_owned());
+                }
+                if !codes.is_empty() {
+                    line.push_str(&format!("\u{1b}[{}m", codes.join(";")));
+                }
+                line.push_str(cell.symbol());
+                line.push_str("\u{1b}[0m");
+            }
+            println!("{}", line.trim_end());
+        }
+        return;
+    }
     for y in 0..height {
         let line: String = (0..width)
             .map(|x| buffer[(x, y)].symbol())
