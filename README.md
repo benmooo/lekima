@@ -49,14 +49,22 @@ $ lekima status --json
   preview duration, queue-end recovery, persistence and restart UX.
 - [`docs/sprint-8/`](docs/sprint-8/) — **Offline cache and comments** (0.5.0):
   256 MiB stream cache, `lekima cache`, comments CLI/MCP/TUI.
-- [`docs/sprint-9/`](docs/sprint-9/) — **Catalogue depth** (in design): album
-  and artist search, artist and album pages, album play/queue.
+- [`docs/sprint-9/`](docs/sprint-9/) — **Catalogue depth** (0.9.0): album and
+  artist search, artist and album pages, album play/queue.
+- [`docs/sprint-10/`](docs/sprint-10/) — **Daily-driver loop** (0.10.0):
+  desktop notifications and durable listening history.
+- [`docs/sprint-11/`](docs/sprint-11/) — **Extensions** (0.11.0): out-of-process
+  plugin hooks with capability-checked commands.
 - [`docs/releasing.md`](docs/releasing.md) — release flow, including
   `--registry crates-io` on this rsproxy-mirrored machine.
 - [`docs/sessions/`](docs/sessions/) — archived OpenCode sessions (this rewrite,
   in full) and the exporter script.
 
 ## Status
+
+`0.11.1` makes buffered-range shading honest on variable-bitrate streams: the
+rail now follows the decoder's own byte-to-time curve instead of a constant
+bitrate, so the shaded region matches the bytes that are really on disk.
 
 `0.11.0` adds plugin hooks: `[hooks.<name>]` starts an external process, streams
 sequenced events to its stdin, and accepts only the action commands it declares

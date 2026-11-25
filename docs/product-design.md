@@ -2,7 +2,7 @@
 
 > NetEase Cloud Music in your terminal. Vim-first, agent-native.
 
-Status: **Living document** — shipped through 0.10.1 · Owner: @benmooo · Rewrite
+Status: **Living document** — shipped through 0.11.1 · Owner: @benmooo · Rewrite
 of the archived Go project [`benmooo/lekima`](https://github.com/benmooo/lekima)
 
 ---
@@ -148,13 +148,17 @@ Desktop notifications when the track changes, and a durable listening history:
 what you select. The log is bounded by `[history] capacity` and records each
 play once, including repeat-one loops.
 
-### v0.11 — “extensions” (shipped in 0.11.0)
+### v0.11 — “extensions” (shipped in 0.11.0, hardened in 0.11.1)
 
 > Detailed specification: [`sprint-11/`](./sprint-11/).
 
 Plugin hooks: a user process the daemon starts, with sequenced events on stdin
 and a declared set of commands back on stdout. Hooks stay out of process
 (ADR-015) and are guarded by capabilities (ADR-016).
+
+The 0.11.1 patch makes buffered-range shading follow the decoder's own
+byte-to-time curve, so variable-bitrate streams shade the bytes that are really
+local instead of a constant-bitrate guess.
 
 ### Closed candidates
 
@@ -404,6 +408,7 @@ token.
 | **M12 Console surfaces** (done, 0.8.0) | Comments feed, alert panels, empty-state wordmark | 0.8.0 shipped |
 | **M13 Catalogue depth** (done, 0.9.0/0.9.1) | Album/artist search, artist and album pages, album play/queue, error/search/history hardening | 0.9.1 released |
 | **M14 Daily-driver loop** (done, 0.10.0) | Desktop notifications, durable listening history across CLI/MCP/HTTP/TUI | 0.10.0 released |
+| **M15 Extensions** (done, 0.11.0) | Out-of-process plugin hooks, capability-checked commands, `doctor` reporting, VBR-accurate buffered ranges | 0.11.1 released |
 
 ## 9. Risks & mitigations
 
