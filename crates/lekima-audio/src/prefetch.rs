@@ -63,7 +63,7 @@ impl PrefetchSource {
     ///
     /// The thread is detached and stops when the source is dropped (via
     /// [`Shared::cancelled`]) or when the decoder reaches EOF.
-    pub fn new<D>(decoder: D) -> Self
+    pub fn new<D>(decoder: D, progress: Arc<crate::spool::Progress>) -> Self
     where
         D: Source<Item = f32> + Send + 'static,
     {
@@ -86,7 +86,7 @@ impl PrefetchSource {
         let producer = Arc::clone(&shared);
         std::thread::Builder::new()
             .name("lekima-decode".to_owned())
-            .spawn(move || produce(decoder, &producer))
+            .spawn(move || produce(decoder, &producer, progress))
             .expect("failed to spawn the decoder thread");
 
         Self {
@@ -99,10 +99,18 @@ impl PrefetchSource {
     }
 }
 
-fn produce<D>(mut decoder: D, shared: &Shared)
+fn produce<D>(mut decoder: D, shared: &Shared, progress: Arc<crate::spool::Progress>)
 where
     D: Source<Item = f32>,
 {
+    let sample_rate = u64::from(decoder.sample_rate().get());
+    let channels = u64::from(decoder.channels().get()).max(1);
+    let samples_per_ms = (sample_rate * channels / 1000).max(1);
+    // Audio time decoded so far in this segment, plus the time the last seek
+    // landed on. `Progress` needs a monotonic time axis for its anchors.
+    let mut decoded: u64 = 0;
+    let mut base_ms: u64 = 0;
+
     struct Finish<'a>(&'a Shared);
     impl Drop for Finish<'_> {
         fn drop(&mut self) {
@@ -124,6 +132,9 @@ where
             .unwrap_or_else(|poison| poison.into_inner())
             .take();
         if let Some(position) = seek {
+            base_ms = u64::try_from(position.as_millis()).unwrap_or(u64::MAX);
+            decoded = 0;
+            progress.reset();
             let outcome = decoder.try_seek(position);
             let mut samples = shared.lock_samples();
             samples.clear();
@@ -174,6 +185,9 @@ where
                 }
             }
         }
+
+        decoded = decoded.saturating_add(block.len() as u64);
+        progress.record(base_ms.saturating_add(decoded / samples_per_ms));
 
         let mut samples = shared.lock_samples();
         samples.extend(block);
@@ -322,7 +336,7 @@ mod tests {
 
     #[test]
     fn plays_every_sample_across_the_thread_boundary() {
-        let mut source = PrefetchSource::new(tone());
+        let mut source = PrefetchSource::new(tone(), Arc::new(crate::spool::Progress::default()));
         std::thread::sleep(Duration::from_millis(20));
         let samples = drain(&mut source, 1_000_000);
         let audible: Vec<f32> = samples
@@ -338,7 +352,10 @@ mod tests {
 
     #[test]
     fn seeks_are_forwarded_to_the_producer() {
-        let mut source = PrefetchSource::new(SeekingTone { position: 0 });
+        let mut source = PrefetchSource::new(
+            SeekingTone { position: 0 },
+            Arc::new(crate::spool::Progress::default()),
+        );
         std::thread::sleep(Duration::from_millis(20));
         source.try_seek(Duration::from_millis(50)).unwrap();
         std::thread::sleep(Duration::from_millis(20));
@@ -397,9 +414,12 @@ mod tests {
         }
 
         let calls = Arc::new(AtomicUsize::new(0));
-        let mut source = PrefetchSource::new(Slow {
-            calls: Arc::clone(&calls),
-        });
+        let mut source = PrefetchSource::new(
+            Slow {
+                calls: Arc::clone(&calls),
+            },
+            Arc::new(crate::spool::Progress::default()),
+        );
         assert!(source.next().is_some());
     }
 }

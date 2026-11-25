@@ -247,6 +247,12 @@ Decisions:
 - The spool exposes its merged byte ranges; the audio adapter maps them to track
   time (`buffered_ranges`) and the core publishes them as
   `PlaybackState.buffered`, letting frontends shade what is already local.
+  Byte offsets are not proportional to time in a variable-bitrate file, so the
+  decoder records anchors as it reads — "at this file offset it had produced
+  this much audio" — and ranges are interpolated through them. The average
+  bitrate is only the fallback until two anchors exist; anchors are reset on a
+  seek and thinned to stay bounded. Shading is scaled against
+  `stream_duration_ms` when the decoder reports one.
 - The decoder's real duration is published as `stream_duration_ms` when it is
   shorter than catalogue metadata; frontends label the track `PREVIEW` and draw
   progress against the actual stream length.

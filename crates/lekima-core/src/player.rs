@@ -145,7 +145,13 @@ impl Player {
         // Lock order: liked, then inner. No other path takes them in reverse.
         let liked = self.liked.lock().await;
         let inner = self.inner.lock().await;
-        let duration_ms = inner.queue.current().map_or(0, |track| track.duration_ms);
+        // Shade against the audio the engine actually has, so a provider
+        // preview (shorter than its metadata) does not stretch the buffered
+        // ranges across a timeline that cannot exist.
+        let duration_ms = self
+            .audio
+            .stream_duration_ms()
+            .unwrap_or_else(|| inner.queue.current().map_or(0, |track| track.duration_ms));
         PlaybackState {
             status: inner.status,
             track: inner.queue.current().cloned(),

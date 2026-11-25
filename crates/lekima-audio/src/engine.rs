@@ -18,7 +18,7 @@ use rodio::{Decoder, DeviceSinkBuilder, Player, Source, cpal, cpal::traits::Host
 
 use crate::{
     prefetch::PrefetchSource,
-    spool::{GrowingFile, Spool},
+    spool::{GrowingFile, Progress, Spool},
     wave::{Metered, Waveform},
 };
 use tempfile::NamedTempFile;
@@ -414,7 +414,7 @@ impl AudioEngine for RodioAudioEngine {
         let Some(total) = spool.total().filter(|total| *total > 0) else {
             return Vec::new();
         };
-        map_buffered_ranges(&spool.ranges(), total, duration_ms)
+        map_buffered_ranges(&spool.ranges(), total, duration_ms, &spool.progress())
     }
 
     async fn queue_next_url(&self, id: TrackId, url: &str, cache_key: Option<&str>) -> Result<()> {
@@ -757,6 +757,7 @@ fn audio_thread(
                     .boundary
                     .lock()
                     .unwrap_or_else(|poison| poison.into_inner()) = None;
+                let progress = spool.progress();
                 let mut builder = Decoder::builder()
                     .with_data(GrowingFile::new(reader, spool))
                     .with_seekable(true);
@@ -771,7 +772,7 @@ fn audio_thread(
                         shared.position_ms.store(0, Ordering::Relaxed);
                         shared.wave.reset();
                         // Decode ahead so range fetches never block the device.
-                        let source = PrefetchSource::new(decoder);
+                        let source = PrefetchSource::new(decoder, progress);
                         player.append(Metered::new(source, Arc::clone(&shared.wave)));
                         player.play();
                         tracing::debug!("stream loaded from spool");
@@ -862,6 +863,7 @@ fn map_buffered_ranges(
     ranges: &[Range<u64>],
     total_bytes: u64,
     duration_ms: u64,
+    progress: &Progress,
 ) -> Vec<BufferedRange> {
     if total_bytes == 0 || duration_ms == 0 || ranges.is_empty() {
         return Vec::new();
@@ -875,12 +877,10 @@ fn map_buffered_ranges(
 
     let mut mapped: Vec<BufferedRange> = Vec::with_capacity(ranges.len());
     for range in ranges {
-        let start = u128::from(range.start.min(total_bytes)) * u128::from(duration_ms)
-            / u128::from(total_bytes);
-        let end = u128::from(range.end.min(total_bytes)) * u128::from(duration_ms)
-            / u128::from(total_bytes);
-        let start_ms = u64::try_from(start).unwrap_or(u64::MAX);
-        let end_ms = u64::try_from(end).unwrap_or(u64::MAX);
+        // Variable-bitrate streams need the decoder's own byte-to-time curve;
+        // the average bitrate is only the fallback before anchors exist.
+        let start_ms = progress.time_ms(range.start, total_bytes, duration_ms);
+        let end_ms = progress.time_ms(range.end, total_bytes, duration_ms);
         if end_ms <= start_ms {
             continue;
         }
@@ -909,15 +909,59 @@ mod tests {
     use tempfile::NamedTempFile;
 
     use super::{Boundary, Shared, fetch_range, map_buffered_ranges};
-    use crate::spool::{GrowingFile, Spool};
+    use crate::spool::{GrowingFile, Progress, Spool};
 
     #[test]
     fn maps_buffered_bytes_to_track_time() {
         let ranges = vec![0..25, 50..75];
-        let mapped = map_buffered_ranges(&ranges, 100, 1_000);
+        let mapped = map_buffered_ranges(&ranges, 100, 1_000, &Progress::default());
         assert_eq!(mapped.len(), 2);
         assert_eq!((mapped[0].start_ms, mapped[0].end_ms), (0, 250));
         assert_eq!((mapped[1].start_ms, mapped[1].end_ms), (500, 750));
+    }
+
+    #[test]
+    fn variable_bitrate_ranges_follow_the_decoder_curve() {
+        // 2 000 bytes / 2 000 ms overall: the first 500 bytes are slow (1 s)
+        // and the rest fast (1 s). A linear map would call byte 500 the quarter
+        // point (500 ms) when it is really 1 000 ms.
+        let progress = Progress::default();
+        progress.set_bytes(0);
+        progress.record(0);
+        progress.set_bytes(500);
+        progress.record(1_000);
+        progress.set_bytes(2_000);
+        progress.record(2_000);
+
+        let range = 500..2_000;
+        let mapped = map_buffered_ranges(std::slice::from_ref(&range), 2_000, 2_000, &progress);
+
+        assert_eq!(mapped.len(), 1);
+        assert_eq!((mapped[0].start_ms, mapped[0].end_ms), (1_000, 2_000));
+    }
+
+    #[test]
+    fn anchors_before_the_first_point_interpolate_from_zero() {
+        let progress = Progress::default();
+        progress.set_bytes(100);
+        progress.record(100);
+        progress.set_bytes(400);
+        progress.record(700);
+
+        // Between (0,0) and (100,100): byte 50 is 50 ms, not the linear 100.
+        assert_eq!(progress.time_ms(50, 400, 800), 50);
+    }
+
+    #[test]
+    fn the_curve_extrapolates_past_the_last_anchor_but_never_past_the_end() {
+        let progress = Progress::default();
+        progress.set_bytes(0);
+        progress.record(0);
+        progress.set_bytes(1_000);
+        progress.record(1_000);
+
+        assert_eq!(progress.time_ms(1_500, 2_000, 1_200), 1_200);
+        assert_eq!(progress.time_ms(9_999, 2_000, 1_200), 1_200);
     }
 
     #[test]
@@ -925,10 +969,13 @@ mod tests {
         let complete = 0..100;
         let split = vec![0..40, 40..100];
         let tiny = 0..10;
-        assert!(map_buffered_ranges(std::slice::from_ref(&complete), 100, 1_000).is_empty());
-        assert!(map_buffered_ranges(&split, 100, 1_000).is_empty());
-        assert!(map_buffered_ranges(&[], 100, 1_000).is_empty());
-        assert!(map_buffered_ranges(std::slice::from_ref(&tiny), 0, 1_000).is_empty());
+        let progress = Progress::default();
+        assert!(
+            map_buffered_ranges(std::slice::from_ref(&complete), 100, 1_000, &progress).is_empty()
+        );
+        assert!(map_buffered_ranges(&split, 100, 1_000, &progress).is_empty());
+        assert!(map_buffered_ranges(&[], 100, 1_000, &progress).is_empty());
+        assert!(map_buffered_ranges(std::slice::from_ref(&tiny), 0, 1_000, &progress).is_empty());
     }
 
     #[tokio::test]

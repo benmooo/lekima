@@ -14,7 +14,7 @@ use std::{
     ops::Range,
     sync::{
         Arc, Condvar, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -40,6 +40,7 @@ pub struct Spool {
     buffering: AtomicBool,
     pending: Mutex<Vec<u64>>,
     wake: Notify,
+    progress: Arc<Progress>,
 }
 
 impl Spool {
@@ -57,6 +58,7 @@ impl Spool {
             buffering: AtomicBool::new(false),
             pending: Mutex::new(Vec::new()),
             wake: Notify::new(),
+            progress: Arc::new(Progress::default()),
         })
     }
 
@@ -159,6 +161,12 @@ impl Spool {
         self.lock().ranges.clone()
     }
 
+    /// The byte-to-time curve the decoder learns for this stream.
+    #[must_use]
+    pub fn progress(&self) -> Arc<Progress> {
+        Arc::clone(&self.progress)
+    }
+
     /// Records the total length once it is known from a response header.
     pub fn set_total(&self, total: u64) {
         let mut state = self.lock();
@@ -244,6 +252,136 @@ impl Spool {
     }
 }
 
+/// One point where the decoder had read `bytes` of the file and produced `ms`
+/// of audio.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Anchor {
+    bytes: u64,
+    ms: u64,
+}
+
+/// Smallest gap between recorded anchors, so a long track stays bounded.
+const MIN_ANCHOR_SPACING_MS: u64 = 500;
+/// Anchors kept before the list is thinned by half.
+const MAX_ANCHORS: usize = 512;
+
+/// Byte-to-time mapping learned from the decoder.
+///
+/// A variable-bitrate file cannot be mapped by dividing bytes by the average
+/// bitrate: the first minute of a track may be 320 kbps and the rest 96 kbps,
+/// which shifts every later range by tens of seconds. The decoder records an
+/// anchor as it reads — "at this file offset it had produced this much audio" —
+/// and buffered byte ranges are translated through those anchors.
+#[derive(Debug, Default)]
+pub struct Progress {
+    bytes_read: AtomicU64,
+    anchors: Mutex<Vec<Anchor>>,
+}
+
+impl Progress {
+    /// Records where the decoder is in the file.
+    pub fn set_bytes(&self, bytes: u64) {
+        self.bytes_read.store(bytes, Ordering::Relaxed);
+    }
+
+    #[must_use]
+    pub fn bytes_read(&self) -> u64 {
+        self.bytes_read.load(Ordering::Relaxed)
+    }
+
+    /// Records that `ms` of audio has been produced at the current read offset.
+    ///
+    /// Anchors must advance on both axes; a backward seek resets the list, so
+    /// this only ever stores a monotonic curve.
+    pub fn record(&self, ms: u64) {
+        let bytes = self.bytes_read();
+        let Ok(mut anchors) = self.anchors.lock() else {
+            return;
+        };
+        match anchors.last() {
+            None => anchors.push(Anchor { bytes, ms }),
+            Some(last) => {
+                if bytes <= last.bytes || ms <= last.ms {
+                    return;
+                }
+                if ms - last.ms < MIN_ANCHOR_SPACING_MS {
+                    return;
+                }
+                if anchors.len() >= MAX_ANCHORS {
+                    let thinned: Vec<Anchor> = anchors.iter().copied().step_by(2).collect();
+                    *anchors = thinned;
+                }
+                anchors.push(Anchor { bytes, ms });
+            }
+        }
+    }
+
+    /// Drops the learned curve, e.g. after a seek.
+    pub fn reset(&self) {
+        if let Ok(mut anchors) = self.anchors.lock() {
+            anchors.clear();
+        }
+    }
+
+    /// Approximate track time of one file offset.
+    ///
+    /// Falls back to the average bitrate until two anchors exist, and clamps to
+    /// `duration_ms` so shading never runs past the end of the track.
+    #[must_use]
+    pub fn time_ms(&self, bytes: u64, total_bytes: u64, duration_ms: u64) -> u64 {
+        if total_bytes == 0 || duration_ms == 0 {
+            return 0;
+        }
+        let linear = |value: u64| {
+            let scaled = u128::from(value.min(total_bytes)) * u128::from(duration_ms)
+                / u128::from(total_bytes);
+            u64::try_from(scaled).unwrap_or(u64::MAX)
+        };
+
+        let Ok(anchors) = self.anchors.lock() else {
+            return linear(bytes);
+        };
+        if anchors.len() < 2 {
+            return linear(bytes);
+        }
+
+        let first = anchors[0];
+        if bytes <= first.bytes {
+            return interpolate(0, 0, first.bytes, first.ms, bytes).min(duration_ms);
+        }
+        for pair in anchors.windows(2) {
+            let (left, right) = (pair[0], pair[1]);
+            if bytes <= right.bytes {
+                return interpolate(left.bytes, left.ms, right.bytes, right.ms, bytes)
+                    .min(duration_ms);
+            }
+        }
+        let (left, right) = (anchors[anchors.len() - 2], anchors[anchors.len() - 1]);
+        let extra = extrapolate(left, right, bytes);
+        right.ms.saturating_add(extra).min(duration_ms)
+    }
+}
+
+fn interpolate(left_bytes: u64, left_ms: u64, right_bytes: u64, right_ms: u64, at: u64) -> u64 {
+    if right_bytes <= left_bytes {
+        return right_ms;
+    }
+    let span = u128::from(right_bytes - left_bytes);
+    let offset = u128::from(at.saturating_sub(left_bytes));
+    let worked = offset * u128::from(right_ms.saturating_sub(left_ms)) / span;
+    left_ms.saturating_add(u64::try_from(worked).unwrap_or(u64::MAX))
+}
+
+fn extrapolate(left: Anchor, right: Anchor, at: u64) -> u64 {
+    if right.bytes <= left.bytes {
+        return 0;
+    }
+    let span = u128::from(right.bytes - left.bytes);
+    let offset = u128::from(at.saturating_sub(right.bytes));
+    let worked = offset * u128::from(right.ms.saturating_sub(left.ms)) / span;
+    u64::try_from(worked).unwrap_or(u64::MAX)
+}
+
 fn covered_end(ranges: &[Range<u64>], offset: u64) -> Option<u64> {
     ranges
         .iter()
@@ -284,15 +422,17 @@ fn merge(ranges: &mut Vec<Range<u64>>, start: u64, end: u64) {
 pub struct GrowingFile {
     file: File,
     position: u64,
+    progress: Arc<Progress>,
     spool: Arc<Spool>,
 }
 
 impl GrowingFile {
     #[must_use]
-    pub const fn new(file: File, spool: Arc<Spool>) -> Self {
+    pub fn new(file: File, spool: Arc<Spool>) -> Self {
         Self {
             file,
             position: 0,
+            progress: spool.progress(),
             spool,
         }
     }
@@ -324,6 +464,7 @@ impl Read for GrowingFile {
                     self.file.seek(SeekFrom::Start(self.position))?;
                     let read = self.file.read(&mut buffer[..available])?;
                     self.position += read as u64;
+                    self.progress.set_bytes(self.position);
                     self.spool.buffering.store(false, Ordering::Relaxed);
                     return Ok(read);
                 }
@@ -384,6 +525,7 @@ impl Seek for GrowingFile {
         }
         self.file.seek(SeekFrom::Start(target))?;
         self.position = target;
+        self.progress.set_bytes(target);
         Ok(target)
     }
 }
@@ -399,7 +541,7 @@ mod tests {
 
     use tempfile::NamedTempFile;
 
-    use super::{GrowingFile, Spool};
+    use super::{GrowingFile, Progress, Spool};
 
     #[test]
     fn sequential_writes_are_readable_and_out_of_order_writes_merge() {
@@ -455,5 +597,50 @@ mod tests {
         thread::sleep(Duration::from_millis(50));
         spool.cancel();
         assert_eq!(handle.join().unwrap(), std::io::ErrorKind::Interrupted);
+    }
+
+    #[test]
+    fn anchors_must_advance_on_both_axes() {
+        let progress = Progress::default();
+        progress.set_bytes(100);
+        progress.record(1_000);
+        progress.set_bytes(50);
+        progress.record(2_000);
+        progress.set_bytes(200);
+        progress.record(500);
+        progress.set_bytes(300);
+        progress.record(1_600);
+
+        // Byte 100 → 1 000 ms survives; the backward move and the too-close
+        // one are ignored, so the curve stays monotonic and interpolates
+        // between the two accepted anchors.
+        assert_eq!(progress.time_ms(100, 1_000, 2_000), 1_000);
+        assert_eq!(progress.time_ms(200, 1_000, 2_000), 1_300);
+    }
+
+    #[test]
+    fn a_seek_resets_the_curve() {
+        let progress = Progress::default();
+        progress.set_bytes(100);
+        progress.record(1_000);
+        progress.set_bytes(200);
+        progress.record(2_000);
+        progress.reset();
+
+        // With no anchors left the average bitrate is the fallback.
+        assert_eq!(progress.time_ms(100, 200, 2_000), 1_000);
+    }
+
+    #[test]
+    fn recording_a_long_track_stays_bounded() {
+        let progress = Progress::default();
+        for step in 1..=4_000u64 {
+            progress.set_bytes(step * 1_000);
+            progress.record(step * 500);
+        }
+        // 4 000 s at 500 ms spacing would be 8 000 anchors; the list thins
+        // instead of growing without bound, and still maps sensibly.
+        let mapped = progress.time_ms(2_000_000, 4_000_000, 2_000_000);
+        assert!(mapped > 0 && mapped <= 2_000_000, "mapped {mapped}");
     }
 }

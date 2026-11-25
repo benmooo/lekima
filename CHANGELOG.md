@@ -3,6 +3,15 @@
 All notable changes to lekima are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## Unreleased
+
+### Fixed
+
+- Buffered-range shading follows the decoder's own byte-to-time curve instead of
+  assuming a constant bitrate, so variable-bitrate streams no longer show
+  shading tens of seconds away from the bytes that are actually local. Previews
+  shade against the decoded stream duration rather than catalogue metadata.
+
 ## 0.11.0 — 2026-11-25
 
 ### Added
