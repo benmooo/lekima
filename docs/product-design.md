@@ -456,7 +456,7 @@ token.
    documented contrast floors. See
    [`proposals/2026-11-25-ux-design-system.md`](proposals/2026-11-25-ux-design-system.md).
 3. **Extensions.** Desktop notifications and listening history shipped in
-   0.10.0, plugin hooks in 0.11.0, and the TUI design system in the unreleased
-   line. Scrobbling, Windows and in-process sandboxing stay closed (ADRs
-   013–015). A future theme editor or new palette would need a new proposal and
+   0.10.0, plugin hooks in 0.11.0, and the TUI design system in 0.12.0.
+   Scrobbling, Windows and in-process sandboxing stay closed (ADRs 013–015).
+   A future theme editor or new palette would need a new proposal and
    screenshots.
