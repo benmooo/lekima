@@ -48,7 +48,7 @@ const CONTENT_SECURITY_POLICY: &str = "default-src 'none'; style-src 'unsafe-inl
      script-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; \
      form-action 'none'; frame-ancestors 'none'";
 /// Command tags accepted by `POST /v1/command`.
-const COMMAND_TYPES: [&str; 41] = [
+const COMMAND_TYPES: [&str; 46] = [
     "status",
     "play",
     "jump",
@@ -77,6 +77,11 @@ const COMMAND_TYPES: [&str; 41] = [
     "comments",
     "history",
     "hooks",
+    "playlist_create",
+    "playlist_update",
+    "playlist_add",
+    "playlist_remove",
+    "playlist_delete",
     "liked",
     "sleep",
     "set_quality",
@@ -426,6 +431,11 @@ fn permitted(command: &Command) -> bool {
             | Command::Comments { .. }
             | Command::History { .. }
             | Command::Hooks
+            | Command::PlaylistCreate { .. }
+            | Command::PlaylistUpdate { .. }
+            | Command::PlaylistAdd { .. }
+            | Command::PlaylistRemove { .. }
+            | Command::PlaylistDelete { .. }
             | Command::Liked { .. }
             | Command::Sleep { .. }
             | Command::SetQuality { .. }
@@ -609,6 +619,39 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(body["error"]["code"], "bad_request");
+    }
+
+    #[tokio::test]
+    async fn playlist_writes_are_permitted_with_a_token() {
+        let (status, body) = call(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/command")
+                .header("authorization", "Bearer test-token-0123456789")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"type":"playlist_add","id":7,"tracks":[42]}"#,
+                ))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["error"]["code"], "daemon");
+    }
+
+    #[tokio::test]
+    async fn playlist_delete_is_not_exposed_without_a_token() {
+        let (status, body) = call(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/command")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"type":"playlist_delete","id":7}"#))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(body["error"]["code"], "unauthorized");
     }
 
     #[tokio::test]

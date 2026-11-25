@@ -116,6 +116,11 @@ pub fn print_reply(reply: &Reply, json: bool) {
         Reply::Queue { tracks, index } => print_queue(tracks, *index),
         Reply::History { entries } => print_history(entries),
         Reply::Hooks { hooks } => print_hooks(hooks),
+        Reply::Playlist { playlist } => crate::say!(
+            "created playlist {} · {}",
+            playlist.id,
+            sanitize_line(&playlist.name)
+        ),
         Reply::User { user } => match user {
             Some(user) => crate::say!("{} ({})", sanitize_line(&user.nickname), user.id),
             None => crate::say!("not signed in"),

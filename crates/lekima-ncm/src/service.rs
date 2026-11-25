@@ -4,8 +4,8 @@ use std::{path::PathBuf, time::Duration};
 
 use async_trait::async_trait;
 use lekima_domain::{
-    self as domain, Comments, DomainError, Lyrics, MusicService, PlaylistId, QrLogin, QrStatus,
-    Quality, SearchKind, Toplist, TrackId, UserId, UserProfile,
+    self as domain, Comments, DomainError, Lyrics, MusicService, Playlist, PlaylistId, QrLogin,
+    QrStatus, Quality, SearchKind, Toplist, TrackId, UserId, UserProfile,
 };
 use ncmapi::{
     ApiResponse, NcmClient, Page, SearchKind as ProviderSearchKind, SearchQuery,
@@ -276,6 +276,129 @@ impl MusicService for NcmMusicService {
             .into_iter()
             .map(map::playlist)
             .collect())
+    }
+
+    async fn playlist_create(
+        &self,
+        name: &str,
+        description: &str,
+        private: bool,
+    ) -> domain::Result<Playlist> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(DomainError::InvalidInput(
+                "playlist name must not be empty".to_owned(),
+            ));
+        }
+
+        let response = self
+            .client
+            .library()
+            .playlist_create(name, private)
+            .await
+            .map_err(provider_error)?;
+        let response = ensure_success(response)?;
+        let id = response.body.id;
+        if id == 0 {
+            return Err(DomainError::Unavailable(
+                "the provider did not return a playlist id".to_owned(),
+            ));
+        }
+
+        // Create does not take a description; apply it as a follow-up update so
+        // the returned playlist matches what the caller asked for.
+        if !description.trim().is_empty() {
+            self.playlist_update(PlaylistId(id), None, Some(description))
+                .await?;
+        }
+
+        Ok(Playlist {
+            id: PlaylistId(id),
+            name: name.to_owned(),
+            description: description.to_owned(),
+            track_count: 0,
+            cover_url: None,
+            owner: None,
+        })
+    }
+
+    async fn playlist_update(
+        &self,
+        id: PlaylistId,
+        name: Option<&str>,
+        description: Option<&str>,
+    ) -> domain::Result<()> {
+        let name = name.map(str::trim);
+        if name.is_some_and(str::is_empty) {
+            return Err(DomainError::InvalidInput(
+                "playlist name must not be empty".to_owned(),
+            ));
+        }
+        if name.is_none() && description.is_none() {
+            return Err(DomainError::InvalidInput(
+                "nothing to change: pass a name or a description".to_owned(),
+            ));
+        }
+
+        let response = self
+            .client
+            .library()
+            .playlist_update(id.0, name, description)
+            .await
+            .map_err(provider_error)?;
+        ensure_success(response)?;
+        Ok(())
+    }
+
+    async fn playlist_add(&self, id: PlaylistId, tracks: &[TrackId]) -> domain::Result<()> {
+        if tracks.is_empty() {
+            return Err(DomainError::InvalidInput(
+                "track list must not be empty".to_owned(),
+            ));
+        }
+        let ids = tracks
+            .iter()
+            .map(|track| ProviderTrackId(track.0))
+            .collect::<Vec<_>>();
+        let response = self
+            .client
+            .library()
+            .playlist_add_tracks(id.0, &ids)
+            .await
+            .map_err(provider_error)?;
+        ensure_success(response)?;
+        Ok(())
+    }
+
+    async fn playlist_remove(&self, id: PlaylistId, tracks: &[TrackId]) -> domain::Result<()> {
+        if tracks.is_empty() {
+            return Err(DomainError::InvalidInput(
+                "track list must not be empty".to_owned(),
+            ));
+        }
+        let ids = tracks
+            .iter()
+            .map(|track| ProviderTrackId(track.0))
+            .collect::<Vec<_>>();
+        let response = self
+            .client
+            .library()
+            .playlist_remove_tracks(id.0, &ids)
+            .await
+            .map_err(provider_error)?;
+        ensure_success(response)?;
+        Ok(())
+    }
+
+    async fn playlist_delete(&self, id: PlaylistId) -> domain::Result<()> {
+        let response = self
+            .client
+            .library()
+            .playlist_delete(id.0)
+            .await
+            .map_err(provider_error)?;
+        ensure_success(response)?;
+        Ok(())
     }
 
     async fn playlist_tracks(&self, id: PlaylistId) -> domain::Result<Vec<domain::Track>> {

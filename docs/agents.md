@@ -27,6 +27,8 @@ lekima ui --json
 lekima ui --theme amber --density comfortable --motion reduced --json
 lekima history --limit 20 --json
 lekima hooks --json
+lekima playlist create "Late night" --private --json
+lekima playlist add 123 --ids 42,43 --json
 ```
 
 ## Events: `lekima watch`
@@ -55,7 +57,9 @@ lekima mcp
 JSON-RPC over stdio. Tools: `player_status`, `search`, `artist`,
 `artist_albums`, `album`, `play`, `pause`, `resume`, `next`, `previous`,
 `set_volume`, `queue_list`, `queue_add`, `queue_album`, `queue_remove`, `queue_move`, `sleep`,
-`set_quality`, `lyrics`, `comments`, `history`, `hooks`, `daily`, `fm`.
+`set_quality`, `lyrics`, `comments`, `history`, `hooks`, `daily`, `fm`,
+`playlist_create`, `playlist_update`, `playlist_add`, `playlist_remove`,
+`playlist_delete`.
 
 `search` accepts `kind` (`all`, `track`, `album`, `artist`, `playlist`) and
 `play` accepts `query`, `ids`, `playlist` or `album`.

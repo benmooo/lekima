@@ -1032,6 +1032,7 @@ impl App {
                 Action::Call(Command::Queue)
             }
             "album" => self.album_command(rest.trim()),
+            "playlist" => self.playlist_command(rest.trim()),
             "artist" => self.artist_command(rest.trim()),
             "sleep" => match parse_sleep_minutes(rest.trim()) {
                 Ok(minutes) => Action::Call(Command::Sleep { minutes }),
@@ -1122,6 +1123,52 @@ impl App {
     }
 
     /// `:album`, `:album play`, `:album queue`, `:album <id>`.
+    /// `:playlist create NAME`, `:playlist add ID`, `:playlist delete ID yes`.
+    fn playlist_command(&mut self, spec: &str) -> Action {
+        let (sub, rest) = spec.split_once(' ').unwrap_or((spec, ""));
+        match sub {
+            "create" if !rest.trim().is_empty() => Action::Call(Command::PlaylistCreate {
+                name: rest.trim().to_owned(),
+                description: String::new(),
+                private: false,
+            }),
+            "add" => {
+                let Ok(id) = rest.trim().parse::<u64>() else {
+                    self.notify("usage: :playlist add <playlist-id>", true);
+                    return Action::None;
+                };
+                let Some(track) = self.status.track.as_ref().map(|track| track.id) else {
+                    self.notify("nothing playing", true);
+                    return Action::None;
+                };
+                self.notify(format!("added to playlist {id}"), false);
+                Action::Call(Command::PlaylistAdd {
+                    id: id.into(),
+                    tracks: vec![track],
+                })
+            }
+            "delete" => {
+                let mut parts = rest.split_whitespace();
+                let Some(id) = parts.next().and_then(|value| value.parse::<u64>().ok()) else {
+                    self.notify("usage: :playlist delete <playlist-id> yes", true);
+                    return Action::None;
+                };
+                if parts.next() != Some("yes") {
+                    self.notify("confirm with :playlist delete <id> yes", true);
+                    return Action::None;
+                }
+                Action::Call(Command::PlaylistDelete { id: id.into() })
+            }
+            _ => {
+                self.notify(
+                    "usage: :playlist create NAME · add ID · delete ID yes",
+                    true,
+                );
+                Action::None
+            }
+        }
+    }
+
     fn album_command(&mut self, spec: &str) -> Action {
         match spec {
             "play" | "queue" => {
@@ -2186,6 +2233,13 @@ impl App {
                         }
                         self.queue_selection =
                             self.queue_selection.min(self.queue.len().saturating_sub(1));
+                    }
+                    Reply::Playlist { playlist } => {
+                        self.notify(
+                            format!("created playlist {}", sanitize_line(&playlist.name)),
+                            false,
+                        );
+                        return Action::Call(Command::Playlists);
                     }
                     Reply::Hooks { hooks } => {
                         self.hooks = hooks;
@@ -3454,6 +3508,49 @@ mod history_tests {
 
         assert!(matches!(app.handle_key(key(KeyCode::Enter)), Action::None));
         assert_eq!(app.mode, Mode::History);
+    }
+
+    fn run(app: &mut App, command: &str) -> Action {
+        app.handle_key(key(KeyCode::Char(':')));
+        for character in command.chars() {
+            app.handle_key(key(KeyCode::Char(character)));
+        }
+        app.handle_key(key(KeyCode::Enter))
+    }
+
+    #[test]
+    fn playlist_commands_map_to_writes() {
+        let mut app = App::new();
+
+        match run(&mut app, "playlist create Late night") {
+            Action::Call(Command::PlaylistCreate { name, private, .. }) => {
+                assert_eq!(name, "Late night");
+                assert!(!private);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+
+        app.status.track = Some(Track {
+            id: TrackId::from(42_u64),
+            name: "Song".to_owned(),
+            artists: Vec::new(),
+            album: None,
+            duration_ms: 1_000,
+        });
+        match run(&mut app, "playlist add 7") {
+            Action::Call(Command::PlaylistAdd { id, tracks }) => {
+                assert_eq!(id, 7.into());
+                assert_eq!(tracks, vec![TrackId::from(42_u64)]);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+
+        // Without the literal `yes` nothing is deleted.
+        assert!(matches!(run(&mut app, "playlist delete 7"), Action::None));
+        match run(&mut app, "playlist delete 7 yes") {
+            Action::Call(Command::PlaylistDelete { id }) => assert_eq!(id, 7.into()),
+            other => panic!("unexpected {other:?}"),
+        }
     }
 
     #[test]

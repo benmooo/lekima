@@ -100,6 +100,38 @@ fn history_without_a_daemon_exits_seven_with_a_daemon_error() {
 }
 
 #[test]
+fn playlist_delete_requires_confirmation() {
+    let dir = hermetic("playlist-delete");
+    fs::write(dir.join("config.toml"), "[daemon]\nautostart = false\n").expect("config");
+
+    let output = binary()
+        .env("LEKIMA_CONFIG_DIR", &dir)
+        .args(["playlist", "delete", "7", "--json"])
+        .output()
+        .expect("run lekima");
+
+    assert_eq!(output.status.code(), Some(2));
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("valid json envelope");
+    assert_eq!(json["error"]["code"], "bad_request");
+    assert!(json["error"]["message"].as_str().unwrap().contains("--yes"));
+}
+
+#[test]
+fn playlist_add_requires_ids() {
+    let dir = hermetic("playlist-add-ids");
+    let output = binary()
+        .env("LEKIMA_CONFIG_DIR", &dir)
+        .args(["playlist", "add", "7"])
+        .output()
+        .expect("run lekima");
+
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("--ids"), "{stderr}");
+}
+
+#[test]
 fn themes_are_listed_for_agents() {
     let dir = hermetic("themes");
     let output = binary()

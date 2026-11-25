@@ -4,7 +4,7 @@
 //! no secrets, no second player. stdout is reserved for JSON-RPC; logs go to
 //! stderr.
 
-use lekima_domain::TrackId;
+use lekima_domain::{PlaylistId, TrackId};
 use lekima_ipc::{Command, FmAction, PlayTarget, Reply};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -151,6 +151,37 @@ fn build_command(name: &str, args: &Value) -> Result<Command, String> {
         },
         "queue_list" => Command::Queue,
         "hooks" => Command::Hooks,
+        "playlist_create" => Command::PlaylistCreate {
+            name: string_arg(args, "name")?,
+            description: args
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            private: args
+                .get("private")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        },
+        "playlist_update" => Command::PlaylistUpdate {
+            id: PlaylistId::from(u64_arg(args, "id")?),
+            name: args.get("name").and_then(Value::as_str).map(str::to_owned),
+            description: args
+                .get("description")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+        },
+        "playlist_add" => Command::PlaylistAdd {
+            id: PlaylistId::from(u64_arg(args, "id")?),
+            tracks: id_list(args)?,
+        },
+        "playlist_remove" => Command::PlaylistRemove {
+            id: PlaylistId::from(u64_arg(args, "id")?),
+            tracks: id_list(args)?,
+        },
+        "playlist_delete" => Command::PlaylistDelete {
+            id: PlaylistId::from(u64_arg(args, "id")?),
+        },
         "history" => Command::History {
             limit: match args.get("limit") {
                 None => None,
@@ -339,6 +370,7 @@ fn summary(reply: &Reply) -> String {
             format!("queue of {} (index {index:?})", tracks.len())
         }
         Reply::History { entries } => format!("{} plays", entries.len()),
+        Reply::Playlist { playlist } => format!("playlist {} · {}", playlist.id, playlist.name),
         Reply::Hooks { hooks } => format!(
             "{} hooks · {} running",
             hooks.len(),
@@ -489,6 +521,70 @@ fn tools() -> Vec<Value> {
             true,
         ),
         tool(
+            "playlist_create",
+            "Create a playlist and return its id.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string" },
+                    "description": { "type": "string" },
+                    "private": { "type": "boolean" }
+                },
+                "required": ["name"]
+            }),
+            false,
+        ),
+        tool(
+            "playlist_update",
+            "Rename a playlist or replace its description.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "id": { "type": "integer" },
+                    "name": { "type": "string" },
+                    "description": { "type": "string" }
+                },
+                "required": ["id"]
+            }),
+            false,
+        ),
+        tool(
+            "playlist_add",
+            "Append tracks to a playlist by id.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "id": { "type": "integer" },
+                    "ids": { "type": "array", "items": { "type": "integer" }, "minItems": 1 }
+                },
+                "required": ["id", "ids"]
+            }),
+            false,
+        ),
+        tool(
+            "playlist_remove",
+            "Remove tracks from a playlist by id.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "id": { "type": "integer" },
+                    "ids": { "type": "array", "items": { "type": "integer" }, "minItems": 1 }
+                },
+                "required": ["id", "ids"]
+            }),
+            false,
+        ),
+        tool(
+            "playlist_delete",
+            "Delete a playlist. Irreversible.",
+            json!({
+                "type": "object",
+                "properties": { "id": { "type": "integer" } },
+                "required": ["id"]
+            }),
+            false,
+        ),
+        tool(
             "history",
             "List finished plays, newest first. Each entry has track, started_at (Unix ms), played_ms and completed.",
             json!({
@@ -619,6 +715,29 @@ mod tests {
     use lekima_ipc::Command;
 
     #[test]
+    fn playlist_writes_map_to_commands() {
+        use serde_json::json;
+
+        assert!(matches!(
+            build_command(
+                "playlist_create",
+                &json!({"name": "Late night", "private": true})
+            )
+            .unwrap(),
+            Command::PlaylistCreate { private: true, .. }
+        ));
+        assert!(matches!(
+            build_command("playlist_add", &json!({"id": 7, "ids": [42, 43]})).unwrap(),
+            Command::PlaylistAdd { .. }
+        ));
+        assert!(matches!(
+            build_command("playlist_delete", &json!({"id": 7})).unwrap(),
+            Command::PlaylistDelete { .. }
+        ));
+        assert!(build_command("playlist_add", &json!({"id": 7})).is_err());
+    }
+
+    #[test]
     fn history_limit_is_validated_and_clamped() {
         use serde_json::json;
 
@@ -661,6 +780,9 @@ mod tests {
             "set_volume",
             "queue_list",
             "history",
+            "playlist_create",
+            "playlist_add",
+            "playlist_delete",
             "queue_add",
             "queue_remove",
             "queue_move",

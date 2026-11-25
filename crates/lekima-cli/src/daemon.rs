@@ -481,6 +481,41 @@ impl Daemon {
                 .collect(),
             }),
             Command::Status => Ok(self.status().await),
+            Command::PlaylistCreate {
+                name,
+                description,
+                private,
+            } => {
+                let playlist = self
+                    .player
+                    .music()
+                    .playlist_create(&name, &description, private)
+                    .await?;
+                Ok(Reply::Playlist { playlist })
+            }
+            Command::PlaylistUpdate {
+                id,
+                name,
+                description,
+            } => {
+                self.player
+                    .music()
+                    .playlist_update(id, name.as_deref(), description.as_deref())
+                    .await?;
+                Ok(Reply::Ack)
+            }
+            Command::PlaylistAdd { id, tracks } => {
+                self.player.music().playlist_add(id, &tracks).await?;
+                Ok(Reply::Ack)
+            }
+            Command::PlaylistRemove { id, tracks } => {
+                self.player.music().playlist_remove(id, &tracks).await?;
+                Ok(Reply::Ack)
+            }
+            Command::PlaylistDelete { id } => {
+                self.player.music().playlist_delete(id).await?;
+                Ok(Reply::Ack)
+            }
             Command::Hooks => Ok(Reply::Hooks {
                 hooks: self.hooks_report(),
             }),

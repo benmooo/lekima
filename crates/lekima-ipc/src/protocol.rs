@@ -102,6 +102,35 @@ pub enum Command {
     },
     /// Configured plugin hooks and whether their processes are running.
     Hooks,
+    /// Create a playlist.
+    PlaylistCreate {
+        name: String,
+        #[serde(default)]
+        description: String,
+        /// Private playlists are hidden from the public profile.
+        #[serde(default)]
+        private: bool,
+    },
+    /// Rename a playlist and/or replace its description.
+    PlaylistUpdate {
+        id: PlaylistId,
+        name: Option<String>,
+        description: Option<String>,
+    },
+    /// Append tracks to a playlist.
+    PlaylistAdd {
+        id: PlaylistId,
+        tracks: Vec<TrackId>,
+    },
+    /// Remove tracks from a playlist.
+    PlaylistRemove {
+        id: PlaylistId,
+        tracks: Vec<TrackId>,
+    },
+    /// Delete a playlist.
+    PlaylistDelete {
+        id: PlaylistId,
+    },
     /// Public comments for a track (defaults to the current track).
     Comments {
         id: Option<TrackId>,
@@ -212,6 +241,11 @@ impl Command {
             Self::Like { .. } => "like",
             Self::History { .. } => "history",
             Self::Hooks => "hooks",
+            Self::PlaylistCreate { .. } => "playlist_create",
+            Self::PlaylistUpdate { .. } => "playlist_update",
+            Self::PlaylistAdd { .. } => "playlist_add",
+            Self::PlaylistRemove { .. } => "playlist_remove",
+            Self::PlaylistDelete { .. } => "playlist_delete",
             Self::Comments { .. } => "comments",
             Self::Liked { .. } => "liked",
             Self::Hello { .. } => "hello",
@@ -272,6 +306,11 @@ pub const HOOK_CAPABILITIES: &[&str] = &[
     "set_quality",
     "queue_album",
     "queue_playlist",
+    "playlist_create",
+    "playlist_update",
+    "playlist_add",
+    "playlist_remove",
+    "playlist_delete",
 ];
 
 /// Whether `tag` names a capability a hook may declare.
@@ -405,6 +444,10 @@ pub enum Reply {
     Hooks {
         hooks: Vec<HookStatus>,
     },
+    /// A created playlist, as the provider reports it.
+    Playlist {
+        playlist: Playlist,
+    },
 }
 
 /// One configured hook as the daemon sees it.
@@ -514,6 +557,41 @@ mod tests {
         let response = Response::ok(1, Reply::Ack);
         assert!(response.is_ok());
         assert!(serde_json::to_string(&response).unwrap().contains("ack"));
+    }
+
+    #[test]
+    fn playlist_write_commands_round_trip() {
+        let cases = vec![
+            Command::PlaylistCreate {
+                name: "Late night".to_owned(),
+                description: "after 22:00".to_owned(),
+                private: true,
+            },
+            Command::PlaylistUpdate {
+                id: 7.into(),
+                name: Some("Late night 2".to_owned()),
+                description: None,
+            },
+            Command::PlaylistAdd {
+                id: 7.into(),
+                tracks: vec![42.into()],
+            },
+            Command::PlaylistRemove {
+                id: 7.into(),
+                tracks: vec![42.into()],
+            },
+            Command::PlaylistDelete { id: 7.into() },
+        ];
+        for command in cases {
+            let encoded = serde_json::to_string(&command).unwrap();
+            let decoded: Command = serde_json::from_str(&encoded).unwrap();
+            assert_eq!(encoded, serde_json::to_string(&decoded).unwrap());
+        }
+        assert_eq!(
+            Command::PlaylistDelete { id: 7.into() }.tag(),
+            "playlist_delete"
+        );
+        assert!(super::is_hook_capability("playlist_add"));
     }
 
     #[test]

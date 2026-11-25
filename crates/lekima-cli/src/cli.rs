@@ -428,6 +428,51 @@ pub enum PlaylistCommand {
         #[arg(value_name = "ID")]
         id: u64,
     },
+    /// Create a playlist and print its id.
+    Create {
+        #[arg(value_name = "NAME")]
+        name: String,
+        #[arg(long, value_name = "TEXT")]
+        description: Option<String>,
+        /// Hide the playlist from the public profile.
+        #[arg(long)]
+        private: bool,
+    },
+    /// Rename a playlist.
+    Rename {
+        #[arg(value_name = "ID")]
+        id: u64,
+        #[arg(value_name = "NAME")]
+        name: String,
+    },
+    /// Replace a playlist's description.
+    Describe {
+        #[arg(value_name = "ID")]
+        id: u64,
+        #[arg(value_name = "TEXT")]
+        description: String,
+    },
+    /// Add tracks to a playlist by id.
+    Add {
+        #[arg(value_name = "ID")]
+        id: u64,
+        #[arg(long, value_name = "IDS", value_delimiter = ',', required = true)]
+        ids: Vec<u64>,
+    },
+    /// Remove tracks from a playlist by id.
+    Remove {
+        #[arg(value_name = "ID")]
+        id: u64,
+        #[arg(long, value_name = "IDS", value_delimiter = ',', required = true)]
+        ids: Vec<u64>,
+    },
+    /// Delete a playlist. Requires `--yes`.
+    Delete {
+        #[arg(value_name = "ID")]
+        id: u64,
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]

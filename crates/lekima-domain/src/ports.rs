@@ -53,6 +53,63 @@ pub trait MusicService: Send + Sync {
     /// return [`crate::DomainError::Unsupported`].
     async fn playlist_tracks(&self, id: crate::model::PlaylistId) -> Result<Vec<Track>>;
 
+    /// Creates a playlist and returns it as the provider reports it.
+    ///
+    /// Providers without write access return
+    /// [`crate::DomainError::Unsupported`].
+    async fn playlist_create(
+        &self,
+        name: &str,
+        description: &str,
+        private: bool,
+    ) -> Result<crate::model::Playlist> {
+        let _ = (name, description, private);
+        Err(crate::DomainError::Unsupported(
+            "this provider cannot create playlists".to_owned(),
+        ))
+    }
+
+    /// Renames a playlist and/or replaces its description.
+    async fn playlist_update(
+        &self,
+        id: crate::model::PlaylistId,
+        name: Option<&str>,
+        description: Option<&str>,
+    ) -> Result<()> {
+        let _ = (id, name, description);
+        Err(crate::DomainError::Unsupported(
+            "this provider cannot edit playlists".to_owned(),
+        ))
+    }
+
+    /// Appends tracks to a playlist.
+    async fn playlist_add(&self, id: crate::model::PlaylistId, tracks: &[TrackId]) -> Result<()> {
+        let _ = (id, tracks);
+        Err(crate::DomainError::Unsupported(
+            "this provider cannot edit playlists".to_owned(),
+        ))
+    }
+
+    /// Removes tracks from a playlist.
+    async fn playlist_remove(
+        &self,
+        id: crate::model::PlaylistId,
+        tracks: &[TrackId],
+    ) -> Result<()> {
+        let _ = (id, tracks);
+        Err(crate::DomainError::Unsupported(
+            "this provider cannot edit playlists".to_owned(),
+        ))
+    }
+
+    /// Deletes a playlist.
+    async fn playlist_delete(&self, id: crate::model::PlaylistId) -> Result<()> {
+        let _ = id;
+        Err(crate::DomainError::Unsupported(
+            "this provider cannot delete playlists".to_owned(),
+        ))
+    }
+
     /// A full artist profile.
     async fn artist(&self, id: crate::model::ArtistId) -> Result<crate::model::ArtistDetail> {
         let _ = id;

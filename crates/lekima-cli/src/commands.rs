@@ -378,6 +378,94 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
                     let tracks = bounded(service.playlist_tracks(id.into())).await?;
                     output::print_reply(&Reply::Tracks { tracks }, json);
                 }
+                PlaylistCommand::Create {
+                    name,
+                    description,
+                    private,
+                } => {
+                    let reply = daemon_call(
+                        &socket,
+                        &paths,
+                        &config,
+                        Command::PlaylistCreate {
+                            name,
+                            description: description.unwrap_or_default(),
+                            private,
+                        },
+                    )
+                    .await?;
+                    output::print_reply(&reply, json);
+                }
+                PlaylistCommand::Rename { id, name } => {
+                    let reply = daemon_call(
+                        &socket,
+                        &paths,
+                        &config,
+                        Command::PlaylistUpdate {
+                            id: id.into(),
+                            name: Some(name),
+                            description: None,
+                        },
+                    )
+                    .await?;
+                    output::print_reply(&reply, json);
+                }
+                PlaylistCommand::Describe { id, description } => {
+                    let reply = daemon_call(
+                        &socket,
+                        &paths,
+                        &config,
+                        Command::PlaylistUpdate {
+                            id: id.into(),
+                            name: None,
+                            description: Some(description),
+                        },
+                    )
+                    .await?;
+                    output::print_reply(&reply, json);
+                }
+                PlaylistCommand::Add { id, ids } => {
+                    let reply = daemon_call(
+                        &socket,
+                        &paths,
+                        &config,
+                        Command::PlaylistAdd {
+                            id: id.into(),
+                            tracks: ids.iter().copied().map(Into::into).collect(),
+                        },
+                    )
+                    .await?;
+                    output::print_reply(&reply, json);
+                }
+                PlaylistCommand::Remove { id, ids } => {
+                    let reply = daemon_call(
+                        &socket,
+                        &paths,
+                        &config,
+                        Command::PlaylistRemove {
+                            id: id.into(),
+                            tracks: ids.iter().copied().map(Into::into).collect(),
+                        },
+                    )
+                    .await?;
+                    output::print_reply(&reply, json);
+                }
+                PlaylistCommand::Delete { id, yes } => {
+                    if !yes {
+                        return Err(Failure::new(
+                            ErrorCode::BadRequest,
+                            "pass --yes to delete a playlist".to_owned(),
+                        ));
+                    }
+                    let reply = daemon_call(
+                        &socket,
+                        &paths,
+                        &config,
+                        Command::PlaylistDelete { id: id.into() },
+                    )
+                    .await?;
+                    output::print_reply(&reply, json);
+                }
             }
             Ok(())
         }
