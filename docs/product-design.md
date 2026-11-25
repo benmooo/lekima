@@ -148,7 +148,7 @@ Desktop notifications when the track changes, and a durable listening history:
 what you select. The log is bounded by `[history] capacity` and records each
 play once, including repeat-one loops.
 
-### v0.11 — “extensions” (implemented, awaiting release)
+### v0.11 — “extensions” (shipped in 0.11.0)
 
 > Detailed specification: [`sprint-11/`](./sprint-11/).
 

@@ -1,6 +1,6 @@
 # Sprint 11 — Extensions
 
-Status: **Implemented, unreleased** · Started 2026-11-25
+Status: **Shipped in 0.11.0** · Started 2026-11-25
 
 Sprint 10 made the player follow a listener through a normal day: it announces
 tracks and remembers what was heard. What it still cannot do is let *someone

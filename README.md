@@ -58,6 +58,11 @@ $ lekima status --json
 
 ## Status
 
+`0.11.0` adds plugin hooks: `[hooks.<name>]` starts an external process, streams
+sequenced events to its stdin, and accepts only the action commands it declares
+in `capabilities`. Nothing runs inside the daemon, and `lekima doctor` reports
+every hook. See [`docs/sprint-11/`](docs/sprint-11/).
+
 `0.10.1` moves the search category onto the prompt line as icons (`♪ ▣ ☺ ≡`),
 names it in the results header, and re-runs the query when `Ctrl-1..5` changes
 it. The same glyphs now label the sidebar and the queue, history and lyrics

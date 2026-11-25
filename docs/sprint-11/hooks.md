@@ -1,6 +1,6 @@
 # Sprint 11 · Plugin hooks
 
-Status: **Implemented, unreleased** · Linear AKA-149 · ADR-015, ADR-016
+Status: **Shipped in 0.11.0** · Linear AKA-149 · ADR-015, ADR-016
 
 ## 1. Problem
 
