@@ -3952,13 +3952,13 @@ mod tests {
 
     #[test]
     fn playlist_footer_fits_every_supported_width() {
-        for width in [60, 64, 76, 104, 120] {
+        for width in [60, 64, 76, 104, 106, 120] {
             let mut app = App::new();
             app.mode = Mode::Playlists;
             let screen = render(&mut app, width, 20);
+            // `render` returns cells without newlines: the footer is the last row.
             let footer = screen
-                .lines()
-                .find(|line| line.contains("[PLAYLISTS]"))
+                .get(screen.len().saturating_sub(usize::from(width))..)
                 .unwrap_or("");
             assert!(
                 footer.contains("esc"),
@@ -3968,6 +3968,11 @@ mod tests {
                 assert!(
                     footer.contains("close"),
                     "the full footer is clipped at {width}: {footer:?}"
+                );
+            } else if width >= 76 {
+                assert!(
+                    !footer.contains("close") && !footer.contains("d describe"),
+                    "the mid branch must be used below 107 at {width}: {footer:?}"
                 );
             }
         }
@@ -3981,8 +3986,7 @@ mod tests {
             app.status.track = Some(track("Song"));
             let screen = render(&mut app, width, 20);
             let footer = screen
-                .lines()
-                .find(|line| line.contains("[NORMAL]"))
+                .get(screen.len().saturating_sub(usize::from(width))..)
                 .unwrap_or("");
             assert!(footer.contains("P lists"), "at {width}: {footer:?}");
             assert!(!footer.contains("ctrl-o/i"), "at {width}: {footer:?}");
@@ -3993,8 +3997,7 @@ mod tests {
             app.status.track = Some(track("Song"));
             let screen = render(&mut app, width, 20);
             let footer = screen
-                .lines()
-                .find(|line| line.contains("[NORMAL]"))
+                .get(screen.len().saturating_sub(usize::from(width))..)
                 .unwrap_or("");
             assert!(footer.contains("ctrl-o/i hist"), "at {width}: {footer:?}");
             assert!(footer.contains("? keys"), "at {width}: {footer:?}");

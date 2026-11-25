@@ -119,7 +119,7 @@ pub const PLAYLISTS: &[Binding] = &[
         description: "new rename desc add",
     },
     Binding {
-        key: "enter/x/r/esc",
+        key: "enter/x/r/esc/q",
         description: "open delete refresh close",
     },
 ];

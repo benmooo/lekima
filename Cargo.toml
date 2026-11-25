@@ -29,7 +29,7 @@ clap = { version = "4", features = ["derive", "env", "wrap_help"] }
 crossterm = "0.29"
 directories = "6"
 getrandom = "0.3"
-ncmapi = "1.10.5"
+ncmapi = "1.10.6"
 qrcode = "0.14"
 ratatui = "0.30"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream", "socks"] }
