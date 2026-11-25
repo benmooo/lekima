@@ -374,3 +374,44 @@ fn ui_rejects_an_unknown_choice_as_a_usage_error() {
     assert_eq!(json["ok"], false);
     assert_eq!(json["error"]["code"], "bad_request");
 }
+
+#[test]
+fn ui_accepts_theme_aliases_and_lyrics_offset() {
+    let dir = hermetic("ui-aliases");
+    let output = binary()
+        .env("LEKIMA_CONFIG_DIR", &dir)
+        .args([
+            "ui",
+            "--theme",
+            "gruv",
+            "--lyrics-offset",
+            "250",
+            "--translation",
+            "on",
+            "--json",
+        ])
+        .output()
+        .expect("run lekima");
+
+    assert!(output.status.success(), "{output:?}");
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("valid json envelope");
+    assert_eq!(json["data"]["theme"], "gruvbox");
+    assert_eq!(json["data"]["lyrics_offset_ms"], 250);
+    assert_eq!(json["data"]["resolved_theme"], "gruvbox");
+}
+
+#[test]
+fn ui_rejects_an_out_of_range_lyrics_offset() {
+    let dir = hermetic("ui-offset");
+    let output = binary()
+        .env("LEKIMA_CONFIG_DIR", &dir)
+        .args(["ui", "--lyrics-offset", "60000", "--json"])
+        .output()
+        .expect("run lekima");
+
+    assert_eq!(output.status.code(), Some(2));
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("valid json envelope");
+    assert_eq!(json["error"]["code"], "bad_request");
+}

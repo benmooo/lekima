@@ -101,6 +101,8 @@ fn main() {
     let mut density = "compact".to_owned();
     let mut mode = "normal".to_owned();
     let mut filter = "all".to_owned();
+    let mut color = "truecolor".to_owned();
+    let mut motion = "auto".to_owned();
 
     let mut arguments = std::env::args().skip(1);
     while let Some(argument) = arguments.next() {
@@ -120,7 +122,9 @@ fn main() {
             "--theme" => theme_name = arguments.next().unwrap_or(theme_name),
             "--glyphs" => glyphs = arguments.next().unwrap_or(glyphs),
             "--density" => density = arguments.next().unwrap_or(density),
-            "--mode" => mode = arguments.next().unwrap_or(mode),
+            "--mode" | "--screen" => mode = arguments.next().unwrap_or(mode),
+            "--color" => color = arguments.next().unwrap_or(color),
+            "--motion" => motion = arguments.next().unwrap_or(motion),
             "--filter" => filter = arguments.next().unwrap_or(filter),
             "--long-title" => {
                 if let Some(track) = app.status.track.as_mut() {
@@ -146,7 +150,8 @@ fn main() {
                 println!(
                     "usage: preview [--width N] [--height N] [--theme NAME] \
                      [--glyphs unicode|ascii] [--density compact|comfortable] \
-                     [--mode normal|queue|help|settings|comments|history|search|results|artist|album] \
+                     [--screen|--mode normal|queue|help|settings|comments|history|search|results|artist|album] \
+                     [--color truecolor|256|16|mono] [--motion auto|full|reduced] \
                      [--filter all|tracks|albums|artists|playlists] [--long-title] \
                      [--buffered] [--empty] [--no-lyrics] [--toast-error]"
                 );
@@ -409,7 +414,10 @@ fn main() {
         }
         _ => lekima_tui::app::Mode::Normal,
     };
-    let theme = Theme::resolve(&theme_name, &glyphs, &density);
+    let color_mode = Theme::color_mode(&color).unwrap_or_default();
+    let theme = Theme::resolve(&theme_name, &glyphs, &density)
+        .with_motion(&motion)
+        .with_color_mode(color_mode);
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).expect("test terminal");
     terminal

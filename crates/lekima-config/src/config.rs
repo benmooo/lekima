@@ -77,6 +77,8 @@ pub struct UiConfig {
     pub density: String,
     /// `auto` (default), `full` or `reduced` animation policy.
     pub motion: String,
+    /// Lyrics offset in milliseconds, applied when the TUI starts.
+    pub lyrics_offset_ms: i64,
     /// Show translated lyrics under the original when available.
     pub lyrics_translation: bool,
     /// `true` keeps the terminal contents when the TUI exits.
@@ -91,6 +93,7 @@ impl Default for UiConfig {
             glyphs: "unicode".to_owned(),
             density: "compact".to_owned(),
             motion: "auto".to_owned(),
+            lyrics_offset_ms: 0,
             lyrics_translation: false,
             alternate_screen: true,
             show_help_on_start: false,
@@ -282,7 +285,7 @@ pub fn save_quality(path: &Path, quality: &str) -> Result<(), PathError> {
     })
 }
 
-/// Persists the three UI preferences, preserving every other setting.
+/// Persists the UI preferences, preserving every other setting.
 ///
 /// # Errors
 ///
@@ -293,6 +296,7 @@ pub fn save_ui(
     glyphs: &str,
     density: &str,
     motion: &str,
+    lyrics_offset_ms: i64,
     lyrics_translation: bool,
 ) -> Result<(), PathError> {
     let mut root: toml::Value = match std::fs::read_to_string(path) {
@@ -326,6 +330,10 @@ pub fn save_ui(
         toml::Value::String(density.to_owned()),
     );
     ui.insert("motion".to_owned(), toml::Value::String(motion.to_owned()));
+    ui.insert(
+        "lyrics_offset_ms".to_owned(),
+        toml::Value::Integer(lyrics_offset_ms),
+    );
     ui.insert(
         "lyrics_translation".to_owned(),
         toml::Value::Boolean(lyrics_translation),
@@ -437,11 +445,13 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("config.toml");
         std::fs::write(&path, "[playback]\nvolume = 0.25\n").unwrap();
-        save_ui(&path, "amber", "ascii", "comfortable", "reduced", true).unwrap();
+        save_ui(&path, "amber", "ascii", "comfortable", "reduced", 500, true).unwrap();
         let config = super::load(&path).unwrap();
         assert_eq!(config.ui.theme, "amber");
         assert_eq!(config.ui.glyphs, "ascii");
         assert_eq!(config.ui.density, "comfortable");
+        assert_eq!(config.ui.motion, "reduced");
+        assert_eq!(config.ui.lyrics_offset_ms, 500);
         assert!(config.ui.lyrics_translation);
         assert!((config.playback.volume - 0.25).abs() < f32::EPSILON);
         let _ = std::fs::remove_dir_all(dir);

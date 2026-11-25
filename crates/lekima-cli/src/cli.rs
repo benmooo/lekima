@@ -301,8 +301,12 @@ pub enum TopCommand {
         #[arg(long, value_name = "MODE")]
         motion: Option<String>,
 
+        /// Lyrics offset in milliseconds, applied when the TUI starts.
+        #[arg(long, value_name = "MS", allow_hyphen_values = true)]
+        lyrics_offset: Option<i64>,
+
         /// Translated lyrics under the original: `on` or `off`.
-        #[arg(long, value_name = "on|off")]
+        #[arg(long, alias = "lyrics-translation", value_name = "on|off")]
         translation: Option<String>,
     },
 

@@ -1,6 +1,6 @@
 # Proposal — TUI design system v2
 
-Status: **Draft for review** · 2026-11-25 · Linear AKA-151, AKA-153
+Status: **Accepted; slices 1–6 implemented** · 2026-11-25 · Linear AKA-151, AKA-153
 Extends [`2026-11-25-tui-density-and-theme.md`](./2026-11-25-tui-density-and-theme.md)
 and keeps **A1** (`compact` default) and **B1** (freeze twelve palettes, polish
 `cyber`, add `lekima ui`). Decisions: twelve semantic roles, five type levels, one

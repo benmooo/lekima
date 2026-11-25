@@ -37,11 +37,12 @@ Default theme `cyber`, all colours on the terminal’s own background:
 | `hot` | `#FF2E88` | errors, likes, destructive actions, overlay border |
 | `warn` | `#FFB000` | paused state, daemon offline |
 | `text` | `#C8D6E5` | track titles, primary content |
-| `muted` | `#6E7D8C` | artists, labels, hints |
-| `dim` | `#2D3740` | rules, indices, separators, empty meters |
+| `muted` | `#8494A5` | artists, labels, hints, numerals |
+| `dim` | `#2D3740` | rules, gutters, separators, empty meters (never text) |
 | `selection_bg` | `#003E34` | selected row background |
 | `selection_fg` | `#D2FFF0` | selected row foreground |
-| `panel` | `#007A64` | `//` section markers, table headers |
+| `panel` | `#00A98A` | `//` section markers, table headers |
+| `ground` | `#05070A` | design background used for contrast; not painted |
 | `badge_fg/bg` | `#000000` / `#00FF9C` | mode badge and brand chip |
 
 Alternates: `amber` (VT220 phosphor), `light` for light terminals, and `mono`
@@ -54,6 +55,11 @@ unless a solid ground is requested), with WCAG floors for content and marker
 text. `lekima ui --json` reports the effective set; the reference palettes
 `cyber` and `light` are asserted in `theme.rs` tests, and the remaining palettes
 are brought up to the same floors in the identity slice.
+
+Every palette passes the same floors against its own `ground` — text,
+secondary text, labels, accents, warnings, errors, selection and badge pairs at
+4.5:1, with the pure accent marker at 3:1 — asserted by
+`every_palette_meets_the_contrast_floors`.
 
 Colour capabilities are explicit: `LEKIMA_COLOR` (or `NO_COLOR`) downgrades
 every RGB role to the 256 cube, the nearest 16 ANSI colours, or mono, where

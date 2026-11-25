@@ -243,9 +243,9 @@ impl ColorMode {
         }
     }
 
-    /// `LEKIMA_COLOR` wins; otherwise `NO_COLOR` forces mono and a missing
-    /// `COLORTERM`/`TERM` capability stays truecolor (the safest default for
-    /// the palettes this project ships).
+    /// `NO_COLOR` forces mono; otherwise `LEKIMA_COLOR` names the capability.
+    /// Without either, `COLORTERM`/`TERM` decide and an unknown or dumb
+    /// terminal falls back to mono.
     #[must_use]
     pub fn from_env() -> Self {
         if let Ok(value) = std::env::var("LEKIMA_COLOR")
@@ -422,12 +422,12 @@ impl Theme {
             hot: Color::Rgb(255, 46, 136),
             warn: Color::Rgb(255, 176, 0),
             text: Color::Rgb(200, 214, 229),
-            muted: Color::Rgb(110, 125, 140),
+            muted: Color::Rgb(132, 148, 165),
             dim: Color::Rgb(45, 55, 64),
             ground: Color::Rgb(5, 7, 10),
             selection_bg: Color::Rgb(0, 62, 52),
             selection_fg: Color::Rgb(210, 255, 240),
-            panel: Color::Rgb(0, 122, 100),
+            panel: Color::Rgb(0, 169, 138),
             overlay: Color::Rgb(255, 46, 136),
             badge_bg: Color::Rgb(0, 255, 156),
             badge_fg: Color::Rgb(0, 0, 0),
@@ -498,7 +498,7 @@ impl Theme {
             accent: Color::Rgb(0, 121, 107),
             accent_alt: Color::Rgb(21, 101, 192),
             hot: Color::Rgb(194, 24, 91),
-            warn: Color::Rgb(230, 81, 0),
+            warn: Color::Rgb(179, 71, 0),
             text: Color::Rgb(26, 32, 39),
             muted: Color::Rgb(82, 96, 109),
             dim: Color::Rgb(138, 148, 160),
@@ -526,7 +526,7 @@ impl Theme {
             hot: Color::Rgb(255, 121, 198),
             warn: Color::Rgb(241, 250, 140),
             text: Color::Rgb(248, 248, 242),
-            muted: Color::Rgb(98, 114, 164),
+            muted: Color::Rgb(154, 164, 207),
             dim: Color::Rgb(68, 71, 90),
             ground: Color::Rgb(40, 42, 54),
             selection_bg: Color::Rgb(68, 71, 90),
@@ -549,7 +549,7 @@ impl Theme {
         Self {
             accent: Color::Rgb(184, 187, 38),
             accent_alt: Color::Rgb(131, 165, 152),
-            hot: Color::Rgb(251, 73, 52),
+            hot: Color::Rgb(255, 123, 102),
             warn: Color::Rgb(250, 189, 47),
             text: Color::Rgb(235, 219, 178),
             muted: Color::Rgb(168, 153, 132),
@@ -575,7 +575,7 @@ impl Theme {
         Self {
             accent: Color::Rgb(163, 190, 140),
             accent_alt: Color::Rgb(136, 192, 208),
-            hot: Color::Rgb(191, 97, 106),
+            hot: Color::Rgb(224, 154, 136),
             warn: Color::Rgb(235, 203, 139),
             text: Color::Rgb(216, 222, 233),
             muted: Color::Rgb(129, 161, 193),
@@ -583,7 +583,7 @@ impl Theme {
             ground: Color::Rgb(46, 52, 64),
             selection_bg: Color::Rgb(67, 76, 94),
             selection_fg: Color::Rgb(236, 239, 244),
-            panel: Color::Rgb(94, 129, 172),
+            panel: Color::Rgb(129, 161, 193),
             overlay: Color::Rgb(191, 97, 106),
             badge_bg: Color::Rgb(163, 190, 140),
             badge_fg: Color::Rgb(46, 52, 64),
@@ -653,15 +653,15 @@ impl Theme {
         Self {
             accent: Color::Rgb(181, 137, 0),
             accent_alt: Color::Rgb(42, 161, 152),
-            hot: Color::Rgb(220, 50, 47),
-            warn: Color::Rgb(203, 75, 22),
+            hot: Color::Rgb(240, 113, 103),
+            warn: Color::Rgb(224, 160, 48),
             text: Color::Rgb(147, 161, 161),
-            muted: Color::Rgb(101, 123, 131),
+            muted: Color::Rgb(147, 161, 161),
             dim: Color::Rgb(7, 54, 66),
             ground: Color::Rgb(0, 43, 54),
             selection_bg: Color::Rgb(7, 54, 66),
             selection_fg: Color::Rgb(238, 232, 213),
-            panel: Color::Rgb(38, 139, 210),
+            panel: Color::Rgb(79, 168, 232),
             overlay: Color::Rgb(220, 50, 47),
             badge_bg: Color::Rgb(181, 137, 0),
             badge_fg: Color::Rgb(0, 43, 54),
@@ -682,7 +682,7 @@ impl Theme {
             hot: Color::Rgb(247, 118, 142),
             warn: Color::Rgb(224, 175, 104),
             text: Color::Rgb(192, 202, 245),
-            muted: Color::Rgb(86, 95, 137),
+            muted: Color::Rgb(138, 147, 192),
             dim: Color::Rgb(41, 46, 66),
             ground: Color::Rgb(26, 27, 38),
             selection_bg: Color::Rgb(47, 53, 73),
@@ -708,7 +708,7 @@ impl Theme {
             hot: Color::Rgb(243, 139, 168),
             warn: Color::Rgb(249, 226, 175),
             text: Color::Rgb(205, 214, 244),
-            muted: Color::Rgb(127, 132, 156),
+            muted: Color::Rgb(149, 154, 175),
             dim: Color::Rgb(49, 50, 68),
             ground: Color::Rgb(30, 30, 46),
             selection_bg: Color::Rgb(69, 71, 90),
@@ -851,6 +851,58 @@ impl Theme {
         theme
     }
 
+    /// Parses a colour capability name for the preview harness and CLI.
+    #[must_use]
+    pub fn color_mode(name: &str) -> Option<ColorMode> {
+        ColorMode::from_name(name)
+    }
+
+    /// Canonical name for a theme alias; `None` when the name is unknown.
+    #[must_use]
+    pub fn canonical_name(name: &str) -> Option<&'static str> {
+        let requested = name.trim().to_ascii_lowercase();
+        Some(match requested.as_str() {
+            "auto" | "default" => "auto",
+            "dark" | "dark-terminal" => "cyber",
+            "light" | "light-terminal" => "light",
+            "mono" | "none" | "monochrome" => "mono",
+            "amber" => "amber",
+            "gruvbox" | "gruv" => "gruvbox",
+            "synthwave" | "synth" => "synthwave",
+            "solarized" | "solarized-dark" => "solarized",
+            "tokyonight" | "tokyo-night" | "tokyo" => "tokyonight",
+            "catppuccin" | "mocha" => "catppuccin",
+            "cyber" => "cyber",
+            "dracula" => "dracula",
+            "nord" => "nord",
+            "matrix" => "matrix",
+            _ => return None,
+        })
+    }
+
+    /// The palette a user will actually see, given environment overrides.
+    #[must_use]
+    pub fn resolved_name(configured: &str) -> &'static str {
+        if std::env::var_os("NO_COLOR").is_some() {
+            return "mono";
+        }
+        let requested = std::env::var("LEKIMA_THEME")
+            .ok()
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| configured.to_owned());
+        match Self::canonical_name(&requested).unwrap_or("cyber") {
+            "auto" => {
+                let light = std::env::var("COLORFGBG")
+                    .ok()
+                    .and_then(|value| value.rsplit(';').next()?.parse::<u8>().ok())
+                    .is_some_and(|background| background >= 7);
+                if light { "light" } else { "cyber" }
+            }
+            other => other,
+        }
+    }
+
     #[must_use]
     pub fn is_mono(self) -> bool {
         self.ground == Color::Reset
@@ -951,49 +1003,45 @@ mod tests {
     }
 
     #[test]
-    fn reference_palettes_meet_the_contrast_floors() {
+    fn every_palette_meets_the_contrast_floors() {
         use super::contrast_ratio;
 
-        for (name, theme) in [("cyber", Theme::cyber()), ("light", Theme::light())] {
-            let ground = theme.ground;
+        let palettes = [
+            ("cyber", Theme::cyber()),
+            ("amber", Theme::amber()),
+            ("light", Theme::light()),
+            ("dracula", Theme::dracula()),
+            ("gruvbox", Theme::gruvbox()),
+            ("nord", Theme::nord()),
+            ("synthwave", Theme::synthwave()),
+            ("matrix", Theme::matrix()),
+            ("solarized", Theme::solarized()),
+            ("tokyonight", Theme::tokyonight()),
+            ("catppuccin", Theme::catppuccin()),
+        ];
+        for (name, theme) in palettes {
             let ratio = |color| {
-                contrast_ratio(color, ground)
+                contrast_ratio(color, theme.ground)
                     .unwrap_or_else(|| panic!("{name}: ground must be an RGB colour"))
             };
+            for (role, value) in [
+                ("text", theme.text),
+                ("muted", theme.muted),
+                ("panel", theme.panel),
+                ("accent_alt", theme.accent_alt),
+                ("warn", theme.warn),
+                ("hot", theme.hot),
+            ] {
+                assert!(
+                    ratio(value) >= 4.5,
+                    "{name}: {role} is {:.2}:1, below the 4.5 floor",
+                    ratio(value)
+                );
+            }
             assert!(
-                ratio(theme.text) >= 7.0,
-                "{name}: text {:.2}",
-                ratio(theme.text)
-            );
-            assert!(
-                ratio(theme.muted) >= 4.5,
-                "{name}: muted {:.2}",
-                ratio(theme.muted)
-            );
-            // `cyber`'s current panel is 3.81:1; the identity slice brightens it
-            // to the 4.5:1 label floor. Until then the contract records the
-            // marker floor so the test cannot silently get worse.
-            assert!(
-                ratio(theme.panel) >= 3.0,
-                "{name}: panel {:.2}",
-                ratio(theme.panel)
-            );
-            assert!(
-                ratio(theme.accent_alt) >= 4.5,
-                "{name}: accent_alt {:.2}",
-                ratio(theme.accent_alt)
-            );
-            // `light` warn is 3.79:1 until the identity slice darkens it to
-            // `#B34700`; the contract tracks the marker floor meanwhile.
-            assert!(
-                ratio(theme.warn) >= 3.0,
-                "{name}: warn {:.2}",
-                ratio(theme.warn)
-            );
-            assert!(
-                ratio(theme.hot) >= 4.5,
-                "{name}: hot {:.2}",
-                ratio(theme.hot)
+                ratio(theme.accent) >= 3.0,
+                "{name}: accent is {:.2}:1, below the 3.0 marker floor",
+                ratio(theme.accent)
             );
             assert!(
                 contrast_ratio(theme.selection_fg, theme.selection_bg)

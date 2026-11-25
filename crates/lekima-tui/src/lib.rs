@@ -91,12 +91,20 @@ async fn event_loop(
             }
             reply = replies.recv() => {
                 let Some(reply) = reply else { break };
+                let status_only = matches!(&reply, Ok(Reply::Status { .. }));
+                let before = status_fingerprint(app);
                 let follow_up = app.apply(reply);
                 apply_action(follow_up, &socket, &sender, app);
-                dirty = true;
+                if !status_only
+                    || !theme.motion.is_reduced()
+                    || status_fingerprint(app) != before
+                {
+                    dirty = true;
+                }
             }
             frame = events.recv() => {
                 let Some(frame) = frame else { break };
+                let before = status_fingerprint(app);
                 app.note_event(frame.seq);
                 let reply = match frame.event {
                     DaemonEvent::Status { state } => Some(Reply::Status { state: *state }),
@@ -113,11 +121,16 @@ async fn event_loop(
                     let follow_up = app.apply(Ok(reply));
                     apply_action(follow_up, &socket, &sender, app);
                 }
-                dirty = true;
+                if !theme.motion.is_reduced() || status_fingerprint(app) != before {
+                    dirty = true;
+                }
             }
             _ = ticker.tick() => {
+                let message_before = app.message.as_ref().map(|message| message.created);
                 app.tick();
-                if !theme.motion.is_reduced() {
+                if !theme.motion.is_reduced()
+                    || app.message.as_ref().map(|message| message.created) != message_before
+                {
                     dirty = true;
                 }
                 // 20 Hz while playing for the spectrum; 1 Hz while the daemon
@@ -137,6 +150,26 @@ async fn event_loop(
         }
     }
     Ok(())
+}
+
+/// Everything the frame depends on that can change without a key press.
+/// Reduced motion compares fingerprints so an unchanged status poll does not
+/// repaint the screen.
+fn status_fingerprint(app: &App) -> String {
+    format!(
+        "{:?}|{:?}|{}|{}|{}|{}|{:?}|{}|{}|{:?}|{:?}",
+        app.status.track.as_ref().map(|track| track.id),
+        app.status.status,
+        app.status.position_ms / 1000,
+        app.status.queue_length,
+        (app.status.volume * 100.0) as i32,
+        app.status.muted,
+        app.status.repeat,
+        app.status.shuffle,
+        app.daemon_down,
+        app.message.as_ref().map(|message| message.created),
+        app.message.as_ref().map(|message| message.error),
+    )
 }
 
 /// Returns `true` when the TUI should exit.

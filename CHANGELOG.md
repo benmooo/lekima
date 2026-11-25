@@ -3,6 +3,32 @@
 All notable changes to lekima are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## Unreleased
+
+### Added
+
+- TUI design system v2, end to end: `lekima ui` reports and writes theme,
+  glyphs, density, motion and lyric offset; a measurable theme contract with
+  WCAG floors for all twelve palettes; a right-anchored HUD with a two-row mid
+  width; one list grammar across tracks, queue, history and catalogue; unified
+  empty states and alerts; `LEKIMA_COLOR` downgrade to 256/16/mono; reduced
+  motion and idle draw suppression; and text fixtures in `docs/screenshots/`.
+
+### Changed
+
+- `cyber` secondary text and section labels are brighter, `light` warning text
+  is darker, and the remaining palettes were retuned where they failed the
+  contrast floors.
+- The HUD is two rows at 64–95 columns so the title keeps a 20-cell floor.
+- Shuffle reads as bracket presence, buffered audio uses `┄`, and `fakir`
+  (mono) selection is reverse video.
+
+### Fixed
+
+- Empty panes no longer repeat their header label, alerts stay out of the
+  sidebar, catalogue metadata truncates with `…` instead of mid-token, and the
+  narrow HUD leaves no title residue behind the rail.
+
 ## 0.11.1 — 2026-11-25
 
 ### Fixed

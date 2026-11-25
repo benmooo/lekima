@@ -276,6 +276,8 @@ Global — `q`/`Ctrl-c` quit, `?` help, `/` search, `:` command line,
 - Colour is never the only signal (icons + text).
 - `NO_COLOR`, `LEKIMA_THEME=light|dark|auto|<palette>` (twelve palettes,
   including a light-terminal theme), and a monochrome-safe theme.
+- `LEKIMA_COLOR=truecolor|256|16|mono` downgrades the palette; `LEKIMA_MOTION`
+  and `[ui] motion` freeze animation; selection is reverse video in mono.
 - Alternate screen is configurable; on exit the terminal is always restored
   (panic-safe guard).
 - Catalogue text is sanitized: C0/C1 control characters, ANSI/OSC sequences,
@@ -326,6 +328,11 @@ lekima logout
 lekima whoami [--json]
 lekima serve --http [--bind ADDR]          HTTP control for phones/LAN
 
+lekima ui [--theme NAME] [--glyphs SET] [--density MODE]
+          [--motion auto|full|reduced] [--lyrics-offset MS]
+          [--translation on|off] [--json]
+lekima themes [--json]
+lekima history [--limit N] [--json]
 lekima daemon start|stop|status|logs
 lekima doctor [--json]
 lekima capabilities [--json]

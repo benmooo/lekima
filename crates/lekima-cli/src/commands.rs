@@ -36,6 +36,7 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
                 glyphs: config.ui.glyphs.clone(),
                 density: config.ui.density.clone(),
                 motion: config.ui.motion.clone(),
+                lyrics_offset_ms: config.ui.lyrics_offset_ms,
                 lyrics_translation: config.ui.lyrics_translation,
             };
             let changed = lekima_tui::run(socket, preferences)
@@ -48,6 +49,7 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
                     &preferences.glyphs,
                     &preferences.density,
                     &preferences.motion,
+                    preferences.lyrics_offset_ms,
                     preferences.lyrics_translation,
                 )
             {
@@ -674,6 +676,7 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
             glyphs,
             density,
             motion,
+            lyrics_offset,
             translation,
         } => {
             let mut ui = config.ui.clone();
@@ -681,11 +684,19 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
                 || glyphs.is_some()
                 || density.is_some()
                 || motion.is_some()
+                || lyrics_offset.is_some()
                 || translation.is_some();
             if let Some(value) = theme {
-                let mut allowed = lekima_tui::THEMES.to_vec();
-                allowed.push("auto");
-                ui.theme = ui_choice("theme", &value, &allowed)?;
+                ui.theme = lekima_tui::Theme::canonical_name(&value)
+                    .filter(|name| *name == "auto" || lekima_tui::THEMES.contains(name))
+                    .ok_or_else(|| {
+                        Failure::usage(format!(
+                            "unknown theme `{}`; choose one of {}, auto",
+                            value.trim(),
+                            lekima_tui::THEMES.join(", ")
+                        ))
+                    })?
+                    .to_owned();
             }
             if let Some(value) = glyphs {
                 ui.glyphs = ui_choice("glyph set", &value, &["unicode", "ascii"])?;
@@ -695,6 +706,14 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
             }
             if let Some(value) = motion {
                 ui.motion = ui_choice("motion", &value, &["auto", "full", "reduced"])?;
+            }
+            if let Some(value) = lyrics_offset {
+                if value.unsigned_abs() > 10_000 {
+                    return Err(Failure::usage(
+                        "lyrics offset must stay within ±10 seconds (10000 ms)",
+                    ));
+                }
+                ui.lyrics_offset_ms = value;
             }
             if let Some(value) = translation {
                 ui.lyrics_translation = matches!(
@@ -709,6 +728,7 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
                     &ui.glyphs,
                     &ui.density,
                     &ui.motion,
+                    ui.lyrics_offset_ms,
                     ui.lyrics_translation,
                 )?;
             }
@@ -720,6 +740,8 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
                         "glyphs": ui.glyphs,
                         "density": ui.density,
                         "motion": ui.motion,
+                        "resolved_theme": lekima_tui::Theme::resolved_name(&ui.theme),
+                        "lyrics_offset_ms": ui.lyrics_offset_ms,
                         "lyrics_translation": ui.lyrics_translation,
                     })),
                     None,

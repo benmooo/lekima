@@ -267,37 +267,40 @@ fn draw_hud(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
 
     let right_width = groups_width(&right);
     let fits = right_width + 2 + prefix_width <= usize::from(area.width);
-    let left_width = if fits {
-        usize::from(area.width).saturating_sub(right_width + 2)
-    } else {
-        usize::from(area.width)
-    };
-    let mut line = prefix.clone();
+    if !fits {
+        // Below the point where the full cluster fits, keep the clock: drop
+        // everything else and let the title use what remains. Clear first so
+        // no earlier, wider line can leave residue behind the shorter one.
+        frame.render_widget(Clear, area);
+        let keep_rail = rail_width + 2 + prefix_width + 8 <= usize::from(area.width);
+        let left_width = if keep_rail {
+            usize::from(area.width).saturating_sub(rail_width + 2)
+        } else {
+            usize::from(area.width)
+        };
+        let mut line = prefix;
+        line.extend(hud_title(
+            app,
+            theme,
+            left_width.saturating_sub(prefix_width),
+        ));
+        frame.render_widget(Paragraph::new(Line::from(line)), area);
+        if keep_rail {
+            frame.render_widget(
+                Paragraph::new(Line::from(rail)).alignment(Alignment::Right),
+                area,
+            );
+        }
+        return;
+    }
+    let left_width = usize::from(area.width).saturating_sub(right_width + 2);
+    let mut line = prefix;
     line.extend(hud_title(
         app,
         theme,
         left_width.saturating_sub(prefix_width),
     ));
     frame.render_widget(Paragraph::new(Line::from(line)), area);
-    if !fits {
-        // Below the point where the full cluster fits, keep the clock: drop
-        // everything else and let the title use what remains.
-        if rail_width + 2 + prefix_width + 8 <= usize::from(area.width) {
-            let available = usize::from(area.width).saturating_sub(rail_width + 2);
-            let mut line = prefix;
-            line.extend(hud_title(
-                app,
-                theme,
-                available.saturating_sub(prefix_width),
-            ));
-            frame.render_widget(Paragraph::new(Line::from(line)), area);
-            frame.render_widget(
-                Paragraph::new(Line::from(rail.clone())).alignment(Alignment::Right),
-                area,
-            );
-        }
-        return;
-    }
     let mut tail: Vec<Span<'static>> = Vec::new();
     for group in right.into_iter().filter(|group| !group.is_empty()) {
         tail.push(Span::raw("  "));
@@ -816,7 +819,7 @@ fn draw_tracks(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         header.push("ARTIST");
     }
     if columns.time {
-        header.push("    TIME");
+        header.push("   TIME ");
     }
     let table = Table::new(rows, columns.constraints())
         .column_spacing(0)
@@ -929,19 +932,20 @@ fn empty_lines(
     hints: &[(&str, &str)],
     theme: &Theme,
 ) -> Vec<Line<'static>> {
-    let mut lines = vec![
-        Line::from(vec![
+    let mut lines = Vec::new();
+    if !label.is_empty() {
+        lines.push(Line::from(vec![
             Span::styled("// ", Style::new().fg(theme.panel)),
             Span::styled(
                 label.to_uppercase(),
                 Style::new().fg(theme.muted).add_modifier(Modifier::BOLD),
             ),
-        ]),
-        Line::from(vec![
-            Span::styled("  ", Style::new()),
-            Span::styled(sentence.to_owned(), Style::new().fg(theme.muted)),
-        ]),
-    ];
+        ]));
+    }
+    lines.push(Line::from(vec![
+        Span::styled("  ", Style::new()),
+        Span::styled(sentence.to_owned(), Style::new().fg(theme.muted)),
+    ]));
     if !hints.is_empty() {
         lines.push(Line::from(""));
     }
@@ -978,7 +982,7 @@ impl TrackColumns {
 
 fn track_columns(width: u16) -> TrackColumns {
     let width = usize::from(width);
-    let time = width >= 40;
+    let time = width >= 38;
     let fixed = 8 + usize::from(time) * 8;
     let flexible = width.saturating_sub(fixed);
     if width >= 64 && flexible >= 24 {
@@ -1119,7 +1123,7 @@ fn draw_toplists(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     if app.toplists.is_empty() {
         frame.render_widget(
             Paragraph::new(Text::from(empty_lines(
-                "CHARTS",
+                "",
                 "no charts loaded",
                 &[("t", "load toplists")],
                 theme,
@@ -1341,23 +1345,27 @@ fn draw_search(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
             );
             return;
         }
-        let (label, sentence) = if app.search.query.is_empty() {
-            ("SEARCH", "type a query and press enter".to_owned())
+        let sentence = if app.search.query.is_empty() {
+            "type a query and press enter".to_owned()
         } else {
-            (
-                "SEARCH",
-                format!("no matches for \"{}\"", clean(&app.search.query)),
-            )
+            format!("no matches for \"{}\"", clean(&app.search.query))
         };
         frame.render_widget(
             Paragraph::new(Text::from(empty_lines(
-                label,
+                "",
                 &truncate_to_width(
                     &sentence,
                     usize::from(content.width).saturating_sub(2),
                     theme.glyphs.ellipsis,
                 ),
-                &[("/", "refine the query")],
+                &[(
+                    "/",
+                    if app.search.query.is_empty() {
+                        "type a query"
+                    } else {
+                        "refine the query"
+                    },
+                )],
                 theme,
             ))),
             content,
@@ -1441,12 +1449,12 @@ fn search_entry_line(
         ),
         SearchEntry::Album(album) => {
             let artist = album.artist_name();
-            let artist = if artist.is_empty() { "—" } else { artist };
+            let artist = if artist.is_empty() { "-" } else { artist };
             let year = album
                 .year
-                .map_or_else(|| "—".to_owned(), |year| year.to_string());
+                .map_or_else(|| "-".to_owned(), |year| year.to_string());
             let tracks = album.track_count.map_or_else(
-                || "— tracks".to_owned(),
+                || "- tracks".to_owned(),
                 |count| format!("{count} {}", tracks_word(count as usize)),
             );
             (
@@ -1465,15 +1473,13 @@ fn search_entry_line(
     };
     let title = truncate_to_width(&clean(&title), title_width, theme.glyphs.ellipsis);
     let prefix_width = 2 + 5;
-    let meta_budget = line_width.saturating_sub(prefix_width + title_width).max(4);
+    let meta_budget = line_width
+        .saturating_sub(prefix_width + title_width + 1)
+        .max(1);
     let meta = truncate_to_width(&clean(&meta), meta_budget, theme.glyphs.ellipsis);
     let title_pad = " ".repeat(title_width.saturating_sub(display_width(&title)));
     let meta_width = display_width(&meta);
-    let pad = " ".repeat(
-        line_width
-            .saturating_sub(prefix_width + title_width + meta_width)
-            .max(2),
-    );
+    let pad = " ".repeat(line_width.saturating_sub(prefix_width + title_width + meta_width));
     let primary = if selected {
         selection_style(theme)
     } else {
@@ -1678,9 +1684,9 @@ fn album_line(
     let marker = if selected { theme.glyphs.active } else { " " };
     let year = album
         .year
-        .map_or_else(|| "—".to_owned(), |year| format!("{year:>4}"));
+        .map_or_else(|| "-".to_owned(), |year| format!("{year:>4}"));
     let tracks = album.track_count.map_or_else(
-        || "—".to_owned(),
+        || "-".to_owned(),
         |count| format!("{count} {}", tracks_word(count as usize)),
     );
     let title = truncate_to_width(&clean(&album.name), title_width, theme.glyphs.ellipsis);
@@ -1768,11 +1774,11 @@ fn draw_album(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     let mut meta_lines: Vec<Line<'static>> = Vec::new();
     if let Some(detail) = app.album.detail.as_ref() {
         let artist = detail.album.artist_name();
-        let artist = if artist.is_empty() { "—" } else { artist };
+        let artist = if artist.is_empty() { "-" } else { artist };
         let year = detail
             .album
             .year
-            .map_or_else(|| "—".to_owned(), |year| year.to_string());
+            .map_or_else(|| "-".to_owned(), |year| year.to_string());
         meta_lines.push(Line::from(vec![
             Span::styled("  ", Style::new()),
             Span::styled(
@@ -1868,7 +1874,7 @@ fn draw_album(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         header.push("ARTIST");
     }
     if columns.time {
-        header.push("    TIME");
+        header.push("   TIME ");
     }
     let table = Table::new(rows, columns.constraints())
         .column_spacing(0)
@@ -2314,16 +2320,17 @@ fn draw_history(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         let (text, colour) = match (&app.plays_error, app.plays_loading) {
             (Some(error), _) => (
                 format!(
-                    "could not load history: {} - r to retry",
-                    sanitize_line(error)
+                    "could not load history: {}{} r to retry",
+                    sanitize_line(error),
+                    theme.glyphs.separator
                 ),
                 theme.hot,
             ),
-            (None, true) => ("loading plays…".to_owned(), theme.muted),
+            (None, true) => ("loading plays...".to_owned(), theme.muted),
             (None, false) => {
                 frame.render_widget(
                     Paragraph::new(Text::from(empty_lines(
-                        "HISTORY",
+                        "",
                         &format!(
                             "no plays yet {} play something and it shows up here",
                             theme.glyphs.separator
@@ -2350,7 +2357,7 @@ fn draw_history(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     let show_artist = width >= 64;
     let show_kind = width >= 88;
     let title_width = {
-        let fixed = 2 + 9 + 2 + usize::from(show_played) * 6 + usize::from(show_kind) * 6;
+        let fixed = 2 + 9 + 2 + usize::from(show_played) * 6 + usize::from(show_kind) * 7;
         let artist = if show_artist { 20 } else { 0 };
         width.saturating_sub(fixed + artist).max(8)
     };
@@ -2368,7 +2375,7 @@ fn draw_history(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         widths.push(Constraint::Length(6));
     }
     if show_kind {
-        widths.push(Constraint::Length(6));
+        widths.push(Constraint::Length(7));
     }
 
     let mut header = vec!["", "      AGE", "", "TITLE"];
@@ -2379,7 +2386,7 @@ fn draw_history(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         header.push("PLAYED");
     }
     if show_kind {
-        header.push("KIND  ");
+        header.push("KIND   ");
     }
 
     let comfortable = theme.density == Density::Comfortable;
@@ -2437,7 +2444,7 @@ fn draw_history(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         }
         if show_kind {
             cells.push(Span::styled(
-                format!("{:<6}", entry.kind.as_str()),
+                format!("{:<6} ", entry.kind.as_str()),
                 Style::new().fg(theme.muted),
             ));
         }
@@ -2539,7 +2546,7 @@ fn draw_queue(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     if app.queue.is_empty() {
         frame.render_widget(
             Paragraph::new(Text::from(empty_lines(
-                "QUEUE",
+                "",
                 "nothing queued",
                 &[
                     ("/", "search the catalogue"),
@@ -2581,7 +2588,7 @@ fn draw_queue(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         header.push("ARTIST");
     }
     if columns.time {
-        header.push("    TIME");
+        header.push("   TIME ");
     }
     let table = Table::new(rows, columns.constraints())
         .column_spacing(0)
@@ -3222,23 +3229,33 @@ fn draw_toast(
                 usize::from(area.width),
                 theme.glyphs.ellipsis,
             );
+            let row = Rect {
+                x: area.x,
+                y: area.y + area.height.saturating_sub(1),
+                width: area.width,
+                height: 1,
+            };
+            frame.render_widget(Clear, row);
             frame.render_widget(
                 Paragraph::new(Line::from(Span::styled(
                     line,
                     Style::new().fg(colour).add_modifier(Modifier::BOLD),
                 ))),
-                Rect {
-                    x: area.x,
-                    y: area.y + area.height.saturating_sub(1),
-                    width: area.width,
-                    height: 1,
-                },
+                row,
             );
         }
         return;
     }
 
-    let width = TOAST_MAX_WIDTH.min(area.width.saturating_sub(2));
+    // Keep the alert inside the main pane: never over the sidebar.
+    let min_x = if area.width >= SIDEBAR_BREAKPOINT {
+        SIDEBAR_WIDTH + 1
+    } else {
+        0
+    };
+    let width = TOAST_MAX_WIDTH
+        .min(area.width.saturating_sub(2))
+        .min(area.width.saturating_sub(min_x));
     let inner = usize::from(width.saturating_sub(4));
     let cleaned = clean(&text);
     let mut body = wrap_to_width(&cleaned, inner);
@@ -3256,11 +3273,11 @@ fn draw_toast(
     }
     let height = u16::try_from(body.len()).unwrap_or(1).saturating_add(2);
 
-    let mut x = area.width.saturating_sub(width + 1);
+    let mut x = area.width.saturating_sub(width + 1).max(min_x);
     let mut y = area.height.saturating_sub(height + 2).max(1);
     match lyrics {
         Some(LyricsPlacement::Side(rect)) => {
-            x = x.min(rect.x.saturating_sub(width + 1));
+            x = x.min(rect.x.saturating_sub(width + 1)).max(min_x);
         }
         Some(LyricsPlacement::Bottom(rect)) => {
             y = y.min(rect.y.saturating_sub(height + 1)).max(1);
@@ -3406,7 +3423,7 @@ fn draw_settings(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         ]));
     }
     lines.push(Line::from(""));
-    let hint = if popup.width < 52 {
+    let hint = if popup.width < 53 {
         format!("h/l change {} esc close", theme.glyphs.separator)
     } else {
         format!(
@@ -4393,10 +4410,161 @@ mod tests {
     }
 
     #[test]
+    fn ascii_mode_handles_populated_catalogue_and_loading() {
+        let theme = Theme::resolve("cyber", "ascii", "compact").with_motion("reduced");
+        let mut app = App::new();
+        app.view = View::Search;
+        app.search.query = "mota".to_owned();
+        app.search.entries = vec![
+            SearchEntry::Album(album("Mota", None)),
+            SearchEntry::Playlist(lekima_domain::Playlist {
+                id: lekima_domain::PlaylistId(7),
+                name: "post-rock".to_owned(),
+                description: String::new(),
+                track_count: 42,
+                cover_url: None,
+                owner: None,
+            }),
+        ];
+        let screen = render_rows(&mut app, 120, 30, theme).join("\n");
+        assert!(screen.is_ascii(), "search: {screen}");
+
+        app.search.entries.clear();
+        app.view = View::Album;
+        app.album = AlbumState {
+            id: Some(9.into()),
+            detail: Some(lekima_domain::AlbumDetail {
+                album: album("Mota", None),
+                tracks: Vec::new(),
+            }),
+            ..AlbumState::default()
+        };
+        let screen = render_rows(&mut app, 120, 30, theme).join("\n");
+        assert!(screen.is_ascii(), "album: {screen}");
+
+        app.view = View::Artist;
+        app.artist = ArtistState::default();
+        let screen = render_rows(&mut app, 120, 30, theme).join("\n");
+        assert!(screen.is_ascii(), "artist: {screen}");
+
+        app.view = View::Tracks;
+        app.mode = Mode::History;
+        app.plays_loading = true;
+        let screen = render_rows(&mut app, 120, 30, theme).join("\n");
+        assert!(screen.is_ascii(), "history loading: {screen}");
+
+        app.notify("no matches for \"mota\" ; / to refine", true);
+        let screen = render_rows(&mut app, 120, 30, theme).join("\n");
+        assert!(screen.is_ascii(), "toast: {screen}");
+    }
+
+    #[test]
     fn mono_selection_is_really_reversed() {
         let theme = Theme::resolve("mono", "unicode", "compact");
         assert_eq!(theme.selection_bg, ratatui::style::Color::White);
         assert_eq!(theme.selection_fg, ratatui::style::Color::Black);
+    }
+
+    #[test]
+    fn narrow_hud_leaves_no_title_residue() {
+        let mut app = App::new();
+        app.status.status = lekima_domain::PlaybackStatus::Playing;
+        app.status.track = Some(track("Cigarettes and lighters"));
+        for width in [48, 52] {
+            let rows = render_rows(&mut app, width, 24, Theme::cyber());
+            assert!(rows[0].contains("00:00"), "{width}: {rows:?}");
+            assert!(
+                !rows[0].contains("and lighters"),
+                "{width}: title residue behind the rail: {rows:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn search_metadata_never_clips_mid_token() {
+        let mut app = App::new();
+        app.view = View::Search;
+        app.search.entries = vec![SearchEntry::Playlist(lekima_domain::Playlist {
+            id: lekima_domain::PlaylistId(1),
+            name: "Post-rock".to_owned(),
+            description: String::new(),
+            track_count: 42,
+            cover_url: None,
+            owner: None,
+        })];
+        for width in [80, 100, 120] {
+            let rows = render_rows(&mut app, width, 24, Theme::cyber());
+            let row = rows
+                .iter()
+                .find(|row| row.contains("Post-rock"))
+                .expect("playlist row");
+            let trimmed = row.trim_end();
+            assert!(
+                trimmed.ends_with("tracks") || trimmed.ends_with('…'),
+                "{width}: metadata clipped mid-token: {trimmed:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn search_line_never_exceeds_its_width() {
+        let theme = Theme::cyber();
+        let entry = SearchEntry::Track(lekima_domain::Track {
+            duration_ms: 392_000,
+            ..track("Mota")
+        });
+        for width in [40, 54, 56, 80, 120] {
+            let line = super::search_entry_line(&theme, &entry, 0, false, 28, width);
+            let rendered: String = line
+                .spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect();
+            assert!(
+                display_width(&rendered) <= width,
+                "{width}: line is {} cells: {rendered:?}",
+                display_width(&rendered)
+            );
+            if width < 60 {
+                assert!(rendered.ends_with('…'), "{width}: {rendered:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn history_columns_are_separated() {
+        let mut app = App::new();
+        app.mode = Mode::History;
+        app.plays = vec![play("Mota", true)];
+        let rows = render_rows(&mut app, 120, 30, Theme::cyber());
+        let row = rows.iter().find(|row| row.contains("manual")).expect("row");
+        assert!(!row.contains("manual	"), "{row:?}");
+        assert!(
+            row.contains("manual ") || row.trim_end().ends_with("manual"),
+            "kind column runs into the previous cell: {row:?}"
+        );
+    }
+
+    #[test]
+    fn tiny_footer_alarm_replaces_the_command_bar() {
+        let mut app = App::new();
+        app.notify("daemon went away", true);
+        let rows = render_rows(&mut app, 24, 5, Theme::cyber());
+        let footer = rows.last().expect("footer");
+        assert!(footer.contains("daemon went away"), "{rows:?}");
+        assert!(
+            !footer.contains("[NORMAL]"),
+            "command bar residue: {footer:?}"
+        );
+    }
+
+    #[test]
+    fn empty_panes_do_not_repeat_the_header_label() {
+        let mut app = App::new();
+        app.mode = Mode::Queue;
+        let screen = render(&mut app, 100, 24);
+        assert!(screen.contains("≣ QUEUE"), "{screen}");
+        assert!(!screen.contains("// QUEUE"), "label repeated: {screen}");
     }
 
     #[test]
@@ -4958,8 +5126,8 @@ mod tests {
         };
         let screen = render(&mut app, 100, 24);
         assert!(screen.contains("NO TRACKS"));
-        // Missing metadata is an em dash, never a blank column.
-        assert!(screen.contains('—'));
+        // Missing metadata is a dash, never a blank column (and stays ASCII).
+        assert!(screen.contains('-'));
 
         app.view = View::Search;
         app.search.error = Some("provider down".to_owned());

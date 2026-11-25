@@ -31,6 +31,8 @@ pub struct UiPreferences {
     pub density: String,
     /// `auto`, `full` or `reduced`; the TUI only honours the reduced flag.
     pub motion: String,
+    /// Starting lyrics offset; `[`/`]` adjust it for the session.
+    pub lyrics_offset_ms: i64,
     pub lyrics_translation: bool,
 }
 
@@ -41,6 +43,7 @@ impl Default for UiPreferences {
             glyphs: "unicode".to_owned(),
             density: "compact".to_owned(),
             motion: "auto".to_owned(),
+            lyrics_offset_ms: 0,
             lyrics_translation: false,
         }
     }
@@ -584,6 +587,7 @@ impl App {
     }
 
     pub fn set_preferences(&mut self, preferences: UiPreferences) {
+        self.lyrics_offset_ms = preferences.lyrics_offset_ms;
         self.preferences = preferences;
     }
 
@@ -2036,7 +2040,7 @@ impl App {
                         if was_down {
                             self.notify(
                                 if self.status.queue_length > 0 {
-                                    "daemon restarted - queue restored - space to resume"
+                                    "daemon restarted; queue restored; space to resume"
                                 } else {
                                     "daemon restarted"
                                 },
@@ -2046,7 +2050,7 @@ impl App {
                             && self.status.queue_length > 0
                             && self.status.status == lekima_domain::PlaybackStatus::Stopped
                         {
-                            self.notify("queue restored - space to resume", false);
+                            self.notify("queue restored; space to resume", false);
                         }
                         if self.mode == Mode::Queue
                             && self.queue_follow
@@ -2119,7 +2123,7 @@ impl App {
                         self.focus = Focus::Main;
                         if empty {
                             self.notify(
-                                format!("no matches for \"{}\" · / to refine", self.search.query),
+                                format!("no matches for \"{}\" ; / to refine", self.search.query),
                                 false,
                             );
                         }
@@ -2296,7 +2300,7 @@ impl App {
                 if error.is_not_running() {
                     self.daemon_down = true;
                     if !was_down {
-                        self.notify("daemon not running - press R to start it", true);
+                        self.notify("daemon not running; press R to start it", true);
                     }
                 } else {
                     self.notify(error_message(&error), true);
