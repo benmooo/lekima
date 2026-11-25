@@ -137,8 +137,20 @@ fn draw_hud(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         );
 
         let left = progress_group(app, duration, theme);
-        let mut right = volume_group(app, theme);
-        for group in [repeat_group(app, theme), shuffle_group(app, theme)] {
+        let rail_width = spans_width(&left);
+        let mut groups = vec![
+            volume_group(app, theme),
+            repeat_group(app, theme),
+            shuffle_group(app, theme),
+        ];
+        while rail_width + 2 + groups_width(&groups) > usize::from(bottom.width) {
+            if groups.is_empty() {
+                break;
+            }
+            groups.remove(0);
+        }
+        let mut right: Vec<Span<'static>> = Vec::new();
+        for group in groups.into_iter().filter(|group| !group.is_empty()) {
             right.push(Span::raw("  "));
             right.extend(group);
         }
@@ -151,8 +163,8 @@ fn draw_hud(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     }
 
     // One row: the title keeps a floor and the right cluster is right-anchored.
-    // Optional facts drop in the documented order: SIG, then cache, quality,
-    // volume and the sleep countdown.
+    // Optional facts drop in the documented order: SIG, then the sleep
+    // countdown, cache, quality, preview and volume.
     let mut show_sig = app.status.track.is_some() && area.width >= 104;
     let mut show_cache = app.status.cached;
     let mut show_quality = app.status.track.is_some();
@@ -254,19 +266,27 @@ fn draw_hud(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     right.push(rail);
 
     let right_width = groups_width(&right);
-    let left_width = usize::from(area.width).saturating_sub(right_width + 2);
+    let fits = right_width + 2 + prefix_width <= usize::from(area.width);
+    let left_width = if fits {
+        usize::from(area.width).saturating_sub(right_width + 2)
+    } else {
+        usize::from(area.width)
+    };
     let mut line = prefix;
     line.extend(hud_title(
         app,
         theme,
         left_width.saturating_sub(prefix_width),
     ));
+    frame.render_widget(Paragraph::new(Line::from(line)), area);
+    if !fits {
+        return;
+    }
     let mut tail: Vec<Span<'static>> = Vec::new();
-    for group in right {
+    for group in right.into_iter().filter(|group| !group.is_empty()) {
         tail.push(Span::raw("  "));
         tail.extend(group);
     }
-    frame.render_widget(Paragraph::new(Line::from(line)), area);
     frame.render_widget(
         Paragraph::new(Line::from(tail)).alignment(Alignment::Right),
         area,
@@ -429,10 +449,7 @@ fn shuffle_group(app: &App, theme: &Theme) -> Vec<Span<'static>> {
             Style::new().fg(theme.accent_alt),
         )]
     } else {
-        vec![Span::styled(
-            format!(" {} ", theme.glyphs.shuffle),
-            Style::new().fg(theme.dim),
-        )]
+        Vec::new()
     }
 }
 
@@ -450,7 +467,11 @@ fn spans_width(spans: &[Span<'_>]) -> usize {
 }
 
 fn groups_width(groups: &[Vec<Span<'_>>]) -> usize {
-    groups.iter().map(|group| spans_width(group) + 2).sum()
+    groups
+        .iter()
+        .filter(|group| !group.is_empty())
+        .map(|group| spans_width(group) + 2)
+        .sum()
 }
 
 fn draw_rule(frame: &mut Frame, theme: &Theme, area: Rect) {
@@ -707,7 +728,7 @@ fn draw_tracks(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     } else {
         String::new()
     };
-    let source = clean(&app.source).to_ascii_uppercase();
+    let source = clean(&app.source);
     let count = total.to_string();
     let fixed = 3 + 3 + count.len() + " TRACKS".len() + display_width(&position) + 1;
     let source_budget = usize::from(label.width).saturating_sub(fixed).max(4);
@@ -725,7 +746,7 @@ fn draw_tracks(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         Span::styled(" TRACKS", Style::new().fg(theme.muted)),
     ];
     if !position.is_empty() {
-        title.push(Span::styled(position, Style::new().fg(theme.dim)));
+        title.push(Span::styled(position, Style::new().fg(theme.muted)));
     }
     if focused {
         title.push(Span::styled(
@@ -767,7 +788,7 @@ fn draw_tracks(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         header.push("ARTIST");
     }
     if columns.time {
-        header.push("TIME");
+        header.push(" TIME");
     }
     let table = Table::new(rows, columns.constraints())
         .column_spacing(0)
@@ -980,7 +1001,7 @@ fn track_row<'a>(
     } else {
         Style::new().fg(theme.text)
     };
-    let secondary = if past { theme.dim } else { theme.muted };
+    let secondary = theme.muted;
     let mut cells = vec![
         Span::styled(format!("{} ", selection.0), Style::new().fg(selection.1)),
         Span::styled(format!("{:03} ", index + 1), Style::new().fg(theme.muted)),
@@ -995,7 +1016,7 @@ fn track_row<'a>(
     }
     if columns.time {
         cells.push(Span::styled(
-            track.duration_label(),
+            format!("{:>5} ", track.duration_label()),
             Style::new().fg(secondary),
         ));
     }
@@ -1311,6 +1332,7 @@ fn draw_search(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
             index,
             focused && index == app.main_selection,
             title_width,
+            width,
         ));
     }
 
@@ -1338,6 +1360,7 @@ fn search_entry_line(
     index: usize,
     selected: bool,
     title_width: usize,
+    line_width: usize,
 ) -> Line<'static> {
     let marker = if selected { theme.glyphs.active } else { " " };
     let (title, meta) = match entry {
@@ -1375,7 +1398,15 @@ fn search_entry_line(
         ),
     };
     let title = truncate_to_width(&clean(&title), title_width, theme.glyphs.ellipsis);
-    let pad = " ".repeat(title_width.saturating_sub(display_width(&title)) + 2);
+    let prefix_width = 2 + 4;
+    let meta_budget = line_width.saturating_sub(prefix_width + title_width).max(4);
+    let meta = truncate_to_width(&clean(&meta), meta_budget, theme.glyphs.ellipsis);
+    let meta_width = display_width(&meta);
+    let pad = " ".repeat(
+        line_width
+            .saturating_sub(prefix_width + title_width + meta_width)
+            .max(2),
+    );
     let primary = if selected {
         selection_style(theme)
     } else {
@@ -1400,7 +1431,7 @@ fn search_entry_line(
             },
         ),
         Span::styled(title, primary),
-        Span::styled(format!("{pad}{}", clean(&meta)), secondary),
+        Span::styled(format!("{pad}{meta}"), secondary),
     ])
 }
 
@@ -1762,7 +1793,7 @@ fn draw_album(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         header.push("ARTIST");
     }
     if columns.time {
-        header.push("TIME");
+        header.push(" TIME");
     }
     let table = Table::new(rows, columns.constraints())
         .column_spacing(0)
@@ -2227,48 +2258,124 @@ fn draw_history(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     }
 
     let now = now_ms();
-    let items: Vec<ListItem> = app
-        .plays
-        .iter()
-        .map(|entry| {
-            let marker = match (entry.completed, theme.glyphs.ascii) {
-                (true, false) => "✓",
-                (true, true) => "*",
-                (false, _) => " ",
-            };
-            ListItem::new(Line::from(vec![
-                Span::styled(
-                    format!("{:>8}  ", relative_age(entry.started_at, now)),
-                    Style::new().fg(theme.dim),
-                ),
-                Span::styled(marker, Style::new().fg(theme.accent)),
-                Span::styled(
-                    format!(" {}", sanitize_line(&entry.track.name)),
-                    Style::new().fg(if entry.completed {
-                        theme.text
-                    } else {
-                        theme.muted
-                    }),
-                ),
-                Span::styled(
-                    format!(
-                        " {} {}",
-                        theme.glyphs.separator,
-                        sanitize_line(&entry.track.artist_names())
-                    ),
-                    Style::new().fg(theme.muted),
-                ),
-                Span::styled(
-                    format!("  {}", clock(entry.played_ms)),
-                    Style::new().fg(theme.dim),
-                ),
-            ]))
-        })
-        .collect();
+    let focused = app.focus == Focus::Main;
+    let width = usize::from(content.width);
+    let show_played = width >= 44;
+    let show_artist = width >= 64;
+    let show_kind = width >= 88;
+    let title_width = {
+        let fixed = 2 + 9 + 2 + usize::from(show_played) * 6 + usize::from(show_kind) * 7;
+        let artist = if show_artist { 20 } else { 0 };
+        width.saturating_sub(fixed + artist).max(8)
+    };
 
-    let list = List::new(items).highlight_style(selection_style(theme));
-    let mut state = ListState::default().with_selected(Some(app.plays_selection));
-    frame.render_stateful_widget(list, content, &mut state);
+    let mut widths = vec![
+        Constraint::Length(2),
+        Constraint::Length(9),
+        Constraint::Length(2),
+        Constraint::Length(u16::try_from(title_width).unwrap_or(u16::MAX)),
+    ];
+    if show_artist {
+        widths.push(Constraint::Length(20));
+    }
+    if show_played {
+        widths.push(Constraint::Length(6));
+    }
+    if show_kind {
+        widths.push(Constraint::Length(7));
+    }
+
+    let mut header = vec!["", "      AGE", "", "TITLE"];
+    if show_artist {
+        header.push("ARTIST");
+    }
+    if show_played {
+        header.push("PLAYED");
+    }
+    if show_kind {
+        header.push("KIND");
+    }
+
+    let comfortable = theme.density == Density::Comfortable;
+    let mut rows: Vec<Row> = Vec::with_capacity(app.plays.len() * 2);
+    for (index, entry) in app.plays.iter().enumerate() {
+        let selection = focus_tick(focused, index == app.plays_selection, theme);
+        let check_colour = if entry.completed {
+            theme.accent
+        } else {
+            theme.dim
+        };
+        let title = truncate_to_width(
+            &sanitize_line(&entry.track.name),
+            title_width,
+            theme.glyphs.ellipsis,
+        );
+        let mut cells = vec![
+            Span::styled(selection.0, Style::new().fg(selection.1)),
+            Span::styled(
+                format!("{:>8} ", relative_age(entry.started_at, now)),
+                Style::new().fg(theme.muted),
+            ),
+            Span::styled(
+                if entry.completed {
+                    format!("{} ", theme.glyphs.completed)
+                } else {
+                    "  ".to_owned()
+                },
+                Style::new().fg(check_colour),
+            ),
+            Span::styled(
+                title,
+                Style::new().fg(if entry.completed {
+                    theme.text
+                } else {
+                    theme.muted
+                }),
+            ),
+        ];
+        if show_artist {
+            cells.push(Span::styled(
+                truncate_to_width(
+                    &sanitize_line(&entry.track.artist_names()),
+                    20,
+                    theme.glyphs.ellipsis,
+                ),
+                Style::new().fg(theme.muted),
+            ));
+        }
+        if show_played {
+            cells.push(Span::styled(
+                format!("{:>5} ", entry.played_label()),
+                Style::new().fg(theme.muted),
+            ));
+        }
+        if show_kind {
+            cells.push(Span::styled(
+                format!("{:<6} ", entry.kind.as_str()),
+                Style::new().fg(theme.muted),
+            ));
+        }
+        rows.push(Row::new(cells));
+        if comfortable {
+            rows.push(Row::new(Vec::<Span>::new()));
+        }
+    }
+
+    let table = Table::new(rows, widths)
+        .column_spacing(0)
+        .header(Row::new(header).style(Style::new().fg(theme.panel)))
+        .row_highlight_style(if focused {
+            selection_style(theme)
+        } else {
+            inactive_selection_style(theme)
+        });
+    let visual_selection = if comfortable {
+        app.plays_selection * 2
+    } else {
+        app.plays_selection
+    };
+    let mut state = TableState::default().with_selected(Some(visual_selection));
+    frame.render_stateful_widget(table, content, &mut state);
 }
 
 /// Relative age of a Unix-millisecond timestamp.
@@ -2383,7 +2490,7 @@ fn draw_queue(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         header.push("ARTIST");
     }
     if columns.time {
-        header.push("TIME");
+        header.push(" TIME");
     }
     let table = Table::new(rows, columns.constraints())
         .column_spacing(0)
@@ -3810,6 +3917,39 @@ mod tests {
     }
 
     #[test]
+    fn hud_bottom_row_fits_at_the_two_row_threshold() {
+        let mut app = App::new();
+        app.status.status = lekima_domain::PlaybackStatus::Playing;
+        app.status.track = Some(track("Mota"));
+        app.status.position_ms = 42_000;
+        let rows = render_rows(&mut app, 64, 24, Theme::cyber());
+        assert!(rows[0].contains("LEKIMA"), "{rows:?}");
+        assert!(rows[1].contains("00:42/05:00"), "clock clipped: {rows:?}");
+        if let Some(start) = rows[1].find("VOL") {
+            assert!(
+                rows[1][start..].contains("████░░"),
+                "volume meter clipped: {rows:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn narrow_hud_never_overwrites_the_brand() {
+        let mut app = App::new();
+        app.status.track = Some(track("Mota"));
+        let rows = render_rows(&mut app, 40, 16, Theme::cyber());
+        assert!(rows[0].contains("LEKIMA"), "{rows:?}");
+    }
+
+    #[test]
+    fn shuffle_off_has_no_orphan_glyph() {
+        let mut app = App::new();
+        app.status.track = Some(track("Mota"));
+        let screen = render(&mut app, 100, 24);
+        assert!(!screen.contains('⇄'), "{screen}");
+    }
+
+    #[test]
     fn shuffle_state_does_not_depend_on_colour() {
         let mut app = App::new();
         app.status.track = Some(track("Mota"));
@@ -4014,6 +4154,79 @@ mod tests {
         let shaded = render(&mut app, 100, 24);
         assert!(shaded.contains('┄'), "{shaded}");
         assert!(!shaded.contains('━'), "{shaded}");
+    }
+
+    #[test]
+    fn list_times_are_right_aligned() {
+        let mut app = App::new();
+        app.tracks = vec![
+            lekima_domain::Track {
+                duration_ms: 109_000,
+                ..track("short")
+            },
+            lekima_domain::Track {
+                duration_ms: 632_000,
+                ..track("long")
+            },
+        ];
+        let rows = render_rows(&mut app, 100, 24, Theme::cyber());
+        let short = rows
+            .iter()
+            .find(|row| row.contains("short"))
+            .expect("short row");
+        let long = rows
+            .iter()
+            .find(|row| row.contains("long"))
+            .expect("long row");
+        assert!(short.trim_end().ends_with("1:49"), "{short:?}");
+        assert!(long.trim_end().ends_with("10:32"), "{long:?}");
+        assert_eq!(
+            display_width(short.trim_end()),
+            display_width(long.trim_end()),
+            "durations share a right edge"
+        );
+    }
+
+    #[test]
+    fn history_uses_the_shared_list_grammar() {
+        let mut app = App::new();
+        app.mode = Mode::History;
+        app.plays = vec![play("Teardrop", true), play("Mota", false)];
+        let screen = render(&mut app, 120, 30);
+        for header in ["AGE", "TITLE", "ARTIST", "PLAYED", "KIND"] {
+            assert!(screen.contains(header), "missing {header}: {screen}");
+        }
+        assert!(screen.contains("manual"), "{screen}");
+        assert!(screen.contains('✓'), "{screen}");
+    }
+
+    #[test]
+    fn cjk_titles_do_not_exceed_the_pane() {
+        let mut app = App::new();
+        app.tracks = vec![track(
+            "北欧民谣与电子音乐的漫长标题测试轨道名称这是一段用来验证截断行为的超长文本",
+        )];
+        let rows = render_rows(&mut app, 80, 24, Theme::cyber());
+        for row in &rows {
+            // Wide glyphs occupy two cells; the row holds at most one symbol
+            // per cell, so the character count can never exceed the width.
+            assert!(
+                row.chars().count() <= 80,
+                "row wider than 80 cells: {row:?}"
+            );
+        }
+        let track_row = rows
+            .iter()
+            .find(|row| row.contains("001"))
+            .expect("track row");
+        assert!(
+            track_row.contains('…'),
+            "a long CJK title truncates instead of overflowing: {track_row:?}"
+        );
+        assert!(
+            track_row.contains("5:00"),
+            "the time column survives: {track_row:?}"
+        );
     }
 
     #[test]
