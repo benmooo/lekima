@@ -3905,6 +3905,10 @@ mod tests {
         assert!(screen.contains("quit"));
         assert!(screen.contains("settings / daemon"));
         assert!(screen.contains("history back/forward"));
+        assert!(
+            screen.contains(":playlist"),
+            "the playlist commands must be readable at 80x24"
+        );
     }
 
     #[test]

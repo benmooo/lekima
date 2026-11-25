@@ -1981,9 +1981,9 @@ checksum = "743fb55ba31b18fb1ecef6bdc9aa2743314978ac084044301a7eee33fb99a20d"
 
 [[package]]
 name = "ncmapi"
-version = "1.10.2"
+version = "1.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e30b9685bc9ea409ad072a46d098af0f0493fd623e34326ca13b2feaf3a95714"
+checksum = "c2e7e28ef39a994c0b16295cf9c38b09a27a319d8d83612fff5f479cf443d7db"
 dependencies = [
  "aes",
  "async-trait",

@@ -2338,6 +2338,9 @@ impl App {
                 Action::None
             }
             Err(error) => {
+                // A failed playlist write must not make the next unrelated ack
+                // look like a successful one.
+                self.playlist_sync = false;
                 if self.artist.loading || self.artist.paging {
                     self.artist.loading = false;
                     self.artist.paging = false;
@@ -3561,6 +3564,26 @@ mod history_tests {
             Action::Call(Command::PlaylistDelete { id }) => assert_eq!(id, 7.into()),
             other => panic!("unexpected {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_failed_playlist_write_does_not_poison_the_next_ack() {
+        let mut app = App::new();
+        app.status.track = Some(Track {
+            id: TrackId::from(42_u64),
+            name: "Song".to_owned(),
+            artists: Vec::new(),
+            album: None,
+            duration_ms: 1_000,
+        });
+
+        run(&mut app, "playlist add 7");
+        app.apply(Err(lekima_ipc::IpcError::Remote {
+            code: lekima_ipc::ErrorCode::Backend,
+            message: "rejected".to_owned(),
+        }));
+
+        assert!(matches!(app.apply(Ok(Reply::Ack)), Action::None));
     }
 
     #[test]

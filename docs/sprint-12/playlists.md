@@ -9,7 +9,7 @@ one, rename it, or put a track into it — the only documented way to change a
 playlist is the web player. Agents hit the same wall: MCP exposes
 `queue_playlist`, not `playlist_add`.
 
-## 2. Provider routes (`ncmapi 1.10.1`)
+## 2. Provider routes (`ncmapi 1.10.3`)
 
 All are `WEAPI` POSTs; the transport already appends `csrf_token` from the
 session cookie, so no new signing code is needed. The first attempt used a
@@ -25,14 +25,15 @@ live testing found the real routes:
 | Delete | `POST /api/playlist/remove` | `ids` as a JSON array string | `{ code }` |
 
 A combined `update` route and `playlist/delete` with `id` answer `404 接口未找到`
-and `400 请求参数错误` respectively; ncmapi 1.10.1 carries the fix.
+and `400 请求参数错误` respectively; ncmapi 1.10.1 carries the route fix; 1.10.2 the duplicate/ordering fixes; 1.10.3 narrows the duplicate `502` to its provider message.
 
 - Responses are decoded by the existing `ApiResponse`; a non-200 `code` is a
   provider error, not a transport error.
 - `playlist/create` is the only non-idempotent call: the CLI prints the new id
   and never retries on timeout.
 - Adding an already-present track answers `502 歌单内歌曲重复`; `ncmapi` treats
-  that as success, so adding and retrying are safe. Removing a track that is not
+  that specific response as success, so adding and retrying are safe. Any other
+  `502` still surfaces as a backend error. Removing a track that is not
   there is a provider no-op.
 - Deleting a playlist is idempotent **at the provider**: a missing id still
   answers `200`, so `playlist delete` reports success for an id that is not
@@ -55,8 +56,10 @@ async fn playlist_delete(&self, id: PlaylistId) -> Result<()>;
 `Playlist { id, name, track_count: 0, … }` for create (the provider does not
 return the full page; a later `playlist show` is authoritative).
 
-Errors follow the existing taxonomy: `not_found` for a missing playlist,
-`unauthorized` when the session expired, `backend` otherwise. A missing
+Errors follow the existing taxonomy: `not_found` when the provider says the
+playlist does not exist, `unauthorized` when the session expired, `invalid_input`
+for a rejected name or track, `backend` otherwise. Deleting a missing id is
+provider-idempotent and reports success. A missing
 `playlist/create` id in a 200 response is `backend`, not a panic.
 
 ## 4. IPC, CLI and surfaces

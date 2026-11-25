@@ -340,7 +340,7 @@ lekima queue clear
 lekima search <QUERY> [--kind track|album|artist|playlist] [--limit N] [--json]
 lekima playlist list [--json]
 lekima playlist show <ID> [--json]
-lekima playlist create <NAME> [--private] [--json]
+lekima playlist create <NAME> [--description TEXT] [--private] [--json]
 lekima playlist rename <ID> <NAME>
 lekima playlist describe <ID> <TEXT>
 lekima playlist add <ID> --ids <ID,ID>

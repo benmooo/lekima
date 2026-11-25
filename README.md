@@ -150,7 +150,7 @@ $ lekima login --qr          # opens the web player in Chrome
 $ lekima playlist list
 $ lekima playlist show 3778678 | head
 $ lekima playlist create "Late night" --private
-$ lekima playlist add 18636965436 --ids 424474737
+$ lekima playlist add <PLAYLIST-ID> --ids 424474737
 $ lekima tui
 ```
 
