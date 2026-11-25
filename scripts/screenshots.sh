@@ -16,8 +16,8 @@ cd "$root"
 cargo build -q -p lekima-tui --example preview
 binary="target/debug/examples/preview"
 
-rm -rf "$out"
 mkdir -p "$out"
+find "$out" -name '*.txt' -delete
 
 screens=(hud catalogue queue history comments settings)
 
