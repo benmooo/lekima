@@ -2,11 +2,11 @@ LEKIMA ┃ ▶ Cigarettes and lighters · LoMo                                  
 ━━━━━●────── 00:42/01:49                                     VOL ████░░  [⟲ ALL]
 ────────────────────────────────────────────────────────────────────────────────
 // LIBRARY · 3          │ // ↺ HISTORY · 4
-▌d ☀ DAILY              │         AGE  TITLE                              PLAYED
- F ◉ FM                 │         4m ✓ Teardrop                             5:30
- t ▲ TOPLISTS           │ ▌      22m ✓ Mota                                 6:32
- c ☁ CLOUD              │         3h   Late night                           1:01
- ♥ LIKED                │         2d ✓ Bohemian Rhapsody                    5:55
+▌d ☀ DAILY              │         AGE  TITLE                             PLAYED
+ F ◉ FM                 │         4m ✓ Teardrop                            5:30
+ t ▲ TOPLISTS           │ ▌      22m ✓ Mota                                6:32
+ c ☁ CLOUD              │         3h   Late night                          1:01
+ ♥ LIKED                │         2d ✓ Bohemian Rhapsody                   5:55
                         │
 // ≡ PLAYLISTS · 3      │╔═ + NOTICE ══════════════════════════════════════════╗
  01 Late night       42 │║ ▌ queued 3 tracks                                   ║

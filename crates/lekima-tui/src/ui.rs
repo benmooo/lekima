@@ -2357,7 +2357,7 @@ fn draw_history(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     let show_artist = width >= 64;
     let show_kind = width >= 88;
     let title_width = {
-        let fixed = 2 + 9 + 2 + usize::from(show_played) * 6 + usize::from(show_kind) * 7;
+        let fixed = 2 + 9 + 2 + usize::from(show_played) * 7 + usize::from(show_kind) * 7;
         let artist = if show_artist { 20 } else { 0 };
         width.saturating_sub(fixed + artist).max(8)
     };
@@ -2372,7 +2372,7 @@ fn draw_history(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         widths.push(Constraint::Length(20));
     }
     if show_played {
-        widths.push(Constraint::Length(6));
+        widths.push(Constraint::Length(7));
     }
     if show_kind {
         widths.push(Constraint::Length(7));
@@ -2438,7 +2438,7 @@ fn draw_history(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         }
         if show_played {
             cells.push(Span::styled(
-                format!("{:>6}", entry.played_label()),
+                format!("{:>6} ", entry.played_label()),
                 Style::new().fg(theme.muted),
             ));
         }

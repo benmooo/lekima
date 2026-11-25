@@ -1,11 +1,11 @@
 LEKIMA ┃ ▶ Cigarettes and lighters · LoMo                                           Q25  [⟲ ALL]  VOL ████░░  EXHIGH  SIG ▂▅▇▆▅▇▃▆▆▅▇▆  ━━━━━●────── 00:42/01:49
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 // LIBRARY · 3          │ // ↺ HISTORY · 4                                                                                // ♫ LYRICS · 4 lines  LRC
-▌d ☀ DAILY              │         AGE  TITLE                                             ARTIST              PLAYEDKIND   ──────────────────────────────────────
- F ◉ FM                 │         4m ✓ Teardrop                                          Massive Attack        5:30manual
- t ▲ TOPLISTS           │ ▌      22m ✓ Mota                                              Russian Circles       6:32manual
- c ☁ CLOUD              │         3h   Late night                                        LoMo                  1:01manual
- ♥ LIKED                │         2d ✓ Bohemian Rhapsody                                 Queen                 5:55manual
+▌d ☀ DAILY              │         AGE  TITLE                                            ARTIST              PLAYED KIND   ──────────────────────────────────────
+ F ◉ FM                 │         4m ✓ Teardrop                                         Massive Attack        5:30 manual
+ t ▲ TOPLISTS           │ ▌      22m ✓ Mota                                             Russian Circles       6:32 manual
+ c ☁ CLOUD              │         3h   Late night                                       LoMo                  1:01 manual
+ ♥ LIKED                │         2d ✓ Bohemian Rhapsody                                Queen                 5:55 manual
                         │
 // ≡ PLAYLISTS · 3      │
  01 Late night       42 │

@@ -728,13 +728,14 @@ impl Theme {
     /// Applies a configured animation policy. `LEKIMA_MOTION` wins.
     #[must_use]
     pub fn with_motion(mut self, spec: &str) -> Self {
-        self.motion = std::env::var("LEKIMA_MOTION")
+        let requested = std::env::var("LEKIMA_MOTION")
             .ok()
             .filter(|value| !value.trim().is_empty())
             .map_or_else(
                 || Motion::from_name(spec),
                 |value| Motion::from_name(&value),
             );
+        self.motion = requested.resolve(quiescent_terminal());
         self
     }
 

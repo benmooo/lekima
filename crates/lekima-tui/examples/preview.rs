@@ -220,12 +220,19 @@ fn main() {
 
     if mode == "search" || mode == "results" {
         app.search.query = "mota".to_owned();
-        app.search.applied_filter = lekima_tui::app::SearchFilter::All;
+        let search_filter = match filter.as_str() {
+            "tracks" => lekima_tui::app::SearchFilter::Tracks,
+            "albums" => lekima_tui::app::SearchFilter::Albums,
+            "artists" => lekima_tui::app::SearchFilter::Artists,
+            "playlists" => lekima_tui::app::SearchFilter::Playlists,
+            _ => lekima_tui::app::SearchFilter::All,
+        };
+        app.search.applied_filter = search_filter;
         app.search.loading = true;
         app.view = View::Search;
         app.apply(Ok(Reply::Search {
             query: "mota".to_owned(),
-            kind: lekima_domain::SearchKind::All,
+            kind: search_filter.kind(),
             results: SearchResults {
                 tracks: app.tracks.clone(),
                 albums: vec![
@@ -487,7 +494,10 @@ fn main() {
                 line.push_str(cell.symbol());
                 line.push_str("\u{1b}[0m");
             }
-            println!("{}", line.trim_end());
+            {
+                use std::io::Write as _;
+                let _ = writeln!(std::io::stdout().lock(), "{}", line.trim_end());
+            }
         }
         return;
     }
@@ -495,6 +505,9 @@ fn main() {
         let line: String = (0..width)
             .map(|x| buffer[(x, y)].symbol())
             .collect::<String>();
-        println!("{}", line.trim_end());
+        {
+            use std::io::Write as _;
+            let _ = writeln!(std::io::stdout().lock(), "{}", line.trim_end());
+        }
     }
 }

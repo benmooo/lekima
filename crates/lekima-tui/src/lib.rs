@@ -104,6 +104,7 @@ async fn event_loop(
             }
             frame = events.recv() => {
                 let Some(frame) = frame else { break };
+                let status_only = matches!(frame.event, DaemonEvent::Status { .. });
                 let before = status_fingerprint(app);
                 app.note_event(frame.seq);
                 let reply = match frame.event {
@@ -121,7 +122,10 @@ async fn event_loop(
                     let follow_up = app.apply(Ok(reply));
                     apply_action(follow_up, &socket, &sender, app);
                 }
-                if !theme.motion.is_reduced() || status_fingerprint(app) != before {
+                if !status_only
+                    || !theme.motion.is_reduced()
+                    || status_fingerprint(app) != before
+                {
                     dirty = true;
                 }
             }
@@ -157,13 +161,18 @@ async fn event_loop(
 /// repaint the screen.
 fn status_fingerprint(app: &App) -> String {
     format!(
-        "{:?}|{:?}|{}|{}|{}|{}|{:?}|{}|{}|{:?}|{:?}",
+        "{:?}|{:?}|{}|{}|{:?}|{}|{}|{}|{:?}|{}|{:?}|{:?}|{}|{}|{:?}|{:?}",
         app.status.track.as_ref().map(|track| track.id),
         app.status.status,
         app.status.position_ms / 1000,
         app.status.queue_length,
+        app.status.queue_index,
         (app.status.volume * 100.0) as i32,
         app.status.muted,
+        app.status.liked,
+        app.status.quality,
+        app.status.buffered.len(),
+        app.status.buffered.last().map(|range| range.end_ms),
         app.status.repeat,
         app.status.shuffle,
         app.daemon_down,
