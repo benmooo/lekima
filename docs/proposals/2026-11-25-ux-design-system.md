@@ -3,8 +3,10 @@
 Status: **Accepted; slices 1–6 implemented** · 2026-11-25 · Linear AKA-151, AKA-153
 
 Revision after review: the HUD stays **one row at every width** (the two-row
-mid width is withdrawn); shortcut hints spell keys (`enter`, `Q`, `L`) instead
-of reusing concept glyphs. The token, palette, list, surface and accessibility
+mid width is withdrawn) and keeps the **original left-to-right order** — title,
+rail and clock, volume, queue, modes, optional facts — rather than the
+right-anchored cluster; shortcut hints spell keys (`enter`, `Q`, `L`) instead of
+reusing concept glyphs. The token, palette, list, surface and accessibility
 decisions stand.
 Extends [`2026-11-25-tui-density-and-theme.md`](./2026-11-25-tui-density-and-theme.md)
 and keeps **A1** (`compact` default) and **B1** (freeze twelve palettes, polish

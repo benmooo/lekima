@@ -9,7 +9,7 @@ All notable changes to lekima are documented here. The format follows
 
 - TUI design system v2, end to end: `lekima ui` reports and writes theme,
   glyphs, density, motion and lyric offset; a measurable theme contract with
-  WCAG floors for all twelve palettes; a right-anchored one-row HUD with a title floor; one list grammar across tracks, queue, history and catalogue; unified
+  WCAG floors for all twelve palettes; the HUD's original left-to-right order with the new tokens; one list grammar across tracks, queue, history and catalogue; unified
   empty states and alerts; `LEKIMA_COLOR` downgrade to 256/16/mono; reduced
   motion and idle draw suppression; and text fixtures in `docs/screenshots/`.
 
@@ -18,8 +18,9 @@ All notable changes to lekima are documented here. The format follows
 - `cyber` secondary text and section labels are brighter, `light` warning text
   is darker, and the remaining palettes were retuned where they failed the
   contrast floors.
-- The HUD stays one row at every width: the title keeps a reserved floor and
-  the anchored right cluster gives way before the clock does.
+- The HUD stays one row at every width and keeps the pre-design-system order:
+  title, rail and clock, volume, queue, modes, then the optional facts. Narrow
+  terminals drop the tail first instead of moving the progress bar.
 - Shortcut hints spell keys (`enter`, `space`, `Q`, `L`) instead of showing
   glyphs.
 - Shuffle reads as bracket presence, buffered audio uses `┄`, and mono

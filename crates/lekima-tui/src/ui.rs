@@ -9,7 +9,7 @@ use std::borrow::Cow;
 use lekima_domain::{PlaybackState, PlaybackStatus, RepeatMode, Track, sanitize_line};
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Layout, Rect},
+    layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{
@@ -95,176 +95,6 @@ pub fn draw(frame: &mut Frame, app: &mut App, theme: &Theme) {
     }
 }
 
-fn draw_hud(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
-    let loading = app.status.loading || app.status.buffering;
-    let prefix = hud_prefix(app, theme, loading);
-    let prefix_width = spans_width(&prefix);
-    let queue = hud_queue(app, theme);
-    let queue_width = spans_width(&queue);
-    let duration = app
-        .status
-        .track
-        .as_ref()
-        .map_or(0, |track| effective_duration(&app.status, track));
-
-    // The title keeps a floor and the right cluster is right-anchored.
-    // Optional facts drop in the documented order: SIG, then the sleep
-    // countdown, cache, quality, preview and volume.
-    let mut show_sig =
-        app.status.track.is_some() && area.width >= 104 && !theme.motion.is_reduced();
-    let mut show_cache = app.status.cached;
-    let mut show_quality = app.status.track.is_some();
-    let mut show_preview = app
-        .status
-        .track
-        .as_ref()
-        .is_some_and(|track| is_preview(&app.status, track));
-    let mut show_volume = area.width >= 132 || app.status.muted;
-    let mut show_sleep = app.status.sleep_remaining_ms.is_some();
-    let mut show_modes = true;
-    let rail = progress_group(app, duration, theme);
-    let rail_width = spans_width(&rail);
-
-    loop {
-        let mut right_width = queue_width;
-        if show_sleep {
-            right_width += 2 + 2 + 5;
-        }
-        if show_modes {
-            right_width += 2 + spans_width(&repeat_group(app, theme));
-            right_width += 2 + spans_width(&shuffle_group(app, theme));
-        }
-        if show_volume {
-            right_width += 2 + spans_width(&volume_group(app, theme));
-        }
-        if show_quality {
-            right_width += 2 + 2 + 6;
-        }
-        if show_preview {
-            right_width += 2 + 7;
-        }
-        if show_cache {
-            right_width += 2 + 5;
-        }
-        if show_sig {
-            right_width += 2 + 4 + 2 + HUD_SPECTRUM_BARS;
-        }
-        right_width += 2 + rail_width;
-        let title_floor = prefix_width.saturating_add(20);
-        if right_width + 2 + title_floor <= usize::from(area.width) {
-            break;
-        }
-        if show_sig {
-            show_sig = false;
-        } else if show_sleep {
-            show_sleep = false;
-        } else if show_cache {
-            show_cache = false;
-        } else if show_quality {
-            show_quality = false;
-        } else if show_preview {
-            show_preview = false;
-        } else if show_volume {
-            show_volume = false;
-        } else if show_modes {
-            show_modes = false;
-        } else {
-            break;
-        }
-    }
-
-    let mut right: Vec<Vec<Span<'static>>> = vec![queue];
-    if show_modes {
-        right.push(repeat_group(app, theme));
-        right.push(shuffle_group(app, theme));
-    }
-    if show_volume {
-        right.push(volume_group(app, theme));
-    }
-    if show_quality {
-        right.push(vec![Span::styled(
-            app.status.quality.as_str().to_ascii_uppercase(),
-            Style::new().fg(theme.accent_alt),
-        )]);
-    }
-    if show_preview {
-        right.push(vec![Span::styled(
-            "PREVIEW",
-            Style::new().fg(theme.warn).add_modifier(Modifier::BOLD),
-        )]);
-    }
-    if show_cache {
-        right.push(vec![Span::styled(
-            "CACHE",
-            Style::new()
-                .fg(theme.accent_alt)
-                .add_modifier(Modifier::BOLD),
-        )]);
-    }
-    if show_sig {
-        right.push(spectrum_group(app, theme));
-    }
-    if show_sleep {
-        right.push(vec![
-            Span::styled(
-                format!("{} ", theme.glyphs.sleep),
-                Style::new().fg(theme.dim),
-            ),
-            Span::styled(
-                clock(app.status.sleep_remaining_ms.unwrap_or_default()),
-                Style::new().fg(theme.warn),
-            ),
-        ]);
-    }
-    right.push(rail.clone());
-
-    let right_width = groups_width(&right);
-    let fits = right_width + 2 + prefix_width <= usize::from(area.width);
-    if !fits {
-        // Below the point where the full cluster fits, keep the clock: drop
-        // everything else and let the title use what remains. Clear first so
-        // no earlier, wider line can leave residue behind the shorter one.
-        frame.render_widget(Clear, area);
-        let keep_rail = rail_width + 2 + prefix_width + 8 <= usize::from(area.width);
-        let left_width = if keep_rail {
-            usize::from(area.width).saturating_sub(rail_width + 2)
-        } else {
-            usize::from(area.width)
-        };
-        let mut line = prefix;
-        line.extend(hud_title(
-            app,
-            theme,
-            left_width.saturating_sub(prefix_width),
-        ));
-        frame.render_widget(Paragraph::new(Line::from(line)), area);
-        if keep_rail {
-            frame.render_widget(
-                Paragraph::new(Line::from(rail)).alignment(Alignment::Right),
-                area,
-            );
-        }
-        return;
-    }
-    let left_width = usize::from(area.width).saturating_sub(right_width + 2);
-    let mut line = prefix;
-    line.extend(hud_title(
-        app,
-        theme,
-        left_width.saturating_sub(prefix_width),
-    ));
-    frame.render_widget(Paragraph::new(Line::from(line)), area);
-    let mut tail: Vec<Span<'static>> = Vec::new();
-    for group in right.into_iter().filter(|group| !group.is_empty()) {
-        tail.push(Span::raw("  "));
-        tail.extend(group);
-    }
-    frame.render_widget(
-        Paragraph::new(Line::from(tail)).alignment(Alignment::Right),
-        area,
-    );
-}
-
 /// Spinner frame, frozen on the static loading glyph when motion is reduced.
 fn spinner_glyph(app: &App, theme: &Theme) -> &'static str {
     if theme.motion.is_reduced() {
@@ -274,10 +104,11 @@ fn spinner_glyph(app: &App, theme: &Theme) -> &'static str {
     }
 }
 
-fn hud_prefix(app: &App, theme: &Theme, loading: bool) -> Vec<Span<'static>> {
-    let mut prefix = vec![
+fn draw_hud(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    let loading = app.status.loading || app.status.buffering;
+    let mut prefix: Vec<Span<'static>> = vec![
         Span::styled(
-            "LEKIMA",
+            " LEKIMA ",
             Style::new()
                 .fg(theme.badge_fg)
                 .bg(theme.badge_bg)
@@ -316,45 +147,105 @@ fn hud_prefix(app: &App, theme: &Theme, loading: bool) -> Vec<Span<'static>> {
             Style::new().fg(theme.muted),
         )),
     }
-    prefix
-}
 
-fn hud_queue(app: &App, theme: &Theme) -> Vec<Span<'static>> {
-    vec![
-        Span::styled("Q", Style::new().fg(theme.muted)),
+    let duration = app
+        .status
+        .track
+        .as_ref()
+        .map_or(0, |track| effective_duration(&app.status, track));
+
+    // Optional segments, ordered by priority. The tail is dropped first when
+    // the terminal is narrow; progress and time are the last to go.
+    let mut groups: Vec<Vec<Span<'static>>> = Vec::new();
+    if area.width >= 40 {
+        groups.push(progress_group(app, duration, theme));
+    }
+    groups.push(volume_group(app, theme));
+    groups.push(vec![
+        Span::styled("Q:", Style::new().fg(theme.muted)),
         Span::styled(
             app.status.queue_length.to_string(),
             Style::new().fg(theme.accent_alt),
         ),
-    ]
-}
-
-fn hud_title(app: &App, theme: &Theme, budget: usize) -> Vec<Span<'static>> {
-    if budget == 0 {
-        return Vec::new();
+    ]);
+    groups.push(repeat_group(app, theme));
+    groups.push(shuffle_group(app, theme));
+    if let Some(remaining) = app.status.sleep_remaining_ms {
+        groups.push(vec![
+            Span::styled(
+                format!("{} ", theme.glyphs.sleep),
+                Style::new().fg(theme.dim),
+            ),
+            Span::styled(clock(remaining), Style::new().fg(theme.warn)),
+        ]);
     }
+    if app.status.track.is_some() {
+        groups.push(vec![Span::styled(
+            app.status.quality.as_str().to_ascii_uppercase(),
+            Style::new().fg(theme.accent_alt),
+        )]);
+        if app
+            .status
+            .track
+            .as_ref()
+            .is_some_and(|track| is_preview(&app.status, track))
+        {
+            groups.push(vec![Span::styled(
+                "PREVIEW",
+                Style::new().fg(theme.warn).add_modifier(Modifier::BOLD),
+            )]);
+        }
+        if app.status.cached {
+            groups.push(vec![Span::styled(
+                "CACHE",
+                Style::new()
+                    .fg(theme.accent_alt)
+                    .add_modifier(Modifier::BOLD),
+            )]);
+        }
+        if !theme.motion.is_reduced() {
+            groups.push(spectrum_group(app, theme));
+        }
+    }
+
+    let prefix_width = spans_width(&prefix);
+    let mut identity_budget;
+    loop {
+        let right = groups_width(&groups);
+        identity_budget = (area.width as usize)
+            .saturating_sub(prefix_width)
+            .saturating_sub(right);
+        if identity_budget >= 8 || groups.len() <= 1 {
+            break;
+        }
+        groups.pop();
+    }
+    if identity_budget < 8 {
+        groups.clear();
+        identity_budget = (area.width as usize).saturating_sub(prefix_width);
+    }
+
+    let mut spans = prefix;
     match &app.status.track {
         Some(track) => {
             let title = clean(&track.name);
             let title = title.as_ref();
-            let artist = clean(&track.artist_names()).into_owned();
+            let artist_raw = track.artist_names();
+            let artist = clean(&artist_raw).into_owned();
             let title_width = display_width(title);
             let artist_width = display_width(&artist);
-            let mut spans = Vec::new();
-            if title_width + 3 + artist_width <= budget {
+            if title_width + 3 + artist_width <= identity_budget {
                 spans.push(Span::styled(
                     title.to_owned(),
                     Style::new().fg(theme.text).add_modifier(Modifier::BOLD),
                 ));
-                if !artist.is_empty() {
-                    spans.push(Span::styled(
-                        format!(" {} ", theme.glyphs.separator),
-                        Style::new().fg(theme.dim),
-                    ));
-                    spans.push(Span::styled(artist, Style::new().fg(theme.muted)));
-                }
-            } else if title_width <= budget.saturating_sub(4) {
-                let artist_budget = budget.saturating_sub(title_width + 3);
+                spans.push(Span::styled(
+                    format!(" {} ", theme.glyphs.separator),
+                    Style::new().fg(theme.dim),
+                ));
+                spans.push(Span::styled(artist, Style::new().fg(theme.muted)));
+            } else if title_width <= identity_budget.saturating_sub(4) {
+                let artist_budget = identity_budget.saturating_sub(title_width + 3);
                 spans.push(Span::styled(
                     title.to_owned(),
                     Style::new().fg(theme.text).add_modifier(Modifier::BOLD),
@@ -371,17 +262,23 @@ fn hud_title(app: &App, theme: &Theme, budget: usize) -> Vec<Span<'static>> {
                 }
             } else {
                 spans.push(Span::styled(
-                    truncate_to_width(title, budget, theme.glyphs.ellipsis),
+                    truncate_to_width(title, identity_budget, theme.glyphs.ellipsis),
                     Style::new().fg(theme.text).add_modifier(Modifier::BOLD),
                 ));
             }
-            spans
         }
-        None => vec![Span::styled(
-            truncate_to_width("nothing playing", budget, theme.glyphs.ellipsis),
+        None => spans.push(Span::styled(
+            truncate_to_width("nothing playing", identity_budget, theme.glyphs.ellipsis),
             Style::new().fg(theme.muted),
-        )],
+        )),
     }
+
+    for group in groups {
+        spans.push(Span::styled("  ", Style::new()));
+        spans.extend(group);
+    }
+
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 fn progress_group(app: &App, duration: u64, theme: &Theme) -> Vec<Span<'static>> {
@@ -3800,7 +3697,7 @@ mod tests {
         assert!(screen.contains("Mota"));
         assert!(screen.contains("Russian Circles"));
         assert!(screen.contains("OFF"));
-        assert!(screen.contains("Q0"), "{screen}");
+        assert!(screen.contains("Q:0"), "{screen}");
     }
 
     #[test]
@@ -3989,7 +3886,7 @@ mod tests {
 
         let screen = render(&mut app, 120, 30);
         assert!(screen.contains("00:42/05:00"), "{screen}");
-        assert!(screen.contains("Q0"), "{screen}");
+        assert!(screen.contains("Q:0"), "{screen}");
     }
 
     #[test]

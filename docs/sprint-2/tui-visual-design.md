@@ -126,23 +126,19 @@ Breakpoints:
 
 ### HUD
 
-One row at every width, with a 20-cell title floor. The right side is anchored:
-optional facts are dropped in a fixed order (`SIG` → sleep → `CACHE` → quality →
-`PREVIEW` → volume → mode badges) so the title, counters and clock never slide
-with each other.
+One row, left to right: brand chip (` LEKIMA `), state glyph, bold title,
+`·` artist, then the 12-cell rail with a distinct playhead (`━━━━●──────`) and
+`position/duration`. The rest of the line carries the transport facts in this
+order: `VOL`, queue count (`Q:25`), `[⟲ ALL|1]`, `[⇄]`, sleep countdown, quality
+class, `PREVIEW`, `CACHE`, and the `SIG` spectrum strip. When the terminal is
+narrow the tail is dropped first, so the title, rail and clock survive; the
+title truncates with `…` only when it must. Buffered-but-unplayed rail cells are
+`┄` in `panel`, so they differ from the played `━` even without colour.
+Durations use concise `m:ss`; ASCII mode uses `>` as the playhead with `=`/`-`
+rails and `.` for buffered cells.
 
-**Left** — brand chip (` LEKIMA `), state glyph, bold title, `·`, artist
-(`muted`, truncated first). The title is the first thing shortened.
-
-**Right, flush to the edge** — queue count, `[⟲ ALL|1]`, `[⇄]` (bracket
-presence, not colour, means shuffle is on; off renders nothing), quality class,
-`CACHE`, `PREVIEW`, sleep countdown, `SIG`, then the 12-cell rail with a
-distinct playhead (`━━━━●──────`) and `position/duration`. Buffered-but-unplayed
-cells are `┄` in `panel`, so they differ from the played `━` even without
-colour. `VOL` appears when the width allows and always when muted.
-
-Durations use concise `m:ss`; the clock is never clipped. ASCII mode uses
-`>` as the playhead with `=`/`-` rails and `.` for buffered cells.
+The queue counter sits after the volume meter because it is a transport fact,
+not an identity; it never moves the title or the rail.
 
 ### Library sidebar
 
