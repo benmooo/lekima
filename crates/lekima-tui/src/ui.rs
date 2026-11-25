@@ -3681,7 +3681,8 @@ mod tests {
             &mut app,
             90,
             24,
-            Theme::resolve("cyber", "ascii", "compact"),
+            Theme::resolve_with("cyber", "ascii", "compact", None, false, false)
+                .with_motion("full"),
         );
         assert!(screen.contains("L E K I M A"), "{screen}");
         assert!(screen.contains("NOTHING LOADED"), "{screen}");
@@ -3828,7 +3829,8 @@ mod tests {
             &mut app,
             150,
             30,
-            Theme::resolve("cyber", "ascii", "comfortable"),
+            Theme::resolve_with("cyber", "ascii", "comfortable", None, false, false)
+                .with_motion("full"),
         );
         assert!(screen.contains("SIG"));
         assert!(screen.contains("#"));
@@ -3909,7 +3911,7 @@ mod tests {
     fn shuffle_state_does_not_depend_on_colour() {
         let mut app = App::new();
         app.status.track = Some(track("Mota"));
-        let mono = Theme::resolve("mono", "unicode", "compact");
+        let mono = Theme::resolve_with("mono", "unicode", "compact", None, false, false);
 
         app.status.shuffle = false;
         let off = render_rows(&mut app, 100, 24, mono).join("\n");
@@ -4196,7 +4198,8 @@ mod tests {
 
     #[test]
     fn ascii_mode_never_emits_unicode() {
-        let theme = Theme::resolve("cyber", "ascii", "compact").with_motion("reduced");
+        let theme = Theme::resolve_with("cyber", "ascii", "compact", None, false, false)
+            .with_motion("reduced");
         let cases: [fn(&mut App); 8] = [
             |app| app.mode = Mode::Normal,
             |app| app.mode = Mode::Queue,
@@ -4221,7 +4224,8 @@ mod tests {
 
     #[test]
     fn ascii_mode_handles_populated_catalogue_and_loading() {
-        let theme = Theme::resolve("cyber", "ascii", "compact").with_motion("reduced");
+        let theme = Theme::resolve_with("cyber", "ascii", "compact", None, false, false)
+            .with_motion("reduced");
         let mut app = App::new();
         app.view = View::Search;
         app.search.query = "mota".to_owned();
@@ -4270,7 +4274,7 @@ mod tests {
 
     #[test]
     fn mono_selection_is_really_reversed() {
-        let theme = Theme::resolve("mono", "unicode", "compact");
+        let theme = Theme::resolve_with("mono", "unicode", "compact", None, false, false);
         assert_eq!(theme.selection_bg, ratatui::style::Color::White);
         assert_eq!(theme.selection_fg, ratatui::style::Color::Black);
     }
@@ -4820,7 +4824,8 @@ mod tests {
             &mut app,
             100,
             24,
-            Theme::resolve("cyber", "ascii", "compact"),
+            Theme::resolve_with("cyber", "ascii", "compact", None, false, false)
+                .with_motion("full"),
         );
         let footer = screen[screen.len() - 100..].to_owned();
         for glyph in ["t", "a", "r", "p"] {

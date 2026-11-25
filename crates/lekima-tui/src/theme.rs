@@ -270,9 +270,11 @@ impl ColorMode {
             .to_ascii_lowercase();
         if term.contains("256color") {
             Self::Ansi256
-        } else if term.is_empty() || term == "dumb" {
+        } else if term == "dumb" {
             Self::Mono
         } else {
+            // An unset or unknown TERM says nothing about colour; assume the
+            // palette is displayable rather than silently going monochrome.
             Self::Truecolor
         }
     }
@@ -925,7 +927,7 @@ mod tests {
     #[test]
     fn unknown_theme_names_fall_back_to_cyber() {
         assert_eq!(
-            Theme::resolve("nope", "unicode", "compact").accent,
+            Theme::resolve_with("nope", "unicode", "compact", None, false, false).accent,
             Theme::cyber().accent
         );
     }
@@ -933,18 +935,18 @@ mod tests {
     #[test]
     fn named_themes_and_variants_resolve() {
         assert_eq!(
-            Theme::resolve("amber", "unicode", "compact").accent,
+            Theme::resolve_with("amber", "unicode", "compact", None, false, false).accent,
             Theme::amber().accent
         );
-        assert!(Theme::resolve("mono", "unicode", "compact").is_mono());
+        assert!(Theme::resolve_with("mono", "unicode", "compact", None, false, false).is_mono());
         assert_eq!(
-            Theme::resolve("cyber", "ascii", "comfortable")
+            Theme::resolve_with("cyber", "ascii", "comfortable", None, false, false)
                 .glyphs
                 .active,
             ">"
         );
         assert_eq!(
-            Theme::resolve("cyber", "ascii", "comfortable").density,
+            Theme::resolve_with("cyber", "ascii", "comfortable", None, false, false).density,
             super::Density::Comfortable
         );
     }
@@ -997,7 +999,7 @@ mod tests {
     fn every_canonical_theme_has_a_distinct_accent() {
         let mut accents = std::collections::HashSet::new();
         for name in super::THEMES {
-            let theme = Theme::resolve(name, "unicode", "compact");
+            let theme = Theme::resolve_with(name, "unicode", "compact", None, false, false);
             accents.insert(format!("{:?}", theme.accent));
         }
         assert_eq!(accents.len(), super::THEMES.len());
