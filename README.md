@@ -62,6 +62,13 @@ $ lekima status --json
 
 ## Status
 
+`0.12.0` is the TUI design-system release: `lekima ui` reports and writes theme,
+glyphs, density, motion and lyric offset without a daemon; every palette meets
+the documented contrast floors; the HUD keeps its single-row order while the
+state, list, empty-state and alert surfaces share one visual language;
+`LEKIMA_COLOR` downgrades to 256/16/mono; reduced motion stops idle repainting;
+and `docs/screenshots/` holds 36 reviewable text fixtures.
+
 `0.11.1` makes buffered-range shading honest on variable-bitrate streams: the
 rail now follows the decoder's own byte-to-time curve instead of a constant
 bitrate, so the shaded region matches the bytes that are really on disk.

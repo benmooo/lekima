@@ -2,7 +2,7 @@
 
 > NetEase Cloud Music in your terminal. Vim-first, agent-native.
 
-Status: **Living document** — shipped through 0.11.1 · Owner: @benmooo · Rewrite
+Status: **Living document** — shipped through 0.12.0 · Owner: @benmooo · Rewrite
 of the archived Go project [`benmooo/lekima`](https://github.com/benmooo/lekima)
 
 ---
@@ -159,6 +159,21 @@ and a declared set of commands back on stdout. Hooks stay out of process
 The 0.11.1 patch makes buffered-range shading follow the decoder's own
 byte-to-time curve, so variable-bitrate streams shade the bytes that are really
 local instead of a constant-bitrate guess.
+
+### v0.12 — “design system” (shipped in 0.12.0)
+
+> Proposal and slices:
+> [`proposals/2026-11-25-ux-design-system.md`](proposals/2026-11-25-ux-design-system.md).
+
+One visual contract for every surface: twelve semantic colour roles with WCAG
+floors, five type levels and one spacing scale; `lekima ui` for theme, glyphs,
+density, motion and lyric offset; one list grammar across tracks, queue,
+history and catalogue; unified empty states and alerts; explicit `NO_COLOR`,
+`LEKIMA_COLOR` and reduced-motion behavior; and 36 text fixtures for review.
+
+The HUD keeps its original single-row order (title, rail and clock, volume,
+queue, modes, optional facts) and shortcut hints spell keys instead of reusing
+concept glyphs.
 
 ### Closed candidates
 
@@ -416,6 +431,7 @@ token.
 | **M13 Catalogue depth** (done, 0.9.0/0.9.1) | Album/artist search, artist and album pages, album play/queue, error/search/history hardening | 0.9.1 released |
 | **M14 Daily-driver loop** (done, 0.10.0) | Desktop notifications, durable listening history across CLI/MCP/HTTP/TUI | 0.10.0 released |
 | **M15 Extensions** (done, 0.11.0) | Out-of-process plugin hooks, capability-checked commands, `doctor` reporting, VBR-accurate buffered ranges | 0.11.1 released |
+| **M16 Design system** (done, 0.12.0) | `lekima ui`, measurable theme contract, one list grammar, unified surfaces, colour downgrade, reduced motion, text fixtures | 0.12.0 released |
 
 ## 9. Risks & mitigations
 

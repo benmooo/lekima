@@ -3,15 +3,17 @@
 All notable changes to lekima are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
-## Unreleased
+## 0.12.0 — 2026-11-25
 
 ### Added
 
 - TUI design system v2, end to end: `lekima ui` reports and writes theme,
   glyphs, density, motion and lyric offset; a measurable theme contract with
-  WCAG floors for all twelve palettes; the HUD's original left-to-right order with the new tokens; one list grammar across tracks, queue, history and catalogue; unified
-  empty states and alerts; `LEKIMA_COLOR` downgrade to 256/16/mono; reduced
-  motion and idle draw suppression; and text fixtures in `docs/screenshots/`.
+  WCAG floors for all twelve palettes; the HUD keeps its original left-to-right
+  order with the new tokens; one list grammar across tracks, queue, history and
+  catalogue; unified empty states and alerts; `LEKIMA_COLOR` downgrade to
+  256/16/mono; reduced motion and idle draw suppression; and text fixtures in
+  `docs/screenshots/`.
 
 ### Changed
 

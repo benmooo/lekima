@@ -108,7 +108,7 @@ Rows:
 
 | Row | Height | Contents |
 | --- | --- | --- |
-| HUD | 1 | brand chip, state glyph, title · artist, position/duration, progress, repeat/shuffle, volume meter, queue count |
+| HUD | 1 | brand chip, state glyph, title · artist, progress rail and position/duration, volume meter, queue count, modes, optional facts |
 | rule | 1 | `─` across the width, `dim` |
 | body | rest | sidebar (≥64 cols) + 1-col divider + main pane |
 | footer | 1 | `[MODE]` badge, contextual hints or prompt, transient message |
@@ -129,7 +129,8 @@ Breakpoints:
 One row, left to right: brand chip (` LEKIMA `), state glyph, bold title,
 `·` artist, then the 12-cell rail with a distinct playhead (`━━━━●──────`) and
 `position/duration`. The rest of the line carries the transport facts in this
-order: `VOL`, queue count (`Q:25`), `[⟲ ALL|1]`, `[⇄]`, sleep countdown, quality
+order: `VOL`, queue count (`Q:25`), `[⟲ ALL|1]`, `[⇄]` (rendered only when
+shuffle is on, so bracket presence carries the state), sleep countdown, quality
 class, `PREVIEW`, `CACHE`, and the `SIG` spectrum strip. When the terminal is
 narrow the tail is dropped first, so the title, rail and clock survive; the
 title truncates with `…` only when it must. Buffered-but-unplayed rail cells are
