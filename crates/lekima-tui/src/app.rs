@@ -7,7 +7,8 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use lekima_domain::{
     Album, AlbumDetail, AlbumId, Artist, ArtistDetail, ArtistId, Lyrics, PlaybackState,
-    PlaybackStatus, Playlist, SearchKind, SearchResults, Toplist, Track, TrackId, sanitize_line,
+    PlaybackStatus, Playlist, PlaylistId, SearchKind, SearchResults, Toplist, Track, TrackId,
+    sanitize_line,
 };
 use lekima_ipc::{Command, ErrorCode, IpcError, PlayTarget, Reply};
 
@@ -21,6 +22,7 @@ pub enum Mode {
     Settings,
     Comments,
     History,
+    Playlists,
 }
 
 /// Persisted UI choices.
@@ -346,6 +348,11 @@ pub struct App {
     pub comments_pending_offset: Option<usize>,
     pub lyrics_offset_ms: i64,
     pub playlists: Vec<Playlist>,
+    pub playlists_selection: usize,
+    pub playlists_loading: bool,
+    pub playlists_error: Option<String>,
+    /// Playlist awaiting a `y`/`n` delete confirmation.
+    pub playlist_confirm: Option<PlaylistId>,
     pub queue: Vec<Track>,
     /// Configured hooks, as reported by the daemon at startup.
     pub hooks: Vec<lekima_ipc::HookStatus>,
@@ -421,6 +428,10 @@ impl Default for App {
             comments_pending_offset: None,
             lyrics_offset_ms: 0,
             playlists: Vec::new(),
+            playlists_selection: 0,
+            playlists_loading: false,
+            playlists_error: None,
+            playlist_confirm: None,
             queue: Vec::new(),
             hooks: Vec::new(),
             playlist_sync: false,
@@ -683,6 +694,9 @@ impl App {
         self.sidebar_selection = self
             .sidebar_selection
             .min(self.sidebar_len().saturating_sub(1));
+        self.playlists_selection = self
+            .playlists_selection
+            .min(self.playlists.len().saturating_sub(1));
         self.queue_selection = self.queue_selection.min(self.queue.len().saturating_sub(1));
     }
 
@@ -736,6 +750,7 @@ impl App {
             Mode::Queue => self.handle_queue_key(key),
             Mode::Comments => self.handle_comments_key(key),
             Mode::History => self.handle_history_key(key),
+            Mode::Playlists => self.handle_playlists_key(key),
             Mode::Search | Mode::Command => self.handle_prompt_key(key),
             Mode::Settings => self.handle_settings_key(key),
             Mode::Normal => self.handle_normal_key(key),
@@ -1163,9 +1178,39 @@ impl App {
                 self.playlist_sync = true;
                 Action::Call(Command::PlaylistDelete { id: id.into() })
             }
+            "rename" => {
+                let (id, name) = rest.split_once(' ').unwrap_or((rest, ""));
+                let Ok(id) = id.trim().parse::<u64>() else {
+                    self.notify("usage: :playlist rename <id> <name>", true);
+                    return Action::None;
+                };
+                if name.trim().is_empty() {
+                    self.notify("playlist name cannot be empty", true);
+                    return Action::None;
+                }
+                self.playlist_sync = true;
+                Action::Call(Command::PlaylistUpdate {
+                    id: id.into(),
+                    name: Some(name.trim().to_owned()),
+                    description: None,
+                })
+            }
+            "describe" => {
+                let (id, description) = rest.split_once(' ').unwrap_or((rest, ""));
+                let Ok(id) = id.trim().parse::<u64>() else {
+                    self.notify("usage: :playlist describe <id> <text>", true);
+                    return Action::None;
+                };
+                self.playlist_sync = true;
+                Action::Call(Command::PlaylistUpdate {
+                    id: id.into(),
+                    name: None,
+                    description: Some(description.trim().to_owned()),
+                })
+            }
             _ => {
                 self.notify(
-                    "usage: :playlist create NAME · add ID · delete ID yes",
+                    "usage: :playlist create NAME · rename ID NAME · describe ID TEXT · add ID · delete ID yes",
                     true,
                 );
                 Action::None
@@ -1437,6 +1482,7 @@ impl App {
                 self.queue_selection = self.status.queue_index.unwrap_or(0);
                 Action::Call(Command::Queue)
             }
+            KeyCode::Char('P') => self.open_playlists(),
             KeyCode::Char('F') => Action::Call(Command::Fm {
                 action: lekima_ipc::FmAction::Start,
             }),
@@ -1825,6 +1871,146 @@ impl App {
         self.plays_loading = true;
         self.plays_error = None;
         Action::Call(Command::History { limit: Some(200) })
+    }
+
+    fn open_playlists(&mut self) -> Action {
+        self.mode = Mode::Playlists;
+        self.playlist_confirm = None;
+        self.playlists_loading = true;
+        self.playlists_error = None;
+        self.playlists_selection = self
+            .playlists_selection
+            .min(self.playlists.len().saturating_sub(1));
+        Action::Call(Command::Playlists)
+    }
+
+    /// Opens the command line with a prefix so the pane reuses the editor.
+    fn begin_command(&mut self, text: String) -> Action {
+        self.mode = Mode::Command;
+        self.input = text;
+        self.cursor = self.input.len();
+        self.history_cursor = None;
+        Action::None
+    }
+
+    fn selected_playlist(&self) -> Option<&Playlist> {
+        self.playlists.get(self.playlists_selection)
+    }
+
+    fn open_playlist_selection(&mut self) -> Action {
+        let Some((id, name)) = self
+            .selected_playlist()
+            .map(|playlist| (playlist.id, playlist.name.clone()))
+        else {
+            self.notify("no playlist selected", true);
+            return Action::None;
+        };
+        self.remember();
+        self.source = format!("playlist: {name}");
+        self.mode = Mode::Normal;
+        Action::Call(Command::PlaylistTracks { id })
+    }
+
+    fn add_current_track_to_playlist(&mut self) -> Action {
+        let Some(id) = self.selected_playlist().map(|playlist| playlist.id) else {
+            self.notify("no playlist selected", true);
+            return Action::None;
+        };
+        let Some(track) = self.status.track.as_ref().map(|track| track.id) else {
+            self.notify("nothing playing", true);
+            return Action::None;
+        };
+        self.playlist_sync = true;
+        Action::Call(Command::PlaylistAdd {
+            id,
+            tracks: vec![track],
+        })
+    }
+
+    fn handle_playlists_key(&mut self, key: KeyEvent) -> Action {
+        if let Some(id) = self.playlist_confirm {
+            return match key.code {
+                KeyCode::Char('y' | 'Y') => {
+                    self.playlist_confirm = None;
+                    self.playlist_sync = true;
+                    Action::Call(Command::PlaylistDelete { id })
+                }
+                KeyCode::Esc | KeyCode::Char('n' | 'N') => {
+                    self.playlist_confirm = None;
+                    Action::None
+                }
+                _ => Action::None,
+            };
+        }
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let last = self.playlists.len().saturating_sub(1);
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q' | 'P') => {
+                self.mode = Mode::Normal;
+                Action::None
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.playlists_selection = (self.playlists_selection + 1).min(last);
+                Action::None
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.playlists_selection = self.playlists_selection.saturating_sub(1);
+                Action::None
+            }
+            KeyCode::Char('g') => {
+                self.playlists_selection = 0;
+                Action::None
+            }
+            KeyCode::Char('G') => {
+                self.playlists_selection = last;
+                Action::None
+            }
+            KeyCode::Char('d') if ctrl => {
+                self.playlists_selection = (self.playlists_selection + 10).min(last);
+                Action::None
+            }
+            KeyCode::Char('u') if ctrl => {
+                self.playlists_selection = self.playlists_selection.saturating_sub(10);
+                Action::None
+            }
+            KeyCode::Enter => self.open_playlist_selection(),
+            KeyCode::Char('n') => self.begin_command("playlist create ".to_owned()),
+            KeyCode::Char('R') => match self.selected_playlist() {
+                Some(playlist) => {
+                    let id = playlist.id;
+                    self.begin_command(format!("playlist rename {id} "))
+                }
+                None => {
+                    self.notify("no playlist selected", true);
+                    Action::None
+                }
+            },
+            KeyCode::Char('d') => match self.selected_playlist() {
+                Some(playlist) => {
+                    let id = playlist.id;
+                    self.begin_command(format!("playlist describe {id} "))
+                }
+                None => {
+                    self.notify("no playlist selected", true);
+                    Action::None
+                }
+            },
+            KeyCode::Char('a') => self.add_current_track_to_playlist(),
+            KeyCode::Char('x') => {
+                if let Some(id) = self.selected_playlist().map(|playlist| playlist.id) {
+                    self.playlist_confirm = Some(id);
+                } else {
+                    self.notify("no playlist selected", true);
+                }
+                Action::None
+            }
+            KeyCode::Char('r') => {
+                self.playlists_loading = true;
+                self.playlists_error = None;
+                Action::Call(Command::Playlists)
+            }
+            _ => Action::None,
+        }
     }
 
     fn handle_history_key(&mut self, key: KeyEvent) -> Action {
@@ -2226,6 +2412,11 @@ impl App {
                     }
                     Reply::Playlists { playlists } => {
                         self.playlists = playlists;
+                        self.playlists_loading = false;
+                        self.playlists_error = None;
+                        self.playlists_selection = self
+                            .playlists_selection
+                            .min(self.playlists.len().saturating_sub(1));
                     }
                     Reply::Queue { tracks, index } => {
                         self.queue = tracks;
@@ -2341,6 +2532,10 @@ impl App {
                 // A failed playlist write must not make the next unrelated ack
                 // look like a successful one.
                 self.playlist_sync = false;
+                if self.playlists_loading {
+                    self.playlists_loading = false;
+                    self.playlists_error = Some(error_message(&error));
+                }
                 if self.artist.loading || self.artist.paging {
                     self.artist.loading = false;
                     self.artist.paging = false;
@@ -3651,5 +3846,280 @@ mod history_tests {
             Action::Call(Command::History { .. })
         ));
         assert_eq!(app.mode, Mode::History);
+    }
+
+    fn playlist(id: u64, name: &str) -> lekima_domain::Playlist {
+        lekima_domain::Playlist {
+            id: id.into(),
+            name: name.to_owned(),
+            description: String::new(),
+            track_count: id,
+            cover_url: None,
+            owner: None,
+        }
+    }
+
+    fn three_playlists() -> Vec<lekima_domain::Playlist> {
+        vec![
+            playlist(7, "Late night"),
+            playlist(8, "Focus"),
+            playlist(9, "Daily"),
+        ]
+    }
+
+    #[test]
+    fn p_opens_the_playlist_pane_and_refreshes_it() {
+        let mut app = App::new();
+        let action = app.handle_key(key(KeyCode::Char('P')));
+
+        assert!(matches!(action, Action::Call(Command::Playlists)));
+        assert_eq!(app.mode, Mode::Playlists);
+        assert!(app.playlists_loading);
+        assert!(app.playlists_error.is_none());
+    }
+
+    #[test]
+    fn playlist_navigation_clamps_and_supports_half_pages() {
+        let mut app = App::new();
+        app.mode = Mode::Playlists;
+        app.playlists = three_playlists();
+
+        app.handle_key(key(KeyCode::Char('j')));
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(app.playlists_selection, 2);
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(app.playlists_selection, 2, "clamped at the bottom");
+
+        app.handle_key(key(KeyCode::Char('g')));
+        assert_eq!(app.playlists_selection, 0);
+        app.handle_key(key(KeyCode::Char('G')));
+        assert_eq!(app.playlists_selection, 2);
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+        assert_eq!(app.playlists_selection, 0);
+        app.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL));
+        assert_eq!(app.playlists_selection, 2);
+
+        app.handle_key(key(KeyCode::Char('k')));
+        assert_eq!(app.playlists_selection, 1);
+    }
+
+    #[test]
+    fn enter_opens_the_selected_playlist_and_closes_the_pane() {
+        let mut app = App::new();
+        app.mode = Mode::Playlists;
+        app.playlists = three_playlists();
+        app.playlists_selection = 1;
+
+        match app.handle_key(key(KeyCode::Enter)) {
+            Action::Call(Command::PlaylistTracks { id }) => assert_eq!(id, 8.into()),
+            other => panic!("unexpected {other:?}"),
+        }
+        assert_eq!(app.mode, Mode::Normal);
+        assert_eq!(app.source, "playlist: Focus");
+    }
+
+    #[test]
+    fn playlist_write_prompts_use_the_command_line() {
+        let mut app = App::new();
+        app.mode = Mode::Playlists;
+        app.playlists = three_playlists();
+        app.playlists_selection = 1;
+
+        app.handle_key(key(KeyCode::Char('n')));
+        assert_eq!(app.mode, Mode::Command);
+        assert_eq!(app.input, "playlist create ");
+        assert_eq!(app.cursor, app.input.len());
+
+        app.mode = Mode::Playlists;
+        app.handle_key(key(KeyCode::Char('R')));
+        assert_eq!(app.mode, Mode::Command);
+        assert_eq!(app.input, "playlist rename 8 ");
+
+        app.mode = Mode::Playlists;
+        app.handle_key(key(KeyCode::Char('d')));
+        assert_eq!(app.mode, Mode::Command);
+        assert_eq!(app.input, "playlist describe 8 ");
+    }
+
+    #[test]
+    fn rename_and_describe_submit_playlist_updates() {
+        let mut app = App::new();
+
+        match run(&mut app, "playlist rename 8 Focus 2") {
+            Action::Call(Command::PlaylistUpdate {
+                id,
+                name,
+                description,
+            }) => {
+                assert_eq!(id, 8.into());
+                assert_eq!(name.as_deref(), Some("Focus 2"));
+                assert!(description.is_none());
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        assert!(app.playlist_sync);
+
+        app.playlist_sync = false;
+        match run(&mut app, "playlist describe 8 quiet hours") {
+            Action::Call(Command::PlaylistUpdate {
+                id,
+                name,
+                description,
+            }) => {
+                assert_eq!(id, 8.into());
+                assert!(name.is_none());
+                assert_eq!(description.as_deref(), Some("quiet hours"));
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        assert!(app.playlist_sync);
+
+        // An empty name is rejected before it reaches the daemon.
+        assert!(matches!(run(&mut app, "playlist rename 8 "), Action::None));
+    }
+
+    #[test]
+    fn a_adds_the_current_track_to_the_selected_playlist() {
+        let mut app = App::new();
+        app.mode = Mode::Playlists;
+        app.playlists = three_playlists();
+        app.playlists_selection = 1;
+        app.status.track = Some(Track {
+            id: TrackId::from(42_u64),
+            name: "Song".to_owned(),
+            artists: Vec::new(),
+            album: None,
+            duration_ms: 1_000,
+        });
+
+        match app.handle_key(key(KeyCode::Char('a'))) {
+            Action::Call(Command::PlaylistAdd { id, tracks }) => {
+                assert_eq!(id, 8.into());
+                assert_eq!(tracks, vec![TrackId::from(42_u64)]);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        assert!(app.playlist_sync);
+
+        app.playlist_sync = false;
+        app.status.track = None;
+        assert!(matches!(
+            app.handle_key(key(KeyCode::Char('a'))),
+            Action::None
+        ));
+        assert!(!app.playlist_sync, "nothing playing must not write");
+    }
+
+    #[test]
+    fn delete_requires_a_confirmation_key() {
+        let mut app = App::new();
+        app.mode = Mode::Playlists;
+        app.playlists = three_playlists();
+        app.playlists_selection = 1;
+
+        assert!(matches!(
+            app.handle_key(key(KeyCode::Char('x'))),
+            Action::None
+        ));
+        assert_eq!(app.playlist_confirm, Some(8.into()));
+        assert!(!app.playlist_sync, "x alone must not write");
+
+        // A stray key keeps the confirmation open and writes nothing.
+        assert!(matches!(
+            app.handle_key(key(KeyCode::Char('j'))),
+            Action::None
+        ));
+        assert_eq!(app.playlist_confirm, Some(8.into()));
+
+        app.handle_key(key(KeyCode::Char('n')));
+        assert!(app.playlist_confirm.is_none());
+        assert!(!app.playlist_sync);
+
+        app.handle_key(key(KeyCode::Char('x')));
+        match app.handle_key(key(KeyCode::Char('y'))) {
+            Action::Call(Command::PlaylistDelete { id }) => assert_eq!(id, 8.into()),
+            other => panic!("unexpected {other:?}"),
+        }
+        assert!(app.playlist_sync);
+        assert!(app.playlist_confirm.is_none());
+    }
+
+    #[test]
+    fn a_failed_playlist_write_does_not_refresh_the_pane() {
+        let mut app = App::new();
+        app.mode = Mode::Playlists;
+        app.playlists = three_playlists();
+
+        app.handle_key(key(KeyCode::Char('x')));
+        app.handle_key(key(KeyCode::Char('y')));
+        assert!(app.playlist_sync);
+
+        let action = app.apply(Err(lekima_ipc::IpcError::Remote {
+            code: lekima_ipc::ErrorCode::Backend,
+            message: "rejected".to_owned(),
+        }));
+        assert!(matches!(action, Action::None));
+        assert!(!app.playlist_sync);
+        assert_eq!(app.mode, Mode::Playlists);
+        assert!(app.message.as_ref().is_some_and(|message| message.error));
+
+        // The next unrelated ack cannot look like this write's success.
+        assert!(matches!(app.apply(Ok(Reply::Ack)), Action::None));
+    }
+
+    #[test]
+    fn a_successful_playlist_write_refreshes_the_pane() {
+        let mut app = App::new();
+        app.mode = Mode::Playlists;
+        app.playlists = three_playlists();
+        app.playlists_selection = 1;
+        app.status.track = Some(Track {
+            id: TrackId::from(42_u64),
+            name: "Song".to_owned(),
+            artists: Vec::new(),
+            album: None,
+            duration_ms: 1_000,
+        });
+
+        app.handle_key(key(KeyCode::Char('a')));
+        assert!(matches!(
+            app.apply(Ok(Reply::Ack)),
+            Action::Call(Command::Playlists)
+        ));
+        assert_eq!(app.mode, Mode::Playlists);
+        assert_eq!(app.playlists[1].name, "Focus");
+    }
+
+    #[test]
+    fn r_refreshes_the_playlist_pane() {
+        let mut app = App::new();
+        app.mode = Mode::Playlists;
+        app.playlists = three_playlists();
+        app.playlists_loading = false;
+
+        assert!(matches!(
+            app.handle_key(key(KeyCode::Char('r'))),
+            Action::Call(Command::Playlists)
+        ));
+        assert_eq!(app.mode, Mode::Playlists);
+        assert!(app.playlists_loading);
+    }
+
+    #[test]
+    fn a_failed_playlist_list_shows_an_inline_error_with_a_retry() {
+        let mut app = App::new();
+        app.handle_key(key(KeyCode::Char('P')));
+        app.apply(Err(lekima_ipc::IpcError::Remote {
+            code: lekima_ipc::ErrorCode::Daemon,
+            message: "boom".to_owned(),
+        }));
+
+        assert!(!app.playlists_loading);
+        assert_eq!(app.playlists_error.as_deref(), Some("daemon error: boom"));
+
+        app.handle_key(key(KeyCode::Char('r')));
+        assert!(app.playlists_loading);
+        assert!(app.playlists_error.is_none());
     }
 }

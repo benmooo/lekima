@@ -100,35 +100,34 @@ pub const PLAY: &[Binding] = &[
 
 pub const QUEUE: &[Binding] = &[
     Binding {
-        key: "j / k",
-        description: "nav (transport keys)",
+        key: "j / k / J / K",
+        description: "nav / move entry",
     },
     Binding {
-        key: "x",
-        description: "remove (confirm)",
+        key: "x / enter / esc",
+        description: "remove jump close",
+    },
+];
+
+pub const PLAYLISTS: &[Binding] = &[
+    Binding {
+        key: "P",
+        description: "playlist pane",
     },
     Binding {
-        key: "J / K",
-        description: "move entry down / up",
+        key: "n/R/d/a",
+        description: "new rename desc add",
     },
     Binding {
-        key: "enter",
-        description: "jump to entry",
-    },
-    Binding {
-        key: "esc",
-        description: "close the queue",
+        key: "enter/x/r",
+        description: "open delete refresh",
     },
 ];
 
 pub const DISCOVER: &[Binding] = &[
     Binding {
-        key: "d",
-        description: "daily mix",
-    },
-    Binding {
-        key: "F",
-        description: "personal FM",
+        key: "d / F",
+        description: "daily / FM",
     },
     Binding {
         key: "t",
@@ -158,8 +157,8 @@ pub const APP: &[Binding] = &[
         description: "cmdline :playlist",
     },
     Binding {
-        key: "Q / c-w 3",
-        description: "queue",
+        key: "Q / P / c-w 3",
+        description: "queue / playlists",
     },
     Binding {
         key: "S / R",
@@ -195,6 +194,11 @@ pub const SECTIONS: &[Section] = &[
         title: "QUEUE",
         column: 1,
         bindings: QUEUE,
+    },
+    Section {
+        title: "PLAYLISTS",
+        column: 1,
+        bindings: PLAYLISTS,
     },
     Section {
         title: "DISCOVER",

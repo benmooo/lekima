@@ -596,6 +596,7 @@ fn draw_main(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         (Mode::Queue, _) => draw_queue(frame, app, theme, inner),
         (Mode::Comments, _) => draw_comments(frame, app, theme, inner),
         (Mode::History, _) => draw_history(frame, app, theme, inner),
+        (Mode::Playlists, _) => draw_playlists(frame, app, theme, inner),
         (_, View::Toplists) => draw_toplists(frame, app, theme, inner),
         (_, View::Search) => draw_search(frame, app, theme, inner),
         (_, View::Artist) => draw_artist(frame, app, theme, inner),
@@ -2330,6 +2331,176 @@ fn draw_history(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     frame.render_stateful_widget(table, content, &mut state);
 }
 
+fn draw_playlists(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
+    let [label, content] =
+        Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(area);
+
+    let total = app.playlists.len();
+    let visible = usize::from(content.height.saturating_sub(1));
+    let position = if total > visible && total > 0 {
+        format!(
+            " {} {}/{}",
+            theme.glyphs.separator,
+            app.playlists_selection.saturating_add(1).min(total),
+            total
+        )
+    } else {
+        String::new()
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("// ", Style::new().fg(theme.panel)),
+            Span::styled(
+                format!("{} PLAYLISTS", theme.glyphs.playlists),
+                Style::new().fg(theme.muted),
+            ),
+            Span::styled(
+                format!(" {} {}{}", theme.glyphs.separator, total, position),
+                Style::new().fg(theme.accent_alt),
+            ),
+            Span::styled(
+                format!(" {}", theme.glyphs.active),
+                Style::new().fg(theme.accent),
+            ),
+        ])),
+        label,
+    );
+
+    if total == 0 {
+        if let Some(error) = &app.playlists_error {
+            let width = usize::from(content.width).saturating_sub(1).max(1);
+            let mut lines = vec![Line::from(vec![
+                Span::styled(
+                    "! ",
+                    Style::new().fg(theme.hot).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "PLAYLISTS UNAVAILABLE",
+                    Style::new().fg(theme.hot).add_modifier(Modifier::BOLD),
+                ),
+            ])];
+            for chunk in wrap_to_width(&sanitize_line(error), width) {
+                lines.push(Line::from(vec![
+                    Span::styled("  ", Style::new()),
+                    Span::styled(chunk, Style::new().fg(theme.text)),
+                ]));
+            }
+            lines.push(Line::from(vec![
+                Span::styled("  r ", Style::new().fg(theme.accent)),
+                Span::styled("retry", Style::new().fg(theme.dim)),
+                Span::styled("   P ", Style::new().fg(theme.accent)),
+                Span::styled("close", Style::new().fg(theme.dim)),
+            ]));
+            frame.render_widget(Paragraph::new(Text::from(lines)), content);
+            return;
+        }
+        if app.playlists_loading {
+            let spinner = spinner_glyph(app, theme);
+            frame.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::styled(format!("{spinner} "), Style::new().fg(theme.accent)),
+                    Span::styled(
+                        "LOADING PLAYLISTS",
+                        Style::new().fg(theme.muted).add_modifier(Modifier::BOLD),
+                    ),
+                ])),
+                content,
+            );
+            return;
+        }
+        frame.render_widget(
+            Paragraph::new(Text::from(empty_lines(
+                "PLAYLISTS",
+                "no playlists yet",
+                &[("n", "create one"), ("P", "close")],
+                theme,
+            ))),
+            content,
+        );
+        return;
+    }
+
+    let width = usize::from(content.width).max(1);
+    let show_description = width >= 94;
+    let index_width = total.to_string().len().max(3);
+    let count_width = 6usize;
+    let description_width = 24usize;
+    let fixed =
+        1 + index_width + 1 + count_width + usize::from(show_description) * description_width;
+    let name_width = width.saturating_sub(fixed).max(8);
+
+    let mut widths = vec![
+        Constraint::Length(1),
+        Constraint::Length(u16::try_from(index_width + 1).unwrap_or(u16::MAX)),
+        Constraint::Length(u16::try_from(name_width).unwrap_or(u16::MAX)),
+    ];
+    if show_description {
+        widths.push(Constraint::Length(
+            u16::try_from(description_width).unwrap_or(u16::MAX),
+        ));
+    }
+    widths.push(Constraint::Length(
+        u16::try_from(count_width).unwrap_or(u16::MAX),
+    ));
+
+    let mut header = vec!["", "#", "NAME"];
+    if show_description {
+        header.push("DESCRIPTION");
+    }
+    header.push("TRACKS");
+
+    let comfortable = theme.density == Density::Comfortable;
+    let mut rows: Vec<Row> = Vec::with_capacity(app.playlists.len() * 2);
+    for (index, playlist) in app.playlists.iter().enumerate() {
+        let selection = focus_tick(true, index == app.playlists_selection, theme);
+        let mut cells = vec![
+            Span::styled(selection.0, Style::new().fg(selection.1)),
+            Span::styled(
+                format!("{:0width$} ", index + 1, width = index_width),
+                Style::new().fg(theme.muted),
+            ),
+            Span::styled(
+                truncate_to_width(
+                    &clean(&playlist.name),
+                    name_width.saturating_sub(1),
+                    theme.glyphs.ellipsis,
+                ),
+                Style::new().fg(theme.text),
+            ),
+        ];
+        if show_description {
+            cells.push(Span::styled(
+                truncate_to_width(
+                    &clean(&playlist.description),
+                    description_width.saturating_sub(1),
+                    theme.glyphs.ellipsis,
+                ),
+                Style::new().fg(theme.muted),
+            ));
+        }
+        cells.push(Span::styled(
+            format!("{:>count_width$}", compact_count(playlist.track_count)),
+            Style::new().fg(theme.muted),
+        ));
+        rows.push(Row::new(cells));
+        if comfortable {
+            rows.push(Row::new(Vec::<Span>::new()));
+        }
+    }
+
+    let table = Table::new(rows, widths)
+        .column_spacing(0)
+        .header(Row::new(header).style(Style::new().fg(theme.panel)))
+        .row_highlight_style(selection_style(theme));
+    let visual_selection = if comfortable {
+        app.playlists_selection * 2
+    } else {
+        app.playlists_selection
+    };
+    let mut state = TableState::default().with_selected(Some(visual_selection));
+    frame.render_stateful_widget(table, content, &mut state);
+}
+
 /// Relative age of a Unix-millisecond timestamp.
 fn relative_age(started_at_ms: i64, now_ms: i64) -> String {
     let elapsed = now_ms.saturating_sub(started_at_ms);
@@ -2877,6 +3048,7 @@ fn draw_footer(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                 theme.glyphs.separator
             ),
         ),
+        Mode::Playlists => ("PLAYLISTS", playlist_hints(theme, area.width)),
         Mode::Settings => (
             "UI",
             format!(
@@ -2926,6 +3098,18 @@ fn draw_footer(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     {
         spans.push(Span::styled(
             format!("remove {:03}? [y/N]", index + 1),
+            Style::new().fg(theme.warn).add_modifier(Modifier::BOLD),
+        ));
+    } else if app.mode == Mode::Playlists
+        && let Some(id) = app.playlist_confirm
+    {
+        let name = app
+            .playlists
+            .iter()
+            .find(|playlist| playlist.id == id)
+            .map_or_else(String::new, |playlist| clean(&playlist.name).into_owned());
+        spans.push(Span::styled(
+            format!("delete \"{name}\"? [y/N]"),
             Style::new().fg(theme.warn).add_modifier(Modifier::BOLD),
         ));
     } else {
@@ -2993,16 +3177,16 @@ fn normal_hints(app: &App, theme: &Theme, width: u16) -> String {
     }
     if width >= 108 {
         format!(
-            "j/k {sep} {enter} play {sep} space {sep} {q} queue {sep} S theme {sep} / search {sep} : cmd {sep} ctrl-o/i hist {sep} ? keys"
+            "j/k {sep} {enter} play {sep} space {sep} {q} queue {sep} P playlists {sep} S theme {sep} / search {sep} : cmd {sep} ctrl-o/i hist {sep} ? keys"
         )
     } else if width >= 80 {
-        format!("j/k {sep} {enter} play {sep} space {sep} / search {sep} {q} queue {sep} ? keys")
+        format!("j/k {sep} {enter} play {sep} space {sep} / search {sep} {q} queue {sep} P lists")
     } else if width >= 52 {
-        format!("j/k {sep} {enter} {sep} / {sep} {q} {sep} ?")
+        format!("j/k {sep} {enter} {sep} / {sep} {q} {sep} P {sep} ?")
     } else if app.pending_count.is_some() {
         "digits, then j/k or G".to_owned()
     } else {
-        format!("j/k {sep} / {sep} ?")
+        format!("j/k {sep} / {sep} P {sep} ?")
     }
 }
 
@@ -3017,6 +3201,22 @@ fn queue_hints(theme: &Theme, width: u16) -> String {
         format!("j/k nav {sep} space pause {sep} n/p {sep} x remove {sep} {enter} jump {sep} esc")
     } else {
         format!("j/k {sep} space {sep} x remove {sep} esc")
+    }
+}
+
+fn playlist_hints(theme: &Theme, width: u16) -> String {
+    let enter = "enter";
+    let sep = theme.glyphs.separator;
+    if width >= 104 {
+        format!(
+            "j/k nav {sep} {enter} open {sep} n new {sep} R rename {sep} d describe {sep} a add {sep} x delete {sep} r refresh {sep} esc close"
+        )
+    } else if width >= 64 {
+        format!(
+            "j/k {sep} {enter} open {sep} n new {sep} R rename {sep} x delete {sep} r refresh {sep} esc"
+        )
+    } else {
+        format!("j/k {sep} {enter} {sep} n new {sep} x delete {sep} esc")
     }
 }
 
@@ -3909,6 +4109,14 @@ mod tests {
             screen.contains(":playlist"),
             "the playlist commands must be readable at 80x24"
         );
+        assert!(
+            screen.contains("playlist pane"),
+            "the P binding must fit at 80x24"
+        );
+        assert!(
+            screen.contains("open delete refresh"),
+            "the pane keys must fit at 80x24"
+        );
     }
 
     #[test]
@@ -4072,6 +4280,97 @@ mod tests {
         app.queue_confirm = Some(0);
         let screen = render(&mut app, 100, 30);
         assert!(screen.contains("remove 001? [y/N]"));
+    }
+
+    fn playlist(id: u64, name: &str, count: u64, description: &str) -> lekima_domain::Playlist {
+        lekima_domain::Playlist {
+            id: id.into(),
+            name: name.to_owned(),
+            description: description.to_owned(),
+            track_count: count,
+            cover_url: None,
+            owner: None,
+        }
+    }
+
+    fn playlist_pane() -> App {
+        let mut app = App::new();
+        app.mode = Mode::Playlists;
+        app.playlists = vec![
+            playlist(10, "Late night", 42, "after 22:00"),
+            playlist(11, "Focus", 18, "deep work"),
+            playlist(12, "Daily", 28, "morning"),
+        ];
+        app.playlists_selection = 1;
+        app
+    }
+
+    #[test]
+    fn playlist_pane_renders_rows_and_counts_at_120() {
+        let mut app = playlist_pane();
+        let screen = render(&mut app, 120, 30);
+
+        assert!(screen.contains("PLAYLISTS"), "{screen}");
+        assert!(screen.contains("Late night"), "{screen}");
+        assert!(screen.contains("Focus"), "{screen}");
+        assert!(screen.contains("deep work"), "description at 120: {screen}");
+        assert!(screen.contains("TRACKS"), "{screen}");
+        assert!(screen.contains("002"), "{screen}");
+        assert!(screen.contains("42"), "{screen}");
+    }
+
+    #[test]
+    fn playlist_pane_drops_the_description_at_80() {
+        let mut app = playlist_pane();
+        let screen = render(&mut app, 80, 24);
+
+        assert!(screen.contains("PLAYLISTS"), "{screen}");
+        assert!(screen.contains("002"), "{screen}");
+        assert!(screen.contains("Focus"), "{screen}");
+        assert!(screen.contains("18"), "{screen}");
+        assert!(
+            !screen.contains("deep work"),
+            "the description column is dropped: {screen}"
+        );
+        assert!(screen.contains("R rename"), "footer hints: {screen}");
+    }
+
+    #[test]
+    fn playlist_pane_empty_and_error_states_are_actionable() {
+        let mut app = App::new();
+        app.mode = Mode::Playlists;
+        let empty = render(&mut app, 80, 24);
+        assert!(empty.contains("no playlists yet"), "{empty}");
+        assert!(empty.contains("create one"), "{empty}");
+
+        app.playlists_error = Some("unauthorized: session expired".to_owned());
+        let error = render(&mut app, 80, 24);
+        assert!(error.contains("PLAYLISTS UNAVAILABLE"), "{error}");
+        assert!(error.contains("session expired"), "{error}");
+        assert!(error.contains("retry"), "{error}");
+    }
+
+    #[test]
+    fn playlist_delete_confirmation_names_the_playlist() {
+        let mut app = playlist_pane();
+        app.playlist_confirm = Some(11.into());
+        let screen = render(&mut app, 80, 24);
+
+        assert!(screen.contains("delete \"Focus\"? [y/N]"), "{screen}");
+    }
+
+    #[test]
+    fn playlist_pane_has_an_ascii_twin() {
+        let mut app = playlist_pane();
+        let theme = Theme::resolve_with("cyber", "ascii", "compact", None, false, false);
+        let screen = render_with(&mut app, 100, 30, theme);
+
+        assert!(screen.is_ascii(), "non-ASCII: {screen}");
+        assert!(screen.contains("p PLAYLISTS"), "{screen}");
+        assert!(screen.contains("PLAYLISTS"), "{screen}");
+        assert!(!screen.contains('▌'), "{screen}");
+        assert!(!screen.contains('≡'), "{screen}");
+        assert!(!screen.contains('·'), "{screen}");
     }
 
     #[test]

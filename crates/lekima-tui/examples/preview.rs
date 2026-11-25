@@ -71,7 +71,7 @@ fn main() {
         Playlist {
             id: 10.into(),
             name: "Late night".to_owned(),
-            description: String::new(),
+            description: "after 22:00".to_owned(),
             track_count: 42,
             cover_url: None,
             owner: None,
@@ -79,7 +79,7 @@ fn main() {
         Playlist {
             id: 11.into(),
             name: "Focus".to_owned(),
-            description: String::new(),
+            description: "deep work".to_owned(),
             track_count: 18,
             cover_url: None,
             owner: None,
@@ -87,7 +87,7 @@ fn main() {
         Playlist {
             id: 12.into(),
             name: "Daily".to_owned(),
-            description: String::new(),
+            description: "morning".to_owned(),
             track_count: 28,
             cover_url: None,
             owner: None,
@@ -152,7 +152,7 @@ fn main() {
                 println!(
                     "usage: preview [--width N] [--height N] [--theme NAME] \
                      [--glyphs unicode|ascii] [--density compact|comfortable] \
-                     [--screen|--mode normal|queue|help|settings|comments|history|search|results|artist|album] \
+                     [--screen|--mode normal|queue|help|settings|comments|history|playlists|search|results|artist|album] \
                      [--color truecolor|256|16|mono] [--motion auto|full|reduced] [--ansi] \
                      [--filter all|tracks|albums|artists|playlists] [--long-title] \
                      [--buffered] [--empty] [--no-lyrics] [--toast-error]"
@@ -409,6 +409,33 @@ fn main() {
         "help" => lekima_tui::app::Mode::Help,
         "comments" => lekima_tui::app::Mode::Comments,
         "history" => lekima_tui::app::Mode::History,
+        "playlists" => {
+            app.lyrics_open = false;
+            app.message = None;
+            app.playlists_selection = 1;
+            lekima_tui::app::Mode::Playlists
+        }
+        "playlists-empty" => {
+            app.lyrics_open = false;
+            app.message = None;
+            app.playlists.clear();
+            lekima_tui::app::Mode::Playlists
+        }
+        "playlists-confirm" => {
+            app.lyrics_open = false;
+            app.message = None;
+            app.playlists_selection = 1;
+            app.playlist_confirm = Some(11.into());
+            lekima_tui::app::Mode::Playlists
+        }
+        "playlists-error" => {
+            app.lyrics_open = false;
+            app.message = None;
+            app.playlists.clear();
+            app.playlists_loading = false;
+            app.playlists_error = Some("unauthorized: session expired".to_owned());
+            lekima_tui::app::Mode::Playlists
+        }
         "search" => {
             app.input = "mota".to_owned();
             app.cursor = app.input.len();
