@@ -20,8 +20,8 @@ All notable changes to lekima are documented here. The format follows
   is darker, and the remaining palettes were retuned where they failed the
   contrast floors.
 - The HUD is two rows at 64–95 columns so the title keeps a 20-cell floor.
-- Shuffle reads as bracket presence, buffered audio uses `┄`, and `fakir`
-  (mono) selection is reverse video.
+- Shuffle reads as bracket presence, buffered audio uses `┄`, and mono
+  selection is reverse video.
 
 ### Fixed
 
