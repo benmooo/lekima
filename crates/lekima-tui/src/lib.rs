@@ -165,15 +165,40 @@ async fn event_loop(
 /// Reduced motion compares fingerprints so an unchanged status poll does not
 /// repaint the screen.
 fn status_fingerprint(app: &App) -> String {
-    // The debug form is stable enough for a 4 Hz comparison and covers every
-    // field a status frame can change, including the full buffered ranges.
-    format!(
-        "{:?}|{}|{:?}|{:?}",
-        app.status,
+    // Only fields that affect a rendered cell. Volatile but invisible data
+    // (`wave`, `revision`, `generation`) must not force a repaint.
+    let playback = (
+        app.status.track.as_ref().map(|track| {
+            (
+                track.id,
+                track.name.clone(),
+                track.artist_names(),
+                track.duration_ms,
+            )
+        }),
+        app.status.status,
+        app.status.position_ms / 1000,
+        app.status.queue_length,
+        app.status.queue_index,
+        (app.status.volume * 100.0) as i32,
+        app.status.muted,
+        app.status.liked,
+        app.status.quality,
+    );
+    let surfaces = (
+        &app.status.buffered,
+        app.status.repeat,
+        app.status.shuffle,
+        app.status.loading,
+        app.status.buffering,
+        app.status.cached,
+        app.status.sleep_remaining_ms,
         app.daemon_down,
-        app.message.as_ref().map(|message| message.created),
-        app.message.as_ref().map(|message| message.error),
-    )
+        app.message
+            .as_ref()
+            .map(|message| (message.created, message.error)),
+    );
+    format!("{playback:?}|{surfaces:?}")
 }
 
 /// Returns `true` when the TUI should exit.
