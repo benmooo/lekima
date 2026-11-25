@@ -113,18 +113,26 @@ Breakpoints:
 
 ### HUD
 
-One row, ordered by importance. Everything after the spectrum may clip on narrow
-terminals; the title is clipped first only when the terminal is very small.
+One row at `≥96` columns and below `64`; two rows at `64–95`, where a single row
+would leave the title fewer than 20 cells. The right side is anchored: optional
+facts are dropped in a fixed order (`SIG` → sleep → `CACHE` → quality → shuffle
+label → volume) so counters and the clock never slide with the title.
 
-- Brand chip (` LEKIMA `), state glyph, bold title, artist.
-- A 12-cell progress rail with a distinct playhead (`━━━━●──────`), followed by
-  `position/duration`. Locally buffered cells use the `panel` colour so a
-  streamed track shows what is available before it is played.
-- Mode badges: `[⟲ OFF|ALL|1]` (dim / cyan / accent) and `[⇄]` (hot when on,
-  dim when off). Playhead `●`; ASCII mode uses `>` with `=`/`-` rails.
-- `VOL` meter, queue count, quality class (`EXHIGH`), a `PREVIEW` badge when
-  the decoded stream is shorter than the catalogue duration, sleep countdown,
-  then a compact 12-column spectrum strip (`SIG`).
+**Row 1** — brand chip (` LEKIMA `), state glyph, bold title, `·`, artist
+(`muted`, truncated first), queue count `Q25` flush right.
+
+**Row 2** (mid widths) — a 12-cell rail with a distinct playhead
+(`━━━━●──────`), `position/duration`, then `VOL` and the mode badges flush
+right. Buffered-but-unplayed cells are `┄` in `panel`, so they differ from the
+played `━` even without colour.
+
+**Wide row** — after the title: queue count, `[⟲ ALL|1]`, `[⇄]` (bracket
+presence, not colour, means shuffle is on), quality class, `CACHE`, `PREVIEW`,
+sleep countdown, `SIG`, rail and clock. Volume appears on the mid-width row and
+whenever the output is muted.
+
+Durations use concise `m:ss`; the clock is never clipped. ASCII mode uses
+`>` as the playhead with `=`/`-` rails and `.` for buffered cells.
 
 ### Library sidebar
 

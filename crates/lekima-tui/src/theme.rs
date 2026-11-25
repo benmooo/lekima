@@ -50,6 +50,9 @@ pub struct Glyphs {
     pub more: &'static str,
     pub progress_full: &'static str,
     pub progress_empty: &'static str,
+    /// Bytes that are local but not yet played. Distinct from the played rail
+    /// so the state survives `NO_COLOR`.
+    pub progress_buffered: &'static str,
     pub progress_head: &'static str,
     pub repeat: &'static str,
     pub shuffle: &'static str,
@@ -93,6 +96,7 @@ impl Glyphs {
         more: "↓",
         progress_full: "━",
         progress_empty: "─",
+        progress_buffered: "┄",
         progress_head: "●",
         repeat: "⟲",
         shuffle: "⇄",
@@ -133,6 +137,7 @@ impl Glyphs {
         more: "v",
         progress_full: "=",
         progress_empty: "-",
+        progress_buffered: ".",
         progress_head: ">",
         repeat: "R",
         shuffle: "S",

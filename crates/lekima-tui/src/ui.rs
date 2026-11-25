@@ -9,7 +9,7 @@ use std::borrow::Cow;
 use lekima_domain::{PlaybackState, PlaybackStatus, RepeatMode, Track, sanitize_line};
 use ratatui::{
     Frame,
-    layout::{Constraint, Layout, Rect},
+    layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{
@@ -75,7 +75,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, theme: &Theme) {
     }
 
     let [hud, rule, body, footer] = Layout::vertical([
-        Constraint::Length(1),
+        Constraint::Length(hud_height(area)),
         Constraint::Length(1),
         Constraint::Min(1),
         Constraint::Length(1),
@@ -96,11 +96,187 @@ pub fn draw(frame: &mut Frame, app: &mut App, theme: &Theme) {
     }
 }
 
+/// HUD height: two rows on the mid widths where a single row starves the
+/// title (64–95 columns), one row elsewhere. A short terminal keeps one row so
+/// the list still has room.
+fn hud_height(area: Rect) -> u16 {
+    if area.width >= 64 && area.width < 96 && area.height >= 12 {
+        2
+    } else {
+        1
+    }
+}
+
 fn draw_hud(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let loading = app.status.loading || app.status.buffering;
-    let mut prefix: Vec<Span<'static>> = vec![
+    let prefix = hud_prefix(app, theme, loading);
+    let prefix_width = spans_width(&prefix);
+    let queue = hud_queue(app, theme);
+    let queue_width = spans_width(&queue);
+    let duration = app
+        .status
+        .track
+        .as_ref()
+        .map_or(0, |track| effective_duration(&app.status, track));
+
+    if area.height >= 2 {
+        let [top, bottom] =
+            Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).areas(area);
+        let gap = 2;
+        let left_width = usize::from(top.width).saturating_sub(queue_width + gap);
+        let mut line = prefix;
+        line.extend(hud_title(
+            app,
+            theme,
+            left_width.saturating_sub(prefix_width),
+        ));
+        frame.render_widget(Paragraph::new(Line::from(line)), top);
+        frame.render_widget(
+            Paragraph::new(Line::from(queue)).alignment(Alignment::Right),
+            top,
+        );
+
+        let left = progress_group(app, duration, theme);
+        let mut right = volume_group(app, theme);
+        for group in [repeat_group(app, theme), shuffle_group(app, theme)] {
+            right.push(Span::raw("  "));
+            right.extend(group);
+        }
+        frame.render_widget(Paragraph::new(Line::from(left)), bottom);
+        frame.render_widget(
+            Paragraph::new(Line::from(right)).alignment(Alignment::Right),
+            bottom,
+        );
+        return;
+    }
+
+    // One row: the title keeps a floor and the right cluster is right-anchored.
+    // Optional facts drop in the documented order: SIG, then cache, quality,
+    // volume and the sleep countdown.
+    let mut show_sig = app.status.track.is_some() && area.width >= 104;
+    let mut show_cache = app.status.cached;
+    let mut show_quality = app.status.track.is_some();
+    let mut show_preview = app
+        .status
+        .track
+        .as_ref()
+        .is_some_and(|track| is_preview(&app.status, track));
+    let mut show_volume = area.width >= 132 || app.status.muted;
+    let mut show_sleep = app.status.sleep_remaining_ms.is_some();
+    let rail = progress_group(app, duration, theme);
+    let rail_width = spans_width(&rail);
+
+    loop {
+        let mut right_width = queue_width;
+        if show_sleep {
+            right_width += 2 + 2 + 5;
+        }
+        right_width += 2 + spans_width(&repeat_group(app, theme));
+        right_width += 2 + spans_width(&shuffle_group(app, theme));
+        if show_volume {
+            right_width += 2 + spans_width(&volume_group(app, theme));
+        }
+        if show_quality {
+            right_width += 2 + 2 + 6;
+        }
+        if show_preview {
+            right_width += 2 + 7;
+        }
+        if show_cache {
+            right_width += 2 + 5;
+        }
+        if show_sig {
+            right_width += 2 + 4 + 2 + HUD_SPECTRUM_BARS;
+        }
+        right_width += 2 + rail_width;
+        let title_floor = prefix_width.saturating_add(20);
+        if right_width + 2 + title_floor <= usize::from(area.width) {
+            break;
+        }
+        if show_sig {
+            show_sig = false;
+        } else if show_sleep {
+            show_sleep = false;
+        } else if show_cache {
+            show_cache = false;
+        } else if show_quality {
+            show_quality = false;
+        } else if show_preview {
+            show_preview = false;
+        } else if show_volume {
+            show_volume = false;
+        } else {
+            break;
+        }
+    }
+
+    let mut right: Vec<Vec<Span<'static>>> = vec![queue];
+    right.push(repeat_group(app, theme));
+    right.push(shuffle_group(app, theme));
+    if show_volume {
+        right.push(volume_group(app, theme));
+    }
+    if show_quality {
+        right.push(vec![Span::styled(
+            app.status.quality.as_str().to_ascii_uppercase(),
+            Style::new().fg(theme.accent_alt),
+        )]);
+    }
+    if show_preview {
+        right.push(vec![Span::styled(
+            "PREVIEW",
+            Style::new().fg(theme.warn).add_modifier(Modifier::BOLD),
+        )]);
+    }
+    if show_cache {
+        right.push(vec![Span::styled(
+            "CACHE",
+            Style::new()
+                .fg(theme.accent_alt)
+                .add_modifier(Modifier::BOLD),
+        )]);
+    }
+    if show_sig {
+        right.push(spectrum_group(app, theme));
+    }
+    if show_sleep {
+        right.push(vec![
+            Span::styled(
+                format!("{} ", theme.glyphs.sleep),
+                Style::new().fg(theme.dim),
+            ),
+            Span::styled(
+                clock(app.status.sleep_remaining_ms.unwrap_or_default()),
+                Style::new().fg(theme.warn),
+            ),
+        ]);
+    }
+    right.push(rail);
+
+    let right_width = groups_width(&right);
+    let left_width = usize::from(area.width).saturating_sub(right_width + 2);
+    let mut line = prefix;
+    line.extend(hud_title(
+        app,
+        theme,
+        left_width.saturating_sub(prefix_width),
+    ));
+    let mut tail: Vec<Span<'static>> = Vec::new();
+    for group in right {
+        tail.push(Span::raw("  "));
+        tail.extend(group);
+    }
+    frame.render_widget(Paragraph::new(Line::from(line)), area);
+    frame.render_widget(
+        Paragraph::new(Line::from(tail)).alignment(Alignment::Right),
+        area,
+    );
+}
+
+fn hud_prefix(app: &App, theme: &Theme, loading: bool) -> Vec<Span<'static>> {
+    let mut prefix = vec![
         Span::styled(
-            " LEKIMA ",
+            "LEKIMA",
             Style::new()
                 .fg(theme.badge_fg)
                 .bg(theme.badge_bg)
@@ -139,103 +315,45 @@ fn draw_hud(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             Style::new().fg(theme.muted),
         )),
     }
+    prefix
+}
 
-    let duration = app
-        .status
-        .track
-        .as_ref()
-        .map_or(0, |track| effective_duration(&app.status, track));
-
-    // Optional segments, ordered by priority. The tail is dropped first when
-    // the terminal is narrow; progress and time are the last to go.
-    let mut groups: Vec<Vec<Span<'static>>> = Vec::new();
-    if area.width >= 40 {
-        groups.push(progress_group(app, duration, theme));
-    }
-    groups.push(volume_group(app, theme));
-    groups.push(vec![
-        Span::styled("Q:", Style::new().fg(theme.muted)),
+fn hud_queue(app: &App, theme: &Theme) -> Vec<Span<'static>> {
+    vec![
+        Span::styled("Q", Style::new().fg(theme.muted)),
         Span::styled(
             app.status.queue_length.to_string(),
             Style::new().fg(theme.accent_alt),
         ),
-    ]);
-    groups.push(repeat_group(app, theme));
-    groups.push(shuffle_group(app, theme));
-    if let Some(remaining) = app.status.sleep_remaining_ms {
-        groups.push(vec![
-            Span::styled(
-                format!("{} ", theme.glyphs.sleep),
-                Style::new().fg(theme.dim),
-            ),
-            Span::styled(clock(remaining), Style::new().fg(theme.warn)),
-        ]);
-    }
-    if app.status.track.is_some() {
-        groups.push(vec![Span::styled(
-            app.status.quality.as_str().to_ascii_uppercase(),
-            Style::new().fg(theme.accent_alt),
-        )]);
-        if app
-            .status
-            .track
-            .as_ref()
-            .is_some_and(|track| is_preview(&app.status, track))
-        {
-            groups.push(vec![Span::styled(
-                "PREVIEW",
-                Style::new().fg(theme.warn).add_modifier(Modifier::BOLD),
-            )]);
-        }
-        if app.status.cached {
-            groups.push(vec![Span::styled(
-                "CACHE",
-                Style::new()
-                    .fg(theme.accent_alt)
-                    .add_modifier(Modifier::BOLD),
-            )]);
-        }
-        groups.push(spectrum_group(app, theme));
-    }
+    ]
+}
 
-    let prefix_width = spans_width(&prefix);
-    let mut identity_budget;
-    loop {
-        let right = groups_width(&groups);
-        identity_budget = (area.width as usize)
-            .saturating_sub(prefix_width)
-            .saturating_sub(right);
-        if identity_budget >= 8 || groups.len() <= 1 {
-            break;
-        }
-        groups.pop();
+fn hud_title(app: &App, theme: &Theme, budget: usize) -> Vec<Span<'static>> {
+    if budget == 0 {
+        return Vec::new();
     }
-    if identity_budget < 8 {
-        groups.clear();
-        identity_budget = (area.width as usize).saturating_sub(prefix_width);
-    }
-
-    let mut spans = prefix;
     match &app.status.track {
         Some(track) => {
             let title = clean(&track.name);
             let title = title.as_ref();
-            let artist_raw = track.artist_names();
-            let artist = clean(&artist_raw).into_owned();
+            let artist = clean(&track.artist_names()).into_owned();
             let title_width = display_width(title);
             let artist_width = display_width(&artist);
-            if title_width + 3 + artist_width <= identity_budget {
+            let mut spans = Vec::new();
+            if title_width + 3 + artist_width <= budget {
                 spans.push(Span::styled(
                     title.to_owned(),
                     Style::new().fg(theme.text).add_modifier(Modifier::BOLD),
                 ));
-                spans.push(Span::styled(
-                    format!(" {} ", theme.glyphs.separator),
-                    Style::new().fg(theme.dim),
-                ));
-                spans.push(Span::styled(artist, Style::new().fg(theme.muted)));
-            } else if title_width <= identity_budget.saturating_sub(4) {
-                let artist_budget = identity_budget.saturating_sub(title_width + 3);
+                if !artist.is_empty() {
+                    spans.push(Span::styled(
+                        format!(" {} ", theme.glyphs.separator),
+                        Style::new().fg(theme.dim),
+                    ));
+                    spans.push(Span::styled(artist, Style::new().fg(theme.muted)));
+                }
+            } else if title_width <= budget.saturating_sub(4) {
+                let artist_budget = budget.saturating_sub(title_width + 3);
                 spans.push(Span::styled(
                     title.to_owned(),
                     Style::new().fg(theme.text).add_modifier(Modifier::BOLD),
@@ -252,23 +370,17 @@ fn draw_hud(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                 }
             } else {
                 spans.push(Span::styled(
-                    truncate_to_width(title, identity_budget, theme.glyphs.ellipsis),
+                    truncate_to_width(title, budget, theme.glyphs.ellipsis),
                     Style::new().fg(theme.text).add_modifier(Modifier::BOLD),
                 ));
             }
+            spans
         }
-        None => spans.push(Span::styled(
-            truncate_to_width("nothing playing", identity_budget, theme.glyphs.ellipsis),
+        None => vec![Span::styled(
+            truncate_to_width("nothing playing", budget, theme.glyphs.ellipsis),
             Style::new().fg(theme.muted),
-        )),
+        )],
     }
-
-    for group in groups {
-        spans.push(Span::styled("  ", Style::new()));
-        spans.extend(group);
-    }
-
-    frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 fn progress_group(app: &App, duration: u64, theme: &Theme) -> Vec<Span<'static>> {
@@ -310,14 +422,18 @@ fn repeat_group(app: &App, theme: &Theme) -> Vec<Span<'static>> {
 }
 
 fn shuffle_group(app: &App, theme: &Theme) -> Vec<Span<'static>> {
-    vec![Span::styled(
-        format!("[{}]", theme.glyphs.shuffle),
-        Style::new().fg(if app.status.shuffle {
-            theme.accent_alt
-        } else {
-            theme.dim
-        }),
-    )]
+    // Bracket presence, not colour, is the on/off signal.
+    if app.status.shuffle {
+        vec![Span::styled(
+            format!("[{}]", theme.glyphs.shuffle),
+            Style::new().fg(theme.accent_alt),
+        )]
+    } else {
+        vec![Span::styled(
+            format!(" {} ", theme.glyphs.shuffle),
+            Style::new().fg(theme.dim),
+        )]
+    }
 }
 
 fn spectrum_group(app: &App, theme: &Theme) -> Vec<Span<'static>> {
@@ -3280,7 +3396,7 @@ fn progress_spans<'a>(app: &App, duration: u64, theme: &Theme) -> Vec<Span<'a>> 
         let (glyph, colour) = if cell < played {
             (theme.glyphs.progress_full, theme.meter_full)
         } else if buffered {
-            (theme.glyphs.progress_full, theme.panel)
+            (theme.glyphs.progress_buffered, theme.panel)
         } else {
             (theme.glyphs.progress_empty, theme.meter_empty)
         };
@@ -3485,8 +3601,10 @@ mod tests {
         let screen = render(&mut app, 100, 30);
         assert!(screen.contains("Mota"));
         assert!(screen.contains("Russian Circles"));
-        assert!(screen.contains("VOL"));
         assert!(screen.contains("OFF"));
+        // Volume lives on the two-row HUD, where the title is not starved.
+        let screen = render(&mut app, 80, 30);
+        assert!(screen.contains("VOL"), "{screen}");
     }
 
     #[test]
@@ -3657,19 +3775,53 @@ mod tests {
     }
 
     #[test]
-    fn hud_keeps_the_clock_and_volume_when_the_title_is_long() {
+    fn hud_reserves_a_title_floor_and_never_clips_the_clock() {
         let mut app = App::new();
         app.status.status = lekima_domain::PlaybackStatus::Playing;
         app.status.track = Some(track(
             "A very long track title that should never hide the clock or volume meter",
         ));
         app.status.position_ms = 42_000;
-        let screen = render(&mut app, 80, 24);
-        assert!(screen.contains("00:42/05:00"));
-        assert!(screen.contains("VOL"));
-        let screen = render(&mut app, 60, 20);
-        assert!(screen.contains("00:42/05:00"));
-        assert!(screen.contains("VOL"));
+
+        // Mid widths get two rows: title on top, rail/clock/volume below.
+        let rows = render_rows(&mut app, 80, 24, Theme::cyber());
+        assert!(rows[1].contains("00:42/05:00"), "{rows:?}");
+        assert!(rows[1].contains("VOL"), "{rows:?}");
+        assert!(rows[0].contains('…'), "{rows:?}");
+
+        // Wide terminals keep one row and never lose the clock.
+        let screen = render(&mut app, 120, 30);
+        assert!(screen.contains("00:42/05:00"), "{screen}");
+        assert!(screen.contains("Q0"), "{screen}");
+    }
+
+    #[test]
+    fn hud_is_two_rows_only_on_mid_widths() {
+        let mut app = App::new();
+        app.status.status = lekima_domain::PlaybackStatus::Playing;
+        app.status.track = Some(track("Mota"));
+        let rows = render_rows(&mut app, 80, 24, Theme::cyber());
+        assert!(rows[0].contains("LEKIMA"), "{rows:?}");
+        assert!(rows[1].contains("00:00"), "{rows:?}");
+
+        let rows = render_rows(&mut app, 120, 24, Theme::cyber());
+        assert!(rows[0].contains("LEKIMA"), "{rows:?}");
+        assert!(rows[1].starts_with('─'), "{rows:?}");
+    }
+
+    #[test]
+    fn shuffle_state_does_not_depend_on_colour() {
+        let mut app = App::new();
+        app.status.track = Some(track("Mota"));
+        let mono = Theme::resolve("mono", "unicode", "compact");
+
+        app.status.shuffle = false;
+        let off = render_rows(&mut app, 100, 24, mono).join("\n");
+        assert!(!off.contains("[⇄]"), "{off}");
+
+        app.status.shuffle = true;
+        let on = render_rows(&mut app, 100, 24, mono).join("\n");
+        assert!(on.contains("[⇄]"), "{on}");
     }
 
     #[test]
@@ -3860,7 +4012,8 @@ mod tests {
             end_ms: 150_000,
         }];
         let shaded = render(&mut app, 100, 24);
-        assert!(shaded.contains("━━━━━"), "{shaded}");
+        assert!(shaded.contains('┄'), "{shaded}");
+        assert!(!shaded.contains('━'), "{shaded}");
     }
 
     #[test]
