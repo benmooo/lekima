@@ -100,6 +100,8 @@ pub enum Command {
     History {
         limit: Option<usize>,
     },
+    /// Configured plugin hooks and whether their processes are running.
+    Hooks,
     /// Public comments for a track (defaults to the current track).
     Comments {
         id: Option<TrackId>,
@@ -209,6 +211,7 @@ impl Command {
             Self::Cloud { .. } => "cloud",
             Self::Like { .. } => "like",
             Self::History { .. } => "history",
+            Self::Hooks => "hooks",
             Self::Comments { .. } => "comments",
             Self::Liked { .. } => "liked",
             Self::Hello { .. } => "hello",
@@ -398,6 +401,27 @@ pub enum Reply {
     History {
         entries: Vec<PlayRecord>,
     },
+    /// Configured hooks, in name order.
+    Hooks {
+        hooks: Vec<HookStatus>,
+    },
+}
+
+/// One configured hook as the daemon sees it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HookStatus {
+    pub name: String,
+    /// Event kinds the hook subscribes to.
+    #[serde(default)]
+    pub events: Vec<String>,
+    /// Commands the hook may send.
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+    /// Whether its process is currently alive.
+    pub running: bool,
+    /// Why the configuration was rejected, when it was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -490,6 +514,32 @@ mod tests {
         let response = Response::ok(1, Reply::Ack);
         assert!(response.is_ok());
         assert!(serde_json::to_string(&response).unwrap().contains("ack"));
+    }
+
+    #[test]
+    fn hooks_command_and_reply_round_trip() {
+        let command = Command::Hooks;
+        assert_eq!(
+            serde_json::to_string(&command).unwrap(),
+            r#"{"type":"hooks"}"#
+        );
+
+        let reply = Reply::Hooks {
+            hooks: vec![super::HookStatus {
+                name: "nowplaying".to_owned(),
+                events: vec!["status".to_owned()],
+                capabilities: vec!["pause".to_owned()],
+                running: true,
+                error: None,
+            }],
+        };
+        let encoded = serde_json::to_string(&reply).unwrap();
+        assert!(encoded.contains(r#""type":"hooks""#));
+        assert!(encoded.contains(r#""running":true"#));
+        assert!(
+            !encoded.contains("error"),
+            "a healthy hook has no error field"
+        );
     }
 
     #[test]

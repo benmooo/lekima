@@ -51,6 +51,7 @@ stores the token in `localStorage`.
 | `GET` | `/v1/status` | yes | same data as `lekima status --json` |
 | `GET` | `/v1/queue` | yes | same data as `lekima queue --json` |
 | `GET` | `/v1/history?limit=N` | yes | same data as `lekima history --json` |
+| `GET` | `/v1/hooks` | yes | configured hooks, capabilities and liveness |
 | `POST` | `/v1/command` | yes | one IPC `Command` object, max 1 MiB |
 
 Responses use the CLI envelope:

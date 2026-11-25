@@ -203,6 +203,19 @@ fn draw_hud(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                     .add_modifier(Modifier::BOLD),
             )]);
         }
+        let running = app.hooks.iter().filter(|hook| hook.running).count();
+        let broken = app.hooks.iter().filter(|hook| hook.error.is_some()).count();
+        if running > 0 || broken > 0 {
+            let (label, colour) = match (running, broken) {
+                (0, _) => ("HOOK !".to_owned(), theme.hot),
+                (running, 0) => (format!("HOOK {running}"), theme.warn),
+                (running, broken) => (format!("HOOK {running}+{broken}!"), theme.hot),
+            };
+            groups.push(vec![Span::styled(
+                label,
+                Style::new().fg(colour).add_modifier(Modifier::BOLD),
+            )]);
+        }
         if !theme.motion.is_reduced() {
             groups.push(spectrum_group(app, theme));
         }
@@ -3555,6 +3568,8 @@ mod tests {
         CURSOR_BLINK_FRAMES, comment_date, compact_count, display_width, draw, truncate_to_width,
         wrap_to_width,
     };
+    use lekima_domain::PlaybackStatus;
+
     use crate::app::{AlbumState, App, ArtistState, Focus, Mode, SearchEntry, View};
     use crate::theme::Theme;
 
@@ -3614,6 +3629,42 @@ mod tests {
             .map_or(0, |elapsed| {
                 i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)
             })
+    }
+
+    #[test]
+    fn the_hud_shows_running_and_invalid_hooks() {
+        let mut app = App::new();
+        app.status.status = PlaybackStatus::Playing;
+        app.status.track = Some(track("Song"));
+        app.hooks = vec![
+            lekima_ipc::HookStatus {
+                name: "nowplaying".to_owned(),
+                events: vec!["status".to_owned()],
+                capabilities: vec![],
+                running: true,
+                error: None,
+            },
+            lekima_ipc::HookStatus {
+                name: "bogus".to_owned(),
+                events: vec![],
+                capabilities: vec![],
+                running: false,
+                error: Some("bad capability".to_owned()),
+            },
+        ];
+
+        let screen = render(&mut app, 120, 30);
+        assert!(screen.contains("HOOK 1+1!"), "{screen}");
+    }
+
+    #[test]
+    fn no_hooks_means_no_badge() {
+        let mut app = App::new();
+        app.status.status = PlaybackStatus::Playing;
+        app.status.track = Some(track("Song"));
+
+        let screen = render(&mut app, 120, 30);
+        assert!(!screen.contains("HOOK"));
     }
 
     #[test]

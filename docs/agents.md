@@ -26,6 +26,7 @@ lekima album queue 242091487 --next --json
 lekima ui --json
 lekima ui --theme amber --density comfortable --motion reduced --json
 lekima history --limit 20 --json
+lekima hooks --json
 ```
 
 ## Events: `lekima watch`
@@ -54,7 +55,7 @@ lekima mcp
 JSON-RPC over stdio. Tools: `player_status`, `search`, `artist`,
 `artist_albums`, `album`, `play`, `pause`, `resume`, `next`, `previous`,
 `set_volume`, `queue_list`, `queue_add`, `queue_album`, `queue_remove`, `queue_move`, `sleep`,
-`set_quality`, `lyrics`, `comments`, `history`, `daily`, `fm`.
+`set_quality`, `lyrics`, `comments`, `history`, `hooks`, `daily`, `fm`.
 
 `search` accepts `kind` (`all`, `track`, `album`, `artist`, `playlist`) and
 `play` accepts `query`, `ids`, `playlist` or `album`.

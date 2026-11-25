@@ -32,13 +32,14 @@ const TOKEN_BYTES: usize = 32;
 /// A hand-supplied token shorter than this is rejected as guessable.
 const MIN_TOKEN_CHARS: usize = 16;
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
-const ENDPOINTS: [&str; 7] = [
+const ENDPOINTS: [&str; 8] = [
     "GET /",
     "GET /v1/health",
     "GET /v1/capabilities",
     "GET /v1/status",
     "GET /v1/queue",
     "GET /v1/history?limit=N",
+    "GET /v1/hooks",
     "POST /v1/command",
 ];
 const REMOTE_HTML: &str = include_str!("../assets/remote.html");
@@ -47,7 +48,7 @@ const CONTENT_SECURITY_POLICY: &str = "default-src 'none'; style-src 'unsafe-inl
      script-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; \
      form-action 'none'; frame-ancestors 'none'";
 /// Command tags accepted by `POST /v1/command`.
-const COMMAND_TYPES: [&str; 40] = [
+const COMMAND_TYPES: [&str; 41] = [
     "status",
     "play",
     "jump",
@@ -75,6 +76,7 @@ const COMMAND_TYPES: [&str; 40] = [
     "like",
     "comments",
     "history",
+    "hooks",
     "liked",
     "sleep",
     "set_quality",
@@ -183,6 +185,7 @@ fn router(state: AppState) -> Router {
         .route("/v1/status", get(status))
         .route("/v1/queue", get(queue))
         .route("/v1/history", get(history))
+        .route("/v1/hooks", get(hooks))
         .route("/v1/command", post(command))
         .layer(DefaultBodyLimit::max(MAX_FRAME_BYTES))
         .with_state(state)
@@ -259,6 +262,13 @@ async fn history(
         );
     };
     forward(&state, Command::History { limit: query.limit }).await
+}
+
+async fn hooks(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Some(response) = authorize(&headers, &state) {
+        return response;
+    }
+    forward(&state, Command::Hooks).await
 }
 
 async fn command(
@@ -415,6 +425,7 @@ fn permitted(command: &Command) -> bool {
             | Command::Like { .. }
             | Command::Comments { .. }
             | Command::History { .. }
+            | Command::Hooks
             | Command::Liked { .. }
             | Command::Sleep { .. }
             | Command::SetQuality { .. }
@@ -598,6 +609,33 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(body["error"]["code"], "bad_request");
+    }
+
+    #[tokio::test]
+    async fn hooks_requires_a_bearer_token() {
+        let (status, body) = call(
+            Request::builder()
+                .uri("/v1/hooks")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(body["error"]["code"], "unauthorized");
+    }
+
+    #[tokio::test]
+    async fn hooks_is_permitted_with_a_token() {
+        let (status, body) = call(
+            Request::builder()
+                .uri("/v1/hooks")
+                .header("authorization", "Bearer test-token-0123456789")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["error"]["code"], "daemon");
     }
 
     #[tokio::test]

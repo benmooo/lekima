@@ -150,6 +150,7 @@ fn build_command(name: &str, args: &Value) -> Result<Command, String> {
             level: (number_arg(args, "level").unwrap_or(70.0) / 100.0).clamp(0.0, 1.0) as f32,
         },
         "queue_list" => Command::Queue,
+        "hooks" => Command::Hooks,
         "history" => Command::History {
             limit: match args.get("limit") {
                 None => None,
@@ -338,6 +339,11 @@ fn summary(reply: &Reply) -> String {
             format!("queue of {} (index {index:?})", tracks.len())
         }
         Reply::History { entries } => format!("{} plays", entries.len()),
+        Reply::Hooks { hooks } => format!(
+            "{} hooks · {} running",
+            hooks.len(),
+            hooks.iter().filter(|hook| hook.running).count()
+        ),
         Reply::Like { id, liked } => {
             format!("{} {id}", if *liked { "liked" } else { "unliked" })
         }
@@ -476,6 +482,12 @@ fn tools() -> Vec<Value> {
             false,
         ),
         tool("queue_list", "List the playback queue.", none.clone(), true),
+        tool(
+            "hooks",
+            "List configured plugin hooks with their events, capabilities and whether they are running.",
+            none.clone(),
+            true,
+        ),
         tool(
             "history",
             "List finished plays, newest first. Each entry has track, started_at (Unix ms), played_ms and completed.",

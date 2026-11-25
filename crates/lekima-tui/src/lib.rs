@@ -63,6 +63,7 @@ async fn event_loop(
     app.status_inflight = true;
     dispatch(&socket, Command::Playlists, &sender);
     dispatch(&socket, Command::Queue, &sender);
+    dispatch(&socket, Command::Hooks, &sender);
     dispatch(&socket, Command::Whoami, &sender);
 
     // 20 fps for the signal visualiser; status still polls at 4 Hz.

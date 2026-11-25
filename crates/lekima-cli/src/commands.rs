@@ -465,6 +465,12 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
             Ok(())
         }
 
+        TopCommand::Hooks => {
+            let reply = daemon_call(&socket, &paths, &config, Command::Hooks).await?;
+            output::print_reply(&reply, json);
+            Ok(())
+        }
+
         TopCommand::History { limit } => {
             let reply = daemon_call(
                 &socket,

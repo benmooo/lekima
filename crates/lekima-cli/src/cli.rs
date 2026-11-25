@@ -211,6 +211,9 @@ pub enum TopCommand {
         offset: u32,
     },
 
+    /// Show configured plugin hooks and whether they are running.
+    Hooks,
+
     /// Show what you have listened to, newest first.
     History {
         /// How many plays to show.

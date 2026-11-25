@@ -14,7 +14,9 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use lekima_config::{Config, FileCredentials, HistoryStore, Paths, PlaybackStore, SavedPlayback};
+use lekima_config::{
+    Config, FileCredentials, HistoryStore, HookConfig, Paths, PlaybackStore, SavedPlayback,
+};
 use lekima_core::{PlayRequest, Player};
 use lekima_domain::{
     CredentialsStore, HistoryLog, PlaybackState, PlaybackStatus, QueueKind, SearchKind, Track,
@@ -130,6 +132,7 @@ pub async fn run(paths: &Paths, config: &Config, socket: &Path, _detached: bool)
         history_saved: StdMutex::new(saved_revision),
         playback_store: playback_store.clone(),
         hooks: running_hooks,
+        hook_configs: config.hooks.clone(),
     });
 
     tracing::info!(hooks = daemon.hooks.len(), "hook processes started");
@@ -210,6 +213,8 @@ struct Daemon {
     /// Live hook processes; dropping the daemon closes their stdin and kills
     /// them.
     hooks: Vec<hooks::RunningHook>,
+    /// The configured hook tables, kept for `hooks` reports.
+    hook_configs: std::collections::BTreeMap<String, HookConfig>,
 }
 
 /// Delivers notifications off the async runtime.
@@ -476,6 +481,9 @@ impl Daemon {
                 .collect(),
             }),
             Command::Status => Ok(self.status().await),
+            Command::Hooks => Ok(Reply::Hooks {
+                hooks: self.hooks_report(),
+            }),
             Command::History { limit } => {
                 let limit = limit.unwrap_or(50).clamp(1, 500);
                 let entries = self
@@ -788,6 +796,38 @@ impl Daemon {
             .track
             .map(|track| track.id)
             .ok_or_else(|| ApiError::new(lekima_ipc::ErrorCode::NotFound, "nothing is playing"))
+    }
+
+    /// Configuration and liveness for every hook, in name order.
+    fn hooks_report(&self) -> Vec<lekima_ipc::HookStatus> {
+        self.hook_configs
+            .iter()
+            .map(
+                |(name, config)| match hooks::HookSpec::from_config(name, config) {
+                    Ok(spec) => lekima_ipc::HookStatus {
+                        name: name.clone(),
+                        events: spec
+                            .event_names()
+                            .iter()
+                            .map(|kind| (*kind).to_owned())
+                            .collect(),
+                        capabilities: spec.capability_names(),
+                        running: self
+                            .hooks
+                            .iter()
+                            .any(|hook| hook.name() == name && hook.is_running()),
+                        error: None,
+                    },
+                    Err(error) => lekima_ipc::HookStatus {
+                        name: name.clone(),
+                        events: Vec::new(),
+                        capabilities: Vec::new(),
+                        running: false,
+                        error: Some(error),
+                    },
+                },
+            )
+            .collect()
     }
 
     /// Announces a track change once per track, and only once it is audible.

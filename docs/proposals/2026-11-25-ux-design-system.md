@@ -479,9 +479,11 @@ Six slices, each with its docs; screenshots regenerate only in slice 6, and slic
   Docs: visual doc values, `terminal-setup.md` theme table, README at release.
 
 **CLI gaps:** settings → `lekima ui` (slice 1, closes the known gap); lyrics offset
-`[`/`]` → `lekima ui --lyrics-offset` (slice 1, flag only); hook status needs
-`status.hooks` before the badge (slice 4, blocked); help and pane focus are view
-state, not actions, and are exempt.
+`[`/`]` → `lekima ui --lyrics-offset` (slice 1, flag only); help and pane focus
+are view state, not actions, and are exempt. Hook status landed as its own
+contract rather than a field on `PlaybackState`: `Command::Hooks` /
+`Reply::Hooks`, `lekima hooks`, MCP `hooks`, `GET /v1/hooks`, and the HUD badge
+(slice 4 unblocked).
 
 ## 8. Non-goals and risks
 **Preserved:** no mouse; no emoji or Nerd Font icons; no bordered chrome in the

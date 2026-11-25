@@ -179,6 +179,19 @@ pub struct RunningHook {
     job: tokio::task::JoinHandle<()>,
 }
 
+impl RunningHook {
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Whether the hook process is still alive.
+    #[must_use]
+    pub fn is_running(&self) -> bool {
+        !self.job.is_finished()
+    }
+}
+
 impl Drop for RunningHook {
     fn drop(&mut self) {
         self.job.abort();

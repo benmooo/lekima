@@ -347,6 +347,8 @@ pub struct App {
     pub lyrics_offset_ms: i64,
     pub playlists: Vec<Playlist>,
     pub queue: Vec<Track>,
+    /// Configured hooks, as reported by the daemon at startup.
+    pub hooks: Vec<lekima_ipc::HookStatus>,
     /// Finished plays, newest first, as returned by the daemon.
     pub plays: Vec<lekima_domain::PlayRecord>,
     pub plays_selection: usize,
@@ -418,6 +420,7 @@ impl Default for App {
             lyrics_offset_ms: 0,
             playlists: Vec::new(),
             queue: Vec::new(),
+            hooks: Vec::new(),
             plays: Vec::new(),
             plays_selection: 0,
             plays_loading: false,
@@ -2184,6 +2187,9 @@ impl App {
                         self.queue_selection =
                             self.queue_selection.min(self.queue.len().saturating_sub(1));
                     }
+                    Reply::Hooks { hooks } => {
+                        self.hooks = hooks;
+                    }
                     Reply::History { entries } => {
                         self.plays = entries;
                         self.plays_loading = false;
@@ -3448,6 +3454,23 @@ mod history_tests {
 
         assert!(matches!(app.handle_key(key(KeyCode::Enter)), Action::None));
         assert_eq!(app.mode, Mode::History);
+    }
+
+    #[test]
+    fn hook_reports_are_stored_for_the_badge() {
+        let mut app = App::new();
+        app.apply(Ok(Reply::Hooks {
+            hooks: vec![lekima_ipc::HookStatus {
+                name: "nowplaying".to_owned(),
+                events: vec!["status".to_owned()],
+                capabilities: vec!["pause".to_owned()],
+                running: true,
+                error: None,
+            }],
+        }));
+
+        assert_eq!(app.hooks.len(), 1);
+        assert!(app.hooks[0].running);
     }
 
     #[test]

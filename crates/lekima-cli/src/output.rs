@@ -115,6 +115,7 @@ pub fn print_reply(reply: &Reply, json: bool) {
         Reply::Playlists { playlists } => print_playlists(playlists),
         Reply::Queue { tracks, index } => print_queue(tracks, *index),
         Reply::History { entries } => print_history(entries),
+        Reply::Hooks { hooks } => print_hooks(hooks),
         Reply::User { user } => match user {
             Some(user) => crate::say!("{} ({})", sanitize_line(&user.nickname), user.id),
             None => crate::say!("not signed in"),
@@ -404,6 +405,34 @@ fn print_queue(tracks: &[Track], index: Option<usize>) {
             sanitize_line(&track.name),
             sanitize_line(&track.artist_names())
         );
+    }
+}
+
+fn print_hooks(hooks: &[lekima_ipc::HookStatus]) {
+    if hooks.is_empty() {
+        crate::say!("no hooks configured · add a [hooks.<name>] table to config.toml");
+        return;
+    }
+    for hook in hooks {
+        let state = match (&hook.error, hook.running) {
+            (Some(_), _) => "invalid",
+            (None, true) => "running",
+            (None, false) => "stopped",
+        };
+        crate::say!(
+            "{:<9} {:<20} events: {}  commands: {}",
+            state,
+            sanitize_line(&hook.name),
+            hook.events.join(","),
+            if hook.capabilities.is_empty() {
+                "read-only".to_owned()
+            } else {
+                hook.capabilities.join(",")
+            }
+        );
+        if let Some(error) = &hook.error {
+            crate::say!("          {}", sanitize_line(error));
+        }
     }
 }
 
