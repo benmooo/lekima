@@ -429,10 +429,18 @@ token.
 | Cookie theft | Account compromise | `0600` session file, no logging, permission check on startup |
 | Scope creep (social features) | Never ships | Non-goals above; milestones |
 
-## 10. Open questions
+## 10. Decisions and open questions
 
-1. **Default UI density.** Do we keep the original’s always-visible sidebar, or
-   start in a single-pane “just the queue” mode?
-2. **Next theme.** Desktop notifications and listening history shipped in
-   0.10.0, and plugin hooks are implemented. The “Later” bucket is empty:
-   scrobbling, Windows and in-process sandboxing are closed.
+1. **Default UI density — decided.** `compact` stays the default; `comfortable`
+   is opt-in, persisted with `[ui] density`, and both are settable from
+   `lekima ui`. The sidebar stays visible at 64 columns and wider because it is
+   the library and playlist switcher, not decoration.
+2. **Visual direction — decided.** The twelve palettes are frozen; the default
+   `cyber` is polished rather than replaced, and every palette meets the
+   documented contrast floors. See
+   [`proposals/2026-11-25-ux-design-system.md`](proposals/2026-11-25-ux-design-system.md).
+3. **Extensions.** Desktop notifications and listening history shipped in
+   0.10.0, plugin hooks in 0.11.0, and the TUI design system in the unreleased
+   line. Scrobbling, Windows and in-process sandboxing stay closed (ADRs
+   013–015). A future theme editor or new palette would need a new proposal and
+   screenshots.
