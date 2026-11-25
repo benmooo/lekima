@@ -69,8 +69,14 @@ async fn event_loop(
     let mut ticker = tokio::time::interval(std::time::Duration::from_millis(50));
     ticker.tick().await;
 
+    // Draw only when something changed. With reduced motion the 20 Hz ticker
+    // does not repaint, so an idle player costs zero frames.
+    let mut dirty = true;
     loop {
-        terminal.draw(|frame| ui::draw(frame, app, theme))?;
+        if dirty {
+            terminal.draw(|frame| ui::draw(frame, app, theme))?;
+            dirty = false;
+        }
 
         tokio::select! {
             key = keys.recv() => {
@@ -81,11 +87,13 @@ async fn event_loop(
                 } else if apply_action(action, &socket, &sender, app) {
                     break;
                 }
+                dirty = true;
             }
             reply = replies.recv() => {
                 let Some(reply) = reply else { break };
                 let follow_up = app.apply(reply);
                 apply_action(follow_up, &socket, &sender, app);
+                dirty = true;
             }
             frame = events.recv() => {
                 let Some(frame) = frame else { break };
@@ -105,9 +113,13 @@ async fn event_loop(
                     let follow_up = app.apply(Ok(reply));
                     apply_action(follow_up, &socket, &sender, app);
                 }
+                dirty = true;
             }
             _ = ticker.tick() => {
                 app.tick();
+                if !theme.motion.is_reduced() {
+                    dirty = true;
+                }
                 // 20 Hz while playing for the spectrum; 1 Hz while the daemon
                 // is down so a restart is noticed without pressing R.
                 let every = if app.is_playing() {

@@ -55,6 +55,13 @@ text. `lekima ui --json` reports the effective set; the reference palettes
 `cyber` and `light` are asserted in `theme.rs` tests, and the remaining palettes
 are brought up to the same floors in the identity slice.
 
+Colour capabilities are explicit: `LEKIMA_COLOR` (or `NO_COLOR`) downgrades
+every RGB role to the 256 cube, the nearest 16 ANSI colours, or mono, where
+selection becomes real reverse video instead of a coloured background. Motion
+has the same treatment: `[ui] motion = auto|full|reduced` (or `LEKIMA_MOTION`)
+freezes spinners and the cursor, hides the spectrum, and stops repainting an
+idle player.
+
 Colour is never the only signal:
 
 - playing `▶`, paused `‖`, stopped `■`

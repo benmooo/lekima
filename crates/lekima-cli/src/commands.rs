@@ -35,6 +35,7 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
                 theme: config.ui.theme.clone(),
                 glyphs: config.ui.glyphs.clone(),
                 density: config.ui.density.clone(),
+                motion: config.ui.motion.clone(),
                 lyrics_translation: config.ui.lyrics_translation,
             };
             let changed = lekima_tui::run(socket, preferences)
@@ -46,7 +47,7 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
                     &preferences.theme,
                     &preferences.glyphs,
                     &preferences.density,
-                    &config.ui.motion,
+                    &preferences.motion,
                     preferences.lyrics_translation,
                 )
             {

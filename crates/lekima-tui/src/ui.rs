@@ -13,8 +13,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{
-        Block, BorderType, Clear, List, ListItem, ListState, Padding, Paragraph, Row, Table,
-        TableState,
+        Block, Clear, List, ListItem, ListState, Padding, Paragraph, Row, Table, TableState,
     },
 };
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
@@ -165,7 +164,8 @@ fn draw_hud(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     // One row: the title keeps a floor and the right cluster is right-anchored.
     // Optional facts drop in the documented order: SIG, then the sleep
     // countdown, cache, quality, preview and volume.
-    let mut show_sig = app.status.track.is_some() && area.width >= 104;
+    let mut show_sig =
+        app.status.track.is_some() && area.width >= 104 && !theme.motion.is_reduced();
     let mut show_cache = app.status.cached;
     let mut show_quality = app.status.track.is_some();
     let mut show_preview = app
@@ -309,6 +309,15 @@ fn draw_hud(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     );
 }
 
+/// Spinner frame, frozen on the static loading glyph when motion is reduced.
+fn spinner_glyph(app: &App, theme: &Theme) -> &'static str {
+    if theme.motion.is_reduced() {
+        theme.glyphs.loading
+    } else {
+        theme.glyphs.spinner[(app.frame % 4) as usize]
+    }
+}
+
 fn hud_prefix(app: &App, theme: &Theme, loading: bool) -> Vec<Span<'static>> {
     let mut prefix = vec![
         Span::styled(
@@ -325,7 +334,7 @@ fn hud_prefix(app: &App, theme: &Theme, loading: bool) -> Vec<Span<'static>> {
     ];
     match (&app.status.track, app.status.status) {
         (Some(_), _) if loading => {
-            let spinner = theme.glyphs.spinner[(app.frame % 4) as usize];
+            let spinner = spinner_glyph(app, theme);
             let label = if app.status.loading {
                 "LOADING"
             } else {
@@ -1022,7 +1031,7 @@ fn track_row<'a>(
     let (marker, marker_style) = if current {
         (
             if app.status.loading || app.status.buffering {
-                theme.glyphs.spinner[(app.frame % 4) as usize].to_owned()
+                spinner_glyph(app, theme).to_owned()
             } else {
                 glyph(app.status.status, theme).to_owned()
             },
@@ -1552,7 +1561,11 @@ fn draw_artist(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
                 Span::styled("  ", Style::new()),
                 Span::styled(
                     truncate_to_width(
-                        &clean(&detail.aliases.join(" · ")),
+                        &clean(
+                            &detail
+                                .aliases
+                                .join(&format!(" {} ", theme.glyphs.separator)),
+                        ),
                         width.saturating_sub(2),
                         theme.glyphs.ellipsis,
                     ),
@@ -1638,7 +1651,11 @@ fn draw_artist(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
 }
 
 fn loading_line(target: &str, theme: &Theme, frame: u64) -> Line<'static> {
-    let spinner = theme.glyphs.spinner[(frame % 4) as usize];
+    let spinner = if theme.motion.is_reduced() {
+        theme.glyphs.loading
+    } else {
+        theme.glyphs.spinner[(frame % 4) as usize]
+    };
     Line::from(vec![
         Span::styled(
             format!("{spinner} LOADING "),
@@ -2681,7 +2698,7 @@ fn draw_comments(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
     match &app.comments_state {
         CommentsState::Idle | CommentsState::Loading { .. } => {
-            let spinner = theme.glyphs.spinner[(app.frame % 4) as usize];
+            let spinner = spinner_glyph(app, theme);
             lines.push(Line::from(vec![
                 Span::styled(format!("{spinner} "), Style::new().fg(theme.accent)),
                 Span::styled(
@@ -2989,7 +3006,10 @@ fn draw_footer(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         ),
         Mode::Comments => (
             "COMMENTS",
-            "j/k scroll · ctrl-d/u page · n more · r refresh · C/esc close".to_owned(),
+            format!(
+                "j/k scroll {0} ctrl-d/u page {0} n more {0} r refresh {0} C/esc close",
+                theme.glyphs.separator
+            ),
         ),
         Mode::Settings => (
             "UI",
@@ -3140,7 +3160,7 @@ fn prompt_spans<'a>(app: &App, theme: &Theme) -> Vec<Span<'a>> {
     let mut chars = rest.chars();
     let at = chars.next();
     let after = chars.as_str();
-    let blink = (app.frame / CURSOR_BLINK_FRAMES).is_multiple_of(2);
+    let blink = theme.motion.is_reduced() || (app.frame / CURSOR_BLINK_FRAMES).is_multiple_of(2);
     let mut spans = vec![Span::styled(before.to_owned(), Style::new().fg(theme.text))];
     match at {
         Some(character) => {
@@ -3270,7 +3290,7 @@ fn draw_toast(
         })
         .collect();
     let block = Block::bordered()
-        .border_type(overlay_border(theme))
+        .border_set(overlay_border(theme))
         .border_style(Style::new().fg(colour))
         .title(Line::from(Span::styled(
             format!("{}{title} ", if theme.glyphs.ascii { "- " } else { "═ " }),
@@ -3328,7 +3348,7 @@ fn draw_settings(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let popup = centred_box(area, 58, 9);
     frame.render_widget(Clear, popup);
     let block = Block::bordered()
-        .border_type(overlay_border(theme))
+        .border_set(overlay_border(theme))
         .border_style(Style::new().fg(theme.overlay))
         .padding(Padding::horizontal(1))
         .title(Span::styled(
@@ -3432,7 +3452,7 @@ fn draw_help(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         app.help_scroll = 0;
         app.help_max_scroll = 0;
         let block = Block::bordered()
-            .border_type(overlay_border(theme))
+            .border_set(overlay_border(theme))
             .border_style(Style::new().fg(theme.overlay))
             .title(Span::styled(
                 overlay_title("KEYS", theme),
@@ -3483,7 +3503,7 @@ fn draw_help(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         overlay_title("KEYS", theme)
     };
     let block = Block::bordered()
-        .border_type(overlay_border(theme))
+        .border_set(overlay_border(theme))
         .border_style(Style::new().fg(theme.overlay))
         .title(Span::styled(
             title,
@@ -3498,11 +3518,20 @@ fn draw_help(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     );
 }
 
-fn overlay_border(theme: &Theme) -> BorderType {
+fn overlay_border(theme: &Theme) -> ratatui::symbols::border::Set<'static> {
     if theme.glyphs.ascii {
-        BorderType::Plain
+        ratatui::symbols::border::Set {
+            top_left: "+",
+            top_right: "+",
+            bottom_left: "+",
+            bottom_right: "+",
+            vertical_left: "|",
+            vertical_right: "|",
+            horizontal_top: "-",
+            horizontal_bottom: "-",
+        }
     } else {
-        BorderType::Double
+        ratatui::symbols::border::DOUBLE
     }
 }
 
@@ -3660,7 +3689,8 @@ mod tests {
     use ratatui::{Terminal, backend::TestBackend};
 
     use super::{
-        comment_date, compact_count, display_width, draw, truncate_to_width, wrap_to_width,
+        CURSOR_BLINK_FRAMES, comment_date, compact_count, display_width, draw, truncate_to_width,
+        wrap_to_width,
     };
     use crate::app::{AlbumState, App, ArtistState, Focus, Mode, SearchEntry, View};
     use crate::theme::Theme;
@@ -4305,6 +4335,68 @@ mod tests {
             let screen = render(&mut app, 100, 24);
             assert!(!screen.contains(" - "), "{mode:?}: {screen}");
         }
+    }
+
+    #[test]
+    fn reduced_motion_freezes_spinners_and_hides_the_spectrum() {
+        let mut app = App::new();
+        app.status.track = Some(track("Mota"));
+        app.status.loading = true;
+        let reduced = Theme::cyber().with_motion("reduced");
+        let first = render_rows(&mut app, 120, 30, reduced).join("\n");
+        app.frame = 3;
+        let second = render_rows(&mut app, 120, 30, reduced).join("\n");
+        assert_eq!(first, second, "reduced motion must not animate");
+        assert!(!first.contains("SIG"), "the spectrum is hidden: {first}");
+
+        let full = Theme::cyber().with_motion("full");
+        let first = render_rows(&mut app, 120, 30, full).join("\n");
+        app.frame = 0;
+        let second = render_rows(&mut app, 120, 30, full).join("\n");
+        assert_ne!(first, second, "full motion animates the spinner");
+    }
+
+    #[test]
+    fn reduced_motion_keeps_the_prompt_cursor_steady() {
+        let mut app = App::new();
+        app.mode = Mode::Search;
+        let reduced = Theme::cyber().with_motion("reduced");
+        let steady = render_rows(&mut app, 100, 24, reduced).join("\n");
+        app.frame = CURSOR_BLINK_FRAMES;
+        let later = render_rows(&mut app, 100, 24, reduced).join("\n");
+        assert_eq!(steady, later);
+    }
+
+    #[test]
+    fn ascii_mode_never_emits_unicode() {
+        let theme = Theme::resolve("cyber", "ascii", "compact").with_motion("reduced");
+        let cases: [fn(&mut App); 8] = [
+            |app| app.mode = Mode::Normal,
+            |app| app.mode = Mode::Queue,
+            |app| app.mode = Mode::History,
+            |app| app.mode = Mode::Settings,
+            |app| app.mode = Mode::Help,
+            |app| app.mode = Mode::Comments,
+            |app| app.view = View::Toplists,
+            |app| app.view = View::Search,
+        ];
+        for setup in cases {
+            let mut app = App::new();
+            setup(&mut app);
+            let screen = render_rows(&mut app, 120, 30, theme).join("\n");
+            assert!(
+                screen.is_ascii(),
+                "non-ASCII glyph in ascii mode: {:?}",
+                screen.chars().filter(|c| !c.is_ascii()).collect::<String>()
+            );
+        }
+    }
+
+    #[test]
+    fn mono_selection_is_really_reversed() {
+        let theme = Theme::resolve("mono", "unicode", "compact");
+        assert_eq!(theme.selection_bg, ratatui::style::Color::White);
+        assert_eq!(theme.selection_fg, ratatui::style::Color::Black);
     }
 
     #[test]

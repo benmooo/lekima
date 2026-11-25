@@ -39,6 +39,11 @@ motion = "auto"          # auto | full | reduced
   fonts where `█ ░ ▌ ▶` render unevenly.
 - `density = "comfortable"` inserts a blank row between track rows.
 - `NO_COLOR=1` keeps the glyph/density choice but removes colour.
+- `motion = "reduced"` freezes spinners and the prompt cursor and hides the
+  spectrum; `auto` follows `TERM=dumb`/CI, `full` always animates.
+- `LEKIMA_COLOR=truecolor|256|16|mono` forces a colour capability. 16-colour
+  mode keeps hue and drops the neon; mono uses reverse-video selection.
+- `LEKIMA_MOTION=auto|full|reduced` overrides the config value.
 
 ## iTerm2
 

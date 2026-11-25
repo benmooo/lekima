@@ -186,6 +186,163 @@ impl Density {
     }
 }
 
+/// Animation policy. `Auto` follows the terminal (`TERM=dumb`, CI).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Motion {
+    #[default]
+    Auto,
+    Full,
+    Reduced,
+}
+
+impl Motion {
+    #[must_use]
+    pub fn from_name(name: &str) -> Self {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "full" => Self::Full,
+            "reduced" | "none" | "off" => Self::Reduced,
+            _ => Self::Auto,
+        }
+    }
+
+    /// Resolves `Auto` against the environment.
+    #[must_use]
+    pub fn resolve(self, quiescent: bool) -> Self {
+        match self {
+            Self::Auto if quiescent => Self::Reduced,
+            Self::Auto => Self::Full,
+            other => other,
+        }
+    }
+
+    #[must_use]
+    pub fn is_reduced(self) -> bool {
+        matches!(self, Self::Reduced)
+    }
+}
+
+/// Terminal colour capability.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ColorMode {
+    #[default]
+    Truecolor,
+    Ansi256,
+    Ansi16,
+    Mono,
+}
+
+impl ColorMode {
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "truecolor" | "24bit" | "full" => Some(Self::Truecolor),
+            "256" | "ansi256" => Some(Self::Ansi256),
+            "16" | "ansi16" | "ansi" => Some(Self::Ansi16),
+            "mono" | "none" | "off" => Some(Self::Mono),
+            _ => None,
+        }
+    }
+
+    /// `LEKIMA_COLOR` wins; otherwise `NO_COLOR` forces mono and a missing
+    /// `COLORTERM`/`TERM` capability stays truecolor (the safest default for
+    /// the palettes this project ships).
+    #[must_use]
+    pub fn from_env() -> Self {
+        if let Ok(value) = std::env::var("LEKIMA_COLOR")
+            && let Some(mode) = Self::from_name(&value)
+        {
+            return mode;
+        }
+        if std::env::var_os("NO_COLOR").is_some() {
+            return Self::Mono;
+        }
+        let colorterm = std::env::var("COLORTERM")
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if colorterm.contains("truecolor") || colorterm.contains("24bit") {
+            return Self::Truecolor;
+        }
+        if colorterm.contains("256") {
+            return Self::Ansi256;
+        }
+        let term = std::env::var("TERM")
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if term.contains("256color") {
+            Self::Ansi256
+        } else if term.is_empty() || term == "dumb" {
+            Self::Mono
+        } else {
+            Self::Truecolor
+        }
+    }
+}
+
+/// Nearest xterm-256 index for an RGB colour (6×6×6 cube, else grey ramp).
+fn rgb_to_256(red: u8, green: u8, blue: u8) -> u8 {
+    if red == green && green == blue {
+        if red < 8 {
+            return 16;
+        }
+        if red > 238 {
+            return 231;
+        }
+        return 232 + (red - 8) / 10;
+    }
+    let step = |value: u8| -> u8 {
+        match value {
+            0..=47 => 0,
+            48..=114 => 1,
+            115..=154 => 2,
+            155..=194 => 3,
+            195..=234 => 4,
+            _ => 5,
+        }
+    };
+    16 + 36 * step(red) + 6 * step(green) + step(blue)
+}
+
+/// Best-effort 16-colour approximation: keep hue, lose the neon.
+fn rgb_to_16(red: u8, green: u8, blue: u8) -> Color {
+    let max = red.max(green).max(blue);
+    let min = red.min(green).min(blue);
+    if max.saturating_sub(min) < 24 {
+        return if max < 96 {
+            Color::Black
+        } else if max < 180 {
+            Color::Gray
+        } else {
+            Color::White
+        };
+    }
+    let bright = max >= 160;
+    let index = match (red >= max / 2, green >= max / 2, blue >= max / 2) {
+        (true, false, false) => 1,
+        (false, true, false) => 2,
+        (true, true, false) => 3,
+        (false, false, true) => 4,
+        (true, false, true) => 5,
+        (false, true, true) => 6,
+        _ => 7,
+    };
+    match (index, bright) {
+        (1, false) => Color::Red,
+        (2, false) => Color::Green,
+        (3, false) => Color::Yellow,
+        (4, false) => Color::Blue,
+        (5, false) => Color::Magenta,
+        (6, false) => Color::Cyan,
+        (7, false) => Color::Gray,
+        (1, true) => Color::LightRed,
+        (2, true) => Color::LightGreen,
+        (3, true) => Color::LightYellow,
+        (4, true) => Color::LightBlue,
+        (5, true) => Color::LightMagenta,
+        (6, true) => Color::LightCyan,
+        _ => Color::White,
+    }
+}
+
 /// Colours and accents for one visual theme.
 #[derive(Debug, Clone, Copy)]
 pub struct Theme {
@@ -218,6 +375,8 @@ pub struct Theme {
     pub meter_empty: Color,
     pub glyphs: Glyphs,
     pub density: Density,
+    /// Animation policy; `Reduced` freezes spinners and hides the spectrum.
+    pub motion: Motion,
 }
 
 /// WCAG 2.x relative luminance of an 8-bit RGB colour.
@@ -276,6 +435,7 @@ impl Theme {
             meter_empty: Color::Rgb(42, 54, 62),
             glyphs: Glyphs::UNICODE,
             density: Density::Compact,
+            motion: Motion::Auto,
         }
     }
 
@@ -301,6 +461,7 @@ impl Theme {
             meter_empty: Color::Rgb(52, 44, 32),
             glyphs: Glyphs::UNICODE,
             density: Density::Compact,
+            motion: Motion::Auto,
         }
     }
 
@@ -316,8 +477,8 @@ impl Theme {
             muted: Color::Gray,
             dim: Color::DarkGray,
             ground: Color::Reset,
-            selection_bg: Color::Reset,
-            selection_fg: Color::White,
+            selection_bg: Color::White,
+            selection_fg: Color::Black,
             panel: Color::Gray,
             overlay: Color::White,
             badge_bg: Color::White,
@@ -326,6 +487,7 @@ impl Theme {
             meter_empty: Color::DarkGray,
             glyphs: Glyphs::UNICODE,
             density: Density::Compact,
+            motion: Motion::Auto,
         }
     }
 
@@ -351,6 +513,7 @@ impl Theme {
             meter_empty: Color::Rgb(215, 222, 229),
             glyphs: Glyphs::UNICODE,
             density: Density::Compact,
+            motion: Motion::Auto,
         }
     }
 
@@ -376,6 +539,7 @@ impl Theme {
             meter_empty: Color::Rgb(68, 71, 90),
             glyphs: Glyphs::UNICODE,
             density: Density::Compact,
+            motion: Motion::Auto,
         }
     }
 
@@ -401,6 +565,7 @@ impl Theme {
             meter_empty: Color::Rgb(60, 56, 54),
             glyphs: Glyphs::UNICODE,
             density: Density::Compact,
+            motion: Motion::Auto,
         }
     }
 
@@ -426,6 +591,7 @@ impl Theme {
             meter_empty: Color::Rgb(67, 76, 94),
             glyphs: Glyphs::UNICODE,
             density: Density::Compact,
+            motion: Motion::Auto,
         }
     }
 
@@ -451,6 +617,7 @@ impl Theme {
             meter_empty: Color::Rgb(42, 27, 74),
             glyphs: Glyphs::UNICODE,
             density: Density::Compact,
+            motion: Motion::Auto,
         }
     }
 
@@ -476,6 +643,7 @@ impl Theme {
             meter_empty: Color::Rgb(18, 61, 28),
             glyphs: Glyphs::UNICODE,
             density: Density::Compact,
+            motion: Motion::Auto,
         }
     }
 
@@ -501,6 +669,7 @@ impl Theme {
             meter_empty: Color::Rgb(7, 54, 66),
             glyphs: Glyphs::UNICODE,
             density: Density::Compact,
+            motion: Motion::Auto,
         }
     }
 
@@ -526,6 +695,7 @@ impl Theme {
             meter_empty: Color::Rgb(41, 46, 66),
             glyphs: Glyphs::UNICODE,
             density: Density::Compact,
+            motion: Motion::Auto,
         }
     }
 
@@ -551,6 +721,64 @@ impl Theme {
             meter_empty: Color::Rgb(49, 50, 68),
             glyphs: Glyphs::UNICODE,
             density: Density::Compact,
+            motion: Motion::Auto,
+        }
+    }
+
+    /// Applies a configured animation policy. `LEKIMA_MOTION` wins.
+    #[must_use]
+    pub fn with_motion(mut self, spec: &str) -> Self {
+        self.motion = std::env::var("LEKIMA_MOTION")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .map_or_else(
+                || Motion::from_name(spec),
+                |value| Motion::from_name(&value),
+            );
+        self
+    }
+
+    /// Downgrades every RGB colour to the terminal's capability. `Mono`
+    /// returns the monochrome palette with the caller's glyphs and density.
+    #[must_use]
+    pub fn with_color_mode(self, mode: ColorMode) -> Self {
+        let map = |color: Color| match mode {
+            ColorMode::Truecolor => color,
+            ColorMode::Ansi256 => match color {
+                Color::Rgb(red, green, blue) => Color::Indexed(rgb_to_256(red, green, blue)),
+                other => other,
+            },
+            ColorMode::Ansi16 => match color {
+                Color::Rgb(red, green, blue) => rgb_to_16(red, green, blue),
+                other => other,
+            },
+            ColorMode::Mono => color,
+        };
+        if mode == ColorMode::Mono {
+            let mut mono = Self::mono();
+            mono.glyphs = self.glyphs;
+            mono.density = self.density;
+            mono.motion = self.motion;
+            return mono;
+        }
+        Self {
+            accent: map(self.accent),
+            accent_alt: map(self.accent_alt),
+            hot: map(self.hot),
+            warn: map(self.warn),
+            text: map(self.text),
+            muted: map(self.muted),
+            dim: map(self.dim),
+            ground: map(self.ground),
+            selection_bg: map(self.selection_bg),
+            selection_fg: map(self.selection_fg),
+            panel: map(self.panel),
+            overlay: map(self.overlay),
+            badge_bg: map(self.badge_bg),
+            badge_fg: map(self.badge_fg),
+            meter_full: map(self.meter_full),
+            meter_empty: map(self.meter_empty),
+            ..self
         }
     }
 
@@ -566,14 +794,19 @@ impl Theme {
             .ok()
             .and_then(|value| value.rsplit(';').next()?.parse::<u8>().ok())
             .is_some_and(|background| background >= 7);
-        Self::resolve_with(
+        let mut theme = Self::resolve_with(
             name,
             glyphs,
             density,
             env.as_deref(),
             std::env::var_os("NO_COLOR").is_some(),
             auto_light,
+        );
+        theme.motion = Motion::from_name(
+            &std::env::var("LEKIMA_MOTION").unwrap_or_else(|_| "auto".to_owned()),
         )
+        .resolve(quiescent_terminal());
+        theme.with_color_mode(ColorMode::from_env())
     }
 
     /// Pure resolver used by tests and by [`Self::resolve`].
@@ -620,12 +853,20 @@ impl Theme {
 
     #[must_use]
     pub fn is_mono(self) -> bool {
-        self.accent == Color::White && self.selection_bg == Color::Reset
+        self.ground == Color::Reset
     }
+}
+
+/// True on terminals where nothing should animate (`TERM=dumb`, CI).
+fn quiescent_terminal() -> bool {
+    std::env::var_os("CI").is_some()
+        || std::env::var("TERM").is_ok_and(|term| term.eq_ignore_ascii_case("dumb"))
 }
 
 #[cfg(test)]
 mod tests {
+    use ratatui::style::Color;
+
     use super::Theme;
 
     #[test]
@@ -764,6 +1005,46 @@ mod tests {
                 "{name}: badge pair"
             );
         }
+    }
+
+    #[test]
+    fn colour_modes_downgrade_rgb() {
+        use super::{ColorMode, rgb_to_256};
+
+        let sixteen = Theme::cyber().with_color_mode(ColorMode::Ansi16);
+        for color in [
+            sixteen.accent,
+            sixteen.text,
+            sixteen.muted,
+            sixteen.hot,
+            sixteen.selection_bg,
+        ] {
+            assert!(!matches!(color, Color::Rgb(..)), "{color:?} is still RGB");
+        }
+
+        let indexed = Theme::cyber().with_color_mode(ColorMode::Ansi256);
+        assert!(matches!(indexed.accent, Color::Indexed(_)));
+
+        let mono = Theme::cyber().with_color_mode(ColorMode::Mono);
+        assert!(mono.is_mono());
+        assert_eq!(mono.selection_bg, Color::White);
+        assert_eq!(mono.selection_fg, Color::Black);
+
+        assert_eq!(rgb_to_256(0, 0, 0), 16);
+        assert_eq!(rgb_to_256(255, 255, 255), 231);
+        assert_eq!(rgb_to_256(0, 255, 0), 46);
+    }
+
+    #[test]
+    fn motion_names_resolve() {
+        use super::Motion;
+
+        assert_eq!(Motion::from_name("reduced"), Motion::Reduced);
+        assert_eq!(Motion::from_name("FULL"), Motion::Full);
+        assert_eq!(Motion::from_name("auto"), Motion::Auto);
+        assert_eq!(Motion::Auto.resolve(true), Motion::Reduced);
+        assert_eq!(Motion::Auto.resolve(false), Motion::Full);
+        assert!(Motion::Reduced.is_reduced());
     }
 
     #[test]

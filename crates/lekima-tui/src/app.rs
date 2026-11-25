@@ -29,6 +29,8 @@ pub struct UiPreferences {
     pub theme: String,
     pub glyphs: String,
     pub density: String,
+    /// `auto`, `full` or `reduced`; the TUI only honours the reduced flag.
+    pub motion: String,
     pub lyrics_translation: bool,
 }
 
@@ -38,6 +40,7 @@ impl Default for UiPreferences {
             theme: "cyber".to_owned(),
             glyphs: "unicode".to_owned(),
             density: "compact".to_owned(),
+            motion: "auto".to_owned(),
             lyrics_translation: false,
         }
     }
@@ -577,6 +580,7 @@ impl App {
             &self.preferences.glyphs,
             &self.preferences.density,
         )
+        .with_motion(&self.preferences.motion)
     }
 
     pub fn set_preferences(&mut self, preferences: UiPreferences) {
