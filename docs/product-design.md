@@ -75,7 +75,7 @@ provider, done well, with a UI that never gets in the way.
 | Area | Included |
 | --- | --- |
 | Session | Assisted web login (`lekima login --qr`, falls back to a terminal QR) or a pasted browser cookie (`--cookie-file -`), `whoami`, `logout` |
-| Catalogue | Search tracks, playlists and artists; track metadata; playlist listing and full playlist paging; lyrics |
+| Catalogue | Search tracks, playlists and artists; track metadata; playlist listing, paging and editing (create, rename, describe, add/remove tracks, delete); lyrics |
 | Playback | Play/pause/resume/stop, next/previous, seek, volume, mute, repeat off/all/one, autoplay next |
 | Queue | View, enqueue (append or “play next”), clear, jump |
 | TUI | Now-playing bar with progress, track table, sidebar (playlists), search prompt, help overlay, vim keybindings, resize-safe layout |
@@ -159,6 +159,14 @@ and a declared set of commands back on stdout. Hooks stay out of process
 The 0.11.1 patch makes buffered-range shading follow the decoder's own
 byte-to-time curve, so variable-bitrate streams shade the bytes that are really
 local instead of a constant-bitrate guess.
+
+### v0.13 — “playlist editing” (unreleased)
+
+> Detailed specification: [`sprint-12/`](./sprint-12/).
+
+The first provider writes: create a playlist, rename or describe it, add and
+remove tracks, delete it — from the CLI, MCP, HTTP and the TUI command line,
+backed by `ncmapi 1.10`.
 
 ### v0.12 — “design system” (shipped in 0.12.0)
 
@@ -332,6 +340,12 @@ lekima queue clear
 lekima search <QUERY> [--kind track|album|artist|playlist] [--limit N] [--json]
 lekima playlist list [--json]
 lekima playlist show <ID> [--json]
+lekima playlist create <NAME> [--private] [--json]
+lekima playlist rename <ID> <NAME>
+lekima playlist describe <ID> <TEXT>
+lekima playlist add <ID> --ids <ID,ID>
+lekima playlist remove <ID> --ids <ID,ID>
+lekima playlist delete <ID> --yes
 lekima lyrics [--id ID] [--json]
 lekima daily [--play] | fm start|next|trash|stop | toplist list|show
 lekima cloud [--limit N] [--play] | liked [--play] | like [--id] [--unlike]
@@ -432,6 +446,7 @@ token.
 | **M14 Daily-driver loop** (done, 0.10.0) | Desktop notifications, durable listening history across CLI/MCP/HTTP/TUI | 0.10.0 released |
 | **M15 Extensions** (done, 0.11.0) | Out-of-process plugin hooks, capability-checked commands, `doctor` reporting, VBR-accurate buffered ranges | 0.11.1 released |
 | **M16 Design system** (done, 0.12.0) | `lekima ui`, measurable theme contract, one list grammar, unified surfaces, colour downgrade, reduced motion, text fixtures | 0.12.0 released |
+| **M17 Playlist editing** (unreleased) | Create, rename, describe, add/remove tracks and delete, with `ncmapi 1.10` write routes | 0.13.0 |
 
 ## 9. Risks & mitigations
 

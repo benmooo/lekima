@@ -1713,6 +1713,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+ "tokio",
 ]
 
 [[package]]
@@ -1980,9 +1981,9 @@ checksum = "743fb55ba31b18fb1ecef6bdc9aa2743314978ac084044301a7eee33fb99a20d"
 
 [[package]]
 name = "ncmapi"
-version = "1.10.1"
+version = "1.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d6d03eb584ac5aa2cba778c7f21069b81e9df9584736a040275b59fdd2cac76"
+checksum = "e30b9685bc9ea409ad072a46d098af0f0493fd623e34326ca13b2feaf3a95714"
 dependencies = [
  "aes",
  "async-trait",

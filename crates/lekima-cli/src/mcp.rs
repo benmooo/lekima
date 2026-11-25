@@ -111,7 +111,13 @@ async fn tools_call(
                 }),
             )
         }
-        Err(error) => tool_error(id, "backend", &error.message),
+        Err(error) => {
+            let code = serde_json::to_value(error.code)
+                .ok()
+                .and_then(|value| value.as_str().map(str::to_owned))
+                .unwrap_or_else(|| "backend".to_owned());
+            tool_error(id, &code, &error.message)
+        }
     }
 }
 

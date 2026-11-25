@@ -371,7 +371,7 @@ Reference: [`http.md`](./http.md).
 
 ### 8.1 Extending `ncmapi-rs`
 
-`ncmapi` 1.9 is published. 1.1 added playlist detail/paging, lyrics and QR
+`ncmapi` 1.10 is published. 1.1 added playlist detail/paging, lyrics and QR
 login; 1.2 added daily recommendations, personal FM, likes and toplists; 1.9
 added album search results, artist profiles, artist album pages and album
 detail with tracks.
@@ -386,6 +386,10 @@ transport's request-hash cache cannot replay stale answers.
 | QR login start/poll | `/eapi/login/qrcode/unikey`, `/eapi/login/qrcode/client/login` (`type: 3`) | `lekima login --qr --no-browser` (terminal fallback) — **done in 1.3** |
 | Assisted web login | Chrome DevTools `Network.getAllCookies` over a dedicated profile | `lekima login --qr` — **done in 0.6** |
 | Playlist detail with tracks | `/api/v6/playlist/detail` + `/api/v3/song/detail` | `playlist show`, sidebar — **done in 1.1** |
+| Create a playlist | `/api/playlist/create` | `playlist create` — **done in 1.10** |
+| Rename / describe | `/api/playlist/update/name`, `/api/playlist/desc/update` | `playlist rename`, `playlist describe` — **done in 1.10** |
+| Add / remove tracks | `/api/playlist/manipulate/tracks` | `playlist add`, `playlist remove` — **done in 1.10** |
+| Delete a playlist | `/api/playlist/remove` | `playlist delete --yes` — **done in 1.10** |
 | Lyrics | `/api/song/lyric` | `lekima lyrics` — **done in 1.1** |
 | Public comments | `/api/v1/resource/comments/R_SO_4_{id}` | `lekima comments`, TUI `C` — **done in 1.7** |
 | Daily recommendations | `/api/v3/discovery/recommend/songs` | Home / `lekima daily` — **done in 1.2** |
@@ -399,7 +403,7 @@ through `/api/v3/song/detail` in batches of 500.
 
 Process: developed on a branch, contract tests per route, deterministic suite
 green, `cargo publish --dry-run`, tag `v1.1.0`, publish, then pin
-`ncmapi = "1.1"` in this workspace (no path patch). Future additions follow the
+`ncmapi = "1.10"` in this workspace (no path patch). Future additions follow the
 same flow as `1.2.0`. Public API stays additive; the existing
 `NcmClient`/service shape is preserved.
 

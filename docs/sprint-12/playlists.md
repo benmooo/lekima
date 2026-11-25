@@ -31,8 +31,12 @@ and `400 请求参数错误` respectively; ncmapi 1.10.1 carries the fix.
   provider error, not a transport error.
 - `playlist/create` is the only non-idempotent call: the CLI prints the new id
   and never retries on timeout.
-- Adding an already-present track is a no-op on the provider; removing a missing
-  one returns the same `code`, so both are safe to repeat.
+- Adding an already-present track answers `502 歌单内歌曲重复`; `ncmapi` treats
+  that as success, so adding and retrying are safe. Removing a track that is not
+  there is a provider no-op.
+- Deleting a playlist is idempotent **at the provider**: a missing id still
+  answers `200`, so `playlist delete` reports success for an id that is not
+  there. The client does not pre-check ownership.
 
 ## 3. Domain and adapter
 
@@ -103,8 +107,8 @@ multi-select, cover) is a design of its own:
 | `:playlist add ID` | Adds the current track to playlist `ID` |
 | `:playlist delete ID yes` | Deletes; the literal `yes` is the confirmation |
 
-The footer and `?` overlay list the new commands. A dedicated pane is a
-follow-up, not a hidden requirement.
+The `?` overlay names `:playlist` under the command-line binding. A dedicated
+pane is a follow-up, not a hidden requirement.
 
 ## 6. Tests
 
@@ -126,7 +130,8 @@ follow-up, not a hidden requirement.
 3. A private playlist is not listed on the public profile.
 4. A missing session yields `unauthorized` (exit 3) without a provider stack
    trace.
-5. Deleting a playlist removes it from `playlist list` and the TUI sidebar.
+5. Deleting a playlist removes it from `playlist list`; the TUI refreshes the
+   sidebar on the ack.
 6. MCP `playlist_add` and `POST /v1/command` with `{"type":"playlist_add"}` do
    the same thing as the CLI.
 

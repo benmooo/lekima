@@ -330,3 +330,76 @@ pub trait CredentialsStore: Send + Sync {
 
     fn clear(&self) -> Result<()>;
 }
+
+#[cfg(test)]
+mod tests {
+    use async_trait::async_trait;
+
+    use super::MusicService;
+    use crate::model::{PlaylistId, Quality, SearchKind, SearchResults, Track, TrackId};
+
+    struct ReadOnlyService;
+
+    #[async_trait]
+    impl MusicService for ReadOnlyService {
+        async fn search(
+            &self,
+            _query: &str,
+            _kind: SearchKind,
+            _limit: u32,
+            _offset: u32,
+        ) -> crate::Result<SearchResults> {
+            Ok(SearchResults::default())
+        }
+
+        async fn tracks(&self, _ids: &[TrackId]) -> crate::Result<Vec<Track>> {
+            Ok(Vec::new())
+        }
+
+        async fn stream_url(&self, _id: TrackId, _quality: Quality) -> crate::Result<String> {
+            Err(crate::DomainError::Unsupported("no streams".to_owned()))
+        }
+
+        async fn playlists(
+            &self,
+            _user: Option<crate::model::UserId>,
+        ) -> crate::Result<Vec<crate::model::Playlist>> {
+            Ok(Vec::new())
+        }
+
+        async fn playlist_tracks(&self, _id: PlaylistId) -> crate::Result<Vec<Track>> {
+            Ok(Vec::new())
+        }
+
+        async fn current_user(&self) -> crate::Result<Option<crate::model::UserProfile>> {
+            Ok(None)
+        }
+    }
+
+    #[tokio::test]
+    async fn write_methods_default_to_unsupported() {
+        let service = ReadOnlyService;
+        assert!(matches!(
+            service.playlist_create("x", "", false).await,
+            Err(crate::DomainError::Unsupported(_))
+        ));
+        assert!(matches!(
+            service
+                .playlist_update(PlaylistId(1), Some("x"), None)
+                .await,
+            Err(crate::DomainError::Unsupported(_))
+        ));
+        assert!(matches!(
+            service.playlist_add(PlaylistId(1), &[TrackId(2)]).await,
+            Err(crate::DomainError::Unsupported(_))
+        ));
+        assert!(matches!(
+            service.playlist_remove(PlaylistId(1), &[TrackId(2)]).await,
+            Err(crate::DomainError::Unsupported(_))
+        ));
+        assert!(matches!(
+            service.playlist_delete(PlaylistId(1)).await,
+            Err(crate::DomainError::Unsupported(_))
+        ));
+    }
+}

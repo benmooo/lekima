@@ -15,3 +15,6 @@ thiserror.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
+# Test-only: the async trait defaults need a runtime. The crate itself stays
+# runtime-free.
+tokio = { workspace = true, features = ["macros", "rt"] }

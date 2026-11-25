@@ -349,6 +349,8 @@ pub struct App {
     pub queue: Vec<Track>,
     /// Configured hooks, as reported by the daemon at startup.
     pub hooks: Vec<lekima_ipc::HookStatus>,
+    /// A playlist write is in flight; the ack refreshes the sidebar.
+    playlist_sync: bool,
     /// Finished plays, newest first, as returned by the daemon.
     pub plays: Vec<lekima_domain::PlayRecord>,
     pub plays_selection: usize,
@@ -421,6 +423,7 @@ impl Default for App {
             playlists: Vec::new(),
             queue: Vec::new(),
             hooks: Vec::new(),
+            playlist_sync: false,
             plays: Vec::new(),
             plays_selection: 0,
             plays_loading: false,
@@ -1141,7 +1144,7 @@ impl App {
                     self.notify("nothing playing", true);
                     return Action::None;
                 };
-                self.notify(format!("added to playlist {id}"), false);
+                self.playlist_sync = true;
                 Action::Call(Command::PlaylistAdd {
                     id: id.into(),
                     tracks: vec![track],
@@ -1157,6 +1160,7 @@ impl App {
                     self.notify("confirm with :playlist delete <id> yes", true);
                     return Action::None;
                 }
+                self.playlist_sync = true;
                 Action::Call(Command::PlaylistDelete { id: id.into() })
             }
             _ => {
@@ -2322,7 +2326,13 @@ impl App {
                         }
                         self.notify(if liked { "+ liked" } else { "- unliked" }, false);
                     }
-                    Reply::Pong | Reply::Ack | Reply::Welcome { .. } | Reply::Subscribed { .. } => {
+                    Reply::Pong | Reply::Welcome { .. } | Reply::Subscribed { .. } => {}
+                    Reply::Ack => {
+                        if self.playlist_sync {
+                            self.playlist_sync = false;
+                            self.notify("playlist updated", false);
+                            return Action::Call(Command::Playlists);
+                        }
                     }
                 }
                 Action::None
@@ -3551,6 +3561,27 @@ mod history_tests {
             Action::Call(Command::PlaylistDelete { id }) => assert_eq!(id, 7.into()),
             other => panic!("unexpected {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_playlist_write_refreshes_the_sidebar_when_acked() {
+        let mut app = App::new();
+        app.status.track = Some(Track {
+            id: TrackId::from(42_u64),
+            name: "Song".to_owned(),
+            artists: Vec::new(),
+            album: None,
+            duration_ms: 1_000,
+        });
+
+        run(&mut app, "playlist add 7");
+        assert!(matches!(
+            app.apply(Ok(Reply::Ack)),
+            Action::Call(Command::Playlists)
+        ));
+
+        // A later unrelated ack does not refresh again.
+        assert!(matches!(app.apply(Ok(Reply::Ack)), Action::None));
     }
 
     #[test]

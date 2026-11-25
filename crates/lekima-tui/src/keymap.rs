@@ -155,7 +155,7 @@ pub const APP: &[Binding] = &[
     },
     Binding {
         key: ":",
-        description: "command line",
+        description: "command line (incl. :playlist)",
     },
     Binding {
         key: "Q / c-w 3",

@@ -131,8 +131,18 @@ fn ensure_success<T>(response: ApiResponse<T>) -> domain::Result<ApiResponse<T>>
         301 => Err(DomainError::AuthenticationRequired(
             "the music provider rejected the session; run `lekima login`".to_owned(),
         )),
+        403 => Err(DomainError::AuthenticationRequired(
+            "the music provider rejected the session; run `lekima login`".to_owned(),
+        )),
         404 => Err(DomainError::NotFound(format!(
             "the music provider could not find the requested item{}",
+            response
+                .message
+                .as_deref()
+                .map_or_else(String::new, |message| format!(": {message}"))
+        ))),
+        400 => Err(DomainError::InvalidInput(format!(
+            "the music provider rejected the request{}",
             response
                 .message
                 .as_deref()
@@ -306,10 +316,16 @@ impl MusicService for NcmMusicService {
         }
 
         // Create does not take a description; apply it as a follow-up update so
-        // the returned playlist matches what the caller asked for.
-        if !description.trim().is_empty() {
-            self.playlist_update(PlaylistId(id), None, Some(description))
-                .await?;
+        // the returned playlist matches what the caller asked for. Keep the id in
+        // the error, otherwise the user cannot find the playlist that now exists.
+        if !description.trim().is_empty()
+            && let Err(error) = self
+                .playlist_update(PlaylistId(id), None, Some(description))
+                .await
+        {
+            return Err(DomainError::Unavailable(format!(
+                "playlist {id} was created but its description was not set: {error}"
+            )));
         }
 
         Ok(Playlist {
@@ -426,11 +442,8 @@ impl MusicService for NcmMusicService {
             offset = offset.saturating_add(u32::try_from(received).unwrap_or(0));
         }
 
-        if tracks.is_empty() {
-            return Err(DomainError::NotFound(format!(
-                "playlist {id} has no tracks"
-            )));
-        }
+        // An empty playlist is a normal state, not a missing one: a playlist
+        // created a second ago has no tracks yet.
         Ok(tracks)
     }
 

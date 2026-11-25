@@ -142,13 +142,15 @@ daemon, a vim-driven TUI (responsive HUD, real spectrum, buffered shading,
 lyrics pane, history, UI settings, twelve themes), device selection, gapless
 playback, MPRIS/Now Playing, push events (`lekima watch`), an MCP stdio server
 (`lekima mcp`) and token-guarded HTTP control with a built-in phone remote
-(`lekima serve --http`, see [docs/http.md](docs/http.md)). `ncmapi` 1.9 is
+(`lekima serve --http`, see [docs/http.md](docs/http.md)). `ncmapi` 1.10 is
 published on crates.io.
 
 ```console
 $ lekima login --qr          # opens the web player in Chrome
 $ lekima playlist list
 $ lekima playlist show 3778678 | head
+$ lekima playlist create "Late night" --private
+$ lekima playlist add 18636965436 --ids 424474737
 $ lekima tui
 ```
 
