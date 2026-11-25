@@ -2438,7 +2438,7 @@ fn draw_history(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         }
         if show_played {
             cells.push(Span::styled(
-                format!("{:>6} ", entry.played_label()),
+                format!("{:>6}", entry.played_label()),
                 Style::new().fg(theme.muted),
             ));
         }
@@ -4538,10 +4538,10 @@ mod tests {
         app.plays = vec![play("Mota", true)];
         let rows = render_rows(&mut app, 120, 30, Theme::cyber());
         let row = rows.iter().find(|row| row.contains("manual")).expect("row");
-        assert!(!row.contains("manual	"), "{row:?}");
+        let at = row.find("manual").expect("kind is rendered");
         assert!(
-            row.contains("manual ") || row.trim_end().ends_with("manual"),
-            "kind column runs into the previous cell: {row:?}"
+            row[..at].ends_with(' '),
+            "kind column runs into the played cell: {row:?}"
         );
     }
 

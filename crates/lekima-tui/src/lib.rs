@@ -130,11 +130,16 @@ async fn event_loop(
                 }
             }
             _ = ticker.tick() => {
-                let message_before = app.message.as_ref().map(|message| message.created);
+                let visible_before = app
+                    .message
+                    .as_ref()
+                    .is_some_and(|message| message.is_visible(app.frame));
                 app.tick();
-                if !theme.motion.is_reduced()
-                    || app.message.as_ref().map(|message| message.created) != message_before
-                {
+                let visible_after = app
+                    .message
+                    .as_ref()
+                    .is_some_and(|message| message.is_visible(app.frame));
+                if !theme.motion.is_reduced() || visible_before != visible_after {
                     dirty = true;
                 }
                 // 20 Hz while playing for the spectrum; 1 Hz while the daemon
@@ -160,21 +165,11 @@ async fn event_loop(
 /// Reduced motion compares fingerprints so an unchanged status poll does not
 /// repaint the screen.
 fn status_fingerprint(app: &App) -> String {
+    // The debug form is stable enough for a 4 Hz comparison and covers every
+    // field a status frame can change, including the full buffered ranges.
     format!(
-        "{:?}|{:?}|{}|{}|{:?}|{}|{}|{}|{:?}|{}|{:?}|{:?}|{}|{}|{:?}|{:?}",
-        app.status.track.as_ref().map(|track| track.id),
-        app.status.status,
-        app.status.position_ms / 1000,
-        app.status.queue_length,
-        app.status.queue_index,
-        (app.status.volume * 100.0) as i32,
-        app.status.muted,
-        app.status.liked,
-        app.status.quality,
-        app.status.buffered.len(),
-        app.status.buffered.last().map(|range| range.end_ms),
-        app.status.repeat,
-        app.status.shuffle,
+        "{:?}|{}|{:?}|{:?}",
+        app.status,
         app.daemon_down,
         app.message.as_ref().map(|message| message.created),
         app.message.as_ref().map(|message| message.error),
