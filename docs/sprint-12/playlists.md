@@ -9,17 +9,23 @@ one, rename it, or put a track into it — the only documented way to change a
 playlist is the web player. Agents hit the same wall: MCP exposes
 `queue_playlist`, not `playlist_add`.
 
-## 2. Provider routes (`ncmapi 1.10`)
+## 2. Provider routes (`ncmapi 1.10.1`)
 
-All four are `WEAPI` POSTs; the transport already appends `csrf_token` from the
-session cookie, so no new signing code is needed.
+All are `WEAPI` POSTs; the transport already appends `csrf_token` from the
+session cookie, so no new signing code is needed. The first attempt used a
+combined `/api/playlist/update` and `/api/playlist/delete`; both are wrong, and
+live testing found the real routes:
 
 | Operation | Route | Payload | Response |
 | --- | --- | --- | --- |
 | Create | `POST /api/playlist/create` | `name`, `privacy` (`0` public, `10` private) | `{ code, id, playlist? }` |
-| Update | `POST /api/playlist/update` | `id`, and any of `name`, `desc`, `tags` | `{ code }` |
+| Rename | `POST /api/playlist/update/name` | `id`, `name` | `{ code }` |
+| Describe | `POST /api/playlist/desc/update` | `id`, `desc` | `{ code }` |
 | Manipulate | `POST /api/playlist/manipulate/tracks` | `op` (`add`/`del`), `pid`, `trackIds` (JSON string), `imme` (`true`) | `{ code }` |
-| Delete | `POST /api/playlist/delete` | `id` | `{ code }` |
+| Delete | `POST /api/playlist/remove` | `ids` as a JSON array string | `{ code }` |
+
+A combined `update` route and `playlist/delete` with `id` answer `404 接口未找到`
+and `400 请求参数错误` respectively; ncmapi 1.10.1 carries the fix.
 
 - Responses are decoded by the existing `ApiResponse`; a non-200 `code` is a
   provider error, not a transport error.
