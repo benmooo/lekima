@@ -309,24 +309,30 @@ Durations use concise `m:ss`; the clock is never clipped. ASCII mode uses
 ### Overlays
 
 - Only overlays use a border: double-line, `hot` (magenta), title `▓ KEYS ▓`.
-- Centred 68% × 78%, `Clear` behind.
+- Help is at most 100×22 (two columns at 80×24, scrollable single column below);
+  settings is 58×9. Both are centred with `Clear` behind and clamp to the frame.
 - Section labels inside use `//`, keys `accent_alt`, descriptions `text`.
 
 ## 6. Motion
 
-- Cursor blink on the input only (2 Hz, driven by the 250 ms tick).
-- No pulsing, no spinners with frames beyond a static glyph. A terminal player
-  should not twitch while you read.
-- Progress and meters update on events/ticks; no animation interpolation.
+- The loop ticks at 20 Hz. The spectrum redraws while playing, the loading
+  spinner steps at 5 Hz, and the prompt cursor toggles at 1 Hz.
+- Nothing else animates: progress is rendered as received, not interpolated.
+- `[ui] motion = reduced` (or `LEKIMA_MOTION`, or `TERM=dumb`/CI with `auto`)
+  freezes the spinner and cursor, hides `SIG`, and skips repaints when a status
+  poll would not change a cell. An idle reduced-motion player draws no frames.
 
 ## 7. Accessibility
 
 - `NO_COLOR` or `theme = "mono"` yields white/gray with reversed selection and
   identical glyphs. The `light` palette keeps dark text for light terminals.
-- ASCII glyph mode also uses `|` separators, plain overlay titles and `Enter`
-  instead of `⏎`; box-drawing borders stay because terminals that need ASCII
-  glyphs still render them acceptably.
-- Contrast: neon on the terminal background, never neon-on-neon text.
+- ASCII glyph mode emits no non-ASCII UI glyph: separators become `|`, borders
+  `+-|`, concept labels become words, and `Enter` replaces `⏎`. Provider text
+  (titles, artists, comments) is passed through and may still be CJK.
+- `LEKIMA_COLOR=256|16|mono` downgrades every role; mono selection is reverse
+  video, not a coloured background.
+- Contrast: every palette meets 4.5:1 for content and 3:1 for the pure accent
+  marker against its design `ground`; never neon-on-neon text.
 - Information is always double-encoded (glyph + colour, `//` + weight).
 - No key requires a mouse; no key chord conflicts with tmux (`Ctrl-b` is not
   bound).
