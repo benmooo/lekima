@@ -153,16 +153,24 @@ Durations use concise `m:ss`; the clock is never clipped. ASCII mode uses
 - Pane keys: `Ctrl-w 1` library, `Ctrl-w 2` list, `Ctrl-w 3` queue,
   `Ctrl-w 4` lyrics. Digits after `Ctrl-w` never become a count prefix.
 - Table header: `#`, blank marker column, `TITLE`, `ARTIST`, `TIME` in `panel`.
-- Row: dim index, marker column (only the playing track has one), title `text`,
-  artist `muted`, duration `dim`.
-- Selection: `▌` symbol in accent + `selection_bg`/`selection_fg`, bold.
-- Empty state: a compact, left-aligned `LEKIMA` block wordmark with a
-  `NETEASE CLOUD MUSIC // CONSOLE` subtitle and `▶` key hints (`/`, `Tab`,
-  `:`, `?`). Below 44×12 it collapses to one actionable line
-  (`// NOTHING LOADED · / search · Tab library`). No centred banner.
+- Row: `muted` index (`001`), marker column (only the playing track has one),
+  title `text`, artist `muted`, duration `muted` and right-aligned. Tracks,
+  queue and history share this gutter/index/marker vocabulary; history adds
+  right-aligned `AGE` and `PLAYED` columns plus `KIND`.
+- Selection: `▌` symbol in accent + `selection_bg`/`selection_fg`, bold; an
+  unfocused pane keeps the gutter marker in `muted`.
+- Empty state: every pane uses one anatomy — `// LABEL`, one sentence, then up
+  to three `▶ key hint` lines. The empty library is the only surface with brand
+  art: the compact `LEKIMA` block wordmark, `NETEASE CLOUD MUSIC // CONSOLE`
+  and hints for `/`, `Tab`, `:` and `?`; below 44×12 it collapses to one
+  actionable line (`// NOTHING LOADED · / search · Tab library`). No centred
+  banner.
 
 ### Catalogue pages
 
+- Metadata is right-aligned to the pane edge (year, track count, duration), so
+  rows read as columns even when titles differ in length; long metadata is
+  truncated with `…` at the pane edge, never mid-column.
 - Search shows a filter row above the prompt (`ALL TRACKS ALBUMS ARTISTS
   PLAYLISTS`); the active filter is inverted. `Tab`/`Shift-Tab` cycle,
   `Ctrl-1..5` jump.
@@ -216,7 +224,10 @@ Durations use concise `m:ss`; the clock is never clipped. ASCII mode uses
   and are written to `config.toml` when the TUI exits. The selected theme shows a
   two-cell accent swatch and the active source (`config.toml`, `LEKIMA_THEME` or
   `NO_COLOR`).
-- `:theme`, `:glyphs`, `:density` do the same from the command line.
+- `:theme`, `:glyphs`, `:density` do the same from the command line; `lekima ui`
+  reports and sets the same preferences without a daemon. The overlay is 58×9,
+  and on terminals narrower than 52 columns its hint collapses to
+  `h/l change · esc close` instead of clipping.
 
 ### History
 
@@ -278,7 +289,9 @@ Durations use concise `m:ss`; the clock is never clipped. ASCII mode uses
 - 60 columns max, `Clear` behind, wrapped and offset left of the lyrics pane.
 - Auto-dismiss after 4 seconds (80 ticks at 50 ms). The daemon-offline toast
   persists until the daemon answers again.
-- Hidden below 30 columns or 6 rows; the CLI still reports failures there.
+- At 30×6 the alert is still visible; below that it collapses to a single
+  severity-coloured footer line (`! message`), so an alarm is never silent.
+  The CLI still reports failures in headless runs.
 
 ### Overlays
 
