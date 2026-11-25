@@ -108,6 +108,24 @@ The tap lives at `benmooo/homebrew-tap`; Homebrew keeps it under
 Restarting the daemon makes the running player use the new binary. A running
 TUI keeps its old process until relaunched; say so in the release notes.
 
+### 1.5 crates.io
+
+The tag and the GitHub release do not publish to crates.io. Publish the whole
+workspace at the same version in dependency order, after the tag exists:
+
+```console
+$ for c in lekima-domain lekima-platform lekima-config lekima-ipc \
+      lekima-core lekima-ncm lekima-audio lekima-tui lekima; do
+    cargo publish -p "$c" --registry crates-io || break
+  done
+$ curl -s https://crates.io/api/v1/crates/lekima | jq -r .crate.max_version
+```
+
+`cargo` waits for each crate to appear in the index before the next one, so the
+loop takes a few minutes. Confirm the last line prints the new version; a
+release that only exists as a tag is invisible to `cargo install lekima` and to
+downstream builds.
+
 ## 2. Library release — `ncmapi`
 
 `ncmapi` is a published dependency. When `lekima` needs a new provider
@@ -198,8 +216,8 @@ $ cargo yank --version 1.9.0 --undo --registry crates-io   # unyank
 - [ ] version + changelog + README status + product scope
 - [ ] commit, tag, push `main` and the tag
 - [ ] GitHub Actions release is green and all four tarballs exist
+- [ ] workspace published to crates.io and `max_version` matches the tag
 - [ ] tap formula URLs and four checksums updated
 - [ ] `brew upgrade lekima` reports the new version
 - [ ] daemon restarted on the new binary; TUI relaunch noted
 - [ ] dependent crates pinned to the published library version (no path patch)
-- [ ] crates.io app-crate publication handled or explicitly deferred
