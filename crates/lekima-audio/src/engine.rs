@@ -475,11 +475,18 @@ impl AudioEngine for RodioAudioEngine {
     }
 
     fn take_track_boundary(&self) -> Option<TrackId> {
-        self.shared
+        let boundary = self
+            .shared
             .boundary
             .lock()
             .unwrap_or_else(|poison| poison.into_inner())
-            .take()
+            .take();
+        if boundary.is_some() {
+            // The next track is the preloaded in-memory one; the finished
+            // stream's byte ranges no longer describe what is playing.
+            self.cancel_spool();
+        }
+        boundary
     }
 }
 
@@ -772,7 +779,7 @@ fn audio_thread(
                         shared.position_ms.store(0, Ordering::Relaxed);
                         shared.wave.reset();
                         // Decode ahead so range fetches never block the device.
-                        let source = PrefetchSource::new(decoder, progress);
+                        let source = PrefetchSource::new_with_progress(decoder, progress);
                         player.append(Metered::new(source, Arc::clone(&shared.wave)));
                         player.play();
                         tracing::debug!("stream loaded from spool");
@@ -868,19 +875,29 @@ fn map_buffered_ranges(
     if total_bytes == 0 || duration_ms == 0 || ranges.is_empty() {
         return Vec::new();
     }
-    if ranges
-        .first()
-        .is_some_and(|range| range.start == 0 && range.end >= total_bytes)
-    {
+    // Full byte coverage needs no shading. Check the merged reach from 0
+    // rather than the mapped time: extrapolation clamps at the duration, so a
+    // time check could call a partially buffered file complete.
+    let mut reach = 0;
+    for range in ranges {
+        if range.start > reach {
+            break;
+        }
+        reach = reach.max(range.end);
+    }
+    if reach >= total_bytes {
         return Vec::new();
     }
 
+    // One snapshot for the whole pass: mapping a range against two different
+    // anchor lists could invert it or drop it for one poll.
+    let curve = progress.curve(total_bytes, duration_ms);
     let mut mapped: Vec<BufferedRange> = Vec::with_capacity(ranges.len());
     for range in ranges {
         // Variable-bitrate streams need the decoder's own byte-to-time curve;
         // the average bitrate is only the fallback before anchors exist.
-        let start_ms = progress.time_ms(range.start, total_bytes, duration_ms);
-        let end_ms = progress.time_ms(range.end, total_bytes, duration_ms);
+        let start_ms = curve.time_ms(range.start);
+        let end_ms = curve.time_ms(range.end);
         if end_ms <= start_ms {
             continue;
         }
@@ -890,9 +907,6 @@ fn map_buffered_ranges(
             }
             _ => mapped.push(BufferedRange { start_ms, end_ms }),
         }
-    }
-    if mapped.len() == 1 && mapped[0].start_ms == 0 && mapped[0].end_ms >= duration_ms {
-        return Vec::new();
     }
     mapped
 }
@@ -949,7 +963,7 @@ mod tests {
         progress.record(700);
 
         // Between (0,0) and (100,100): byte 50 is 50 ms, not the linear 100.
-        assert_eq!(progress.time_ms(50, 400, 800), 50);
+        assert_eq!(progress.curve(400, 800).time_ms(50), 50);
     }
 
     #[test]
@@ -960,8 +974,9 @@ mod tests {
         progress.set_bytes(1_000);
         progress.record(1_000);
 
-        assert_eq!(progress.time_ms(1_500, 2_000, 1_200), 1_200);
-        assert_eq!(progress.time_ms(9_999, 2_000, 1_200), 1_200);
+        let curve = progress.curve(2_000, 1_200);
+        assert_eq!(curve.time_ms(1_500), 1_200);
+        assert_eq!(curve.time_ms(9_999), 1_200);
     }
 
     #[test]

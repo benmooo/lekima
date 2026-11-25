@@ -226,8 +226,8 @@ pub trait AudioEngine: Send + Sync {
         false
     }
 
-    /// Actual decoded stream duration when the provider clipped it shorter than
-    /// the catalogue metadata (a preview). `None` for normal/unknown streams.
+    /// Actual decoded stream duration when the engine knows it. Shorter than the
+    /// catalogue metadata for a preview; `None` before the stream is open.
     fn stream_duration_ms(&self) -> Option<u64> {
         None
     }

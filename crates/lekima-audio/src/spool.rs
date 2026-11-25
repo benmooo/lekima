@@ -163,7 +163,7 @@ impl Spool {
 
     /// The byte-to-time curve the decoder learns for this stream.
     #[must_use]
-    pub fn progress(&self) -> Arc<Progress> {
+    pub(crate) fn progress(&self) -> Arc<Progress> {
         Arc::clone(&self.progress)
     }
 
@@ -269,31 +269,45 @@ const MAX_ANCHORS: usize = 512;
 ///
 /// A variable-bitrate file cannot be mapped by dividing bytes by the average
 /// bitrate: the first minute of a track may be 320 kbps and the rest 96 kbps,
-/// which shifts every later range by tens of seconds. The decoder records an
-/// anchor as it reads — "at this file offset it had produced this much audio" —
-/// and buffered byte ranges are translated through those anchors.
+/// which shifts every later range by tens of seconds.
+///
+/// The decoder records an anchor whenever it has produced another half second of
+/// audio: the file offset its reader had reached and the audio time it had
+/// produced. The offsets include the format reader's read-ahead (tens of
+/// kilobytes), so the curve is approximate to within one read buffer — far
+/// tighter than an average bitrate over a long track, and the only mapping
+/// available without moving decoding out of `rodio`.
 #[derive(Debug, Default)]
-pub struct Progress {
+pub(crate) struct Progress {
     bytes_read: AtomicU64,
     anchors: Mutex<Vec<Anchor>>,
 }
 
+/// One consistent snapshot of the curve, so a mapping pass cannot observe two
+/// different anchor lists for the same range.
+pub(crate) struct Curve {
+    anchors: Vec<Anchor>,
+    total_bytes: u64,
+    duration_ms: u64,
+}
+
 impl Progress {
     /// Records where the decoder is in the file.
-    pub fn set_bytes(&self, bytes: u64) {
+    pub(crate) fn set_bytes(&self, bytes: u64) {
         self.bytes_read.store(bytes, Ordering::Relaxed);
     }
 
     #[must_use]
-    pub fn bytes_read(&self) -> u64 {
+    pub(crate) fn bytes_read(&self) -> u64 {
         self.bytes_read.load(Ordering::Relaxed)
     }
 
     /// Records that `ms` of audio has been produced at the current read offset.
     ///
-    /// Anchors must advance on both axes; a backward seek resets the list, so
-    /// this only ever stores a monotonic curve.
-    pub fn record(&self, ms: u64) {
+    /// Anchors must advance on both axes, so a backward seek keeps the curve
+    /// learned so far and simply stops adding points until the reader passes the
+    /// old frontier again.
+    pub(crate) fn record(&self, ms: u64) {
         let bytes = self.bytes_read();
         let Ok(mut anchors) = self.anchors.lock() else {
             return;
@@ -316,49 +330,63 @@ impl Progress {
         }
     }
 
-    /// Drops the learned curve, e.g. after a seek.
-    pub fn reset(&self) {
-        if let Ok(mut anchors) = self.anchors.lock() {
-            anchors.clear();
+    /// Snapshots the curve for one mapping pass.
+    #[must_use]
+    pub(crate) fn curve(&self, total_bytes: u64, duration_ms: u64) -> Curve {
+        let anchors = self
+            .anchors
+            .lock()
+            .map_or_else(|_| Vec::new(), |anchors| anchors.clone());
+        Curve {
+            anchors,
+            total_bytes,
+            duration_ms,
         }
     }
 
+    #[cfg(test)]
+    fn anchor_count(&self) -> usize {
+        self.anchors.lock().map_or(0, |anchors| anchors.len())
+    }
+}
+
+impl Curve {
     /// Approximate track time of one file offset.
     ///
-    /// Falls back to the average bitrate until two anchors exist, and clamps to
-    /// `duration_ms` so shading never runs past the end of the track.
+    /// Falls back to the average bitrate until two anchors exist. Past the last
+    /// anchor the calibrated average slope is extended, which is steadier than
+    /// the final (500 ms, one read buffer wide) segment.
     #[must_use]
-    pub fn time_ms(&self, bytes: u64, total_bytes: u64, duration_ms: u64) -> u64 {
-        if total_bytes == 0 || duration_ms == 0 {
+    pub(crate) fn time_ms(&self, bytes: u64) -> u64 {
+        if self.total_bytes == 0 || self.duration_ms == 0 {
             return 0;
         }
         let linear = |value: u64| {
-            let scaled = u128::from(value.min(total_bytes)) * u128::from(duration_ms)
-                / u128::from(total_bytes);
+            let scaled = u128::from(value.min(self.total_bytes)) * u128::from(self.duration_ms)
+                / u128::from(self.total_bytes);
             u64::try_from(scaled).unwrap_or(u64::MAX)
         };
-
-        let Ok(anchors) = self.anchors.lock() else {
-            return linear(bytes);
-        };
-        if anchors.len() < 2 {
+        if self.anchors.len() < 2 {
             return linear(bytes);
         }
 
-        let first = anchors[0];
+        let first = self.anchors[0];
+        let last = self.anchors[self.anchors.len() - 1];
         if bytes <= first.bytes {
-            return interpolate(0, 0, first.bytes, first.ms, bytes).min(duration_ms);
+            return interpolate(0, 0, first.bytes, first.ms, bytes).min(self.duration_ms);
         }
-        for pair in anchors.windows(2) {
+        if bytes >= last.bytes {
+            return interpolate(first.bytes, first.ms, last.bytes, last.ms, bytes)
+                .min(self.duration_ms);
+        }
+        for pair in self.anchors.windows(2) {
             let (left, right) = (pair[0], pair[1]);
             if bytes <= right.bytes {
                 return interpolate(left.bytes, left.ms, right.bytes, right.ms, bytes)
-                    .min(duration_ms);
+                    .min(self.duration_ms);
             }
         }
-        let (left, right) = (anchors[anchors.len() - 2], anchors[anchors.len() - 1]);
-        let extra = extrapolate(left, right, bytes);
-        right.ms.saturating_add(extra).min(duration_ms)
+        last.ms.min(self.duration_ms)
     }
 }
 
@@ -370,16 +398,6 @@ fn interpolate(left_bytes: u64, left_ms: u64, right_bytes: u64, right_ms: u64, a
     let offset = u128::from(at.saturating_sub(left_bytes));
     let worked = offset * u128::from(right_ms.saturating_sub(left_ms)) / span;
     left_ms.saturating_add(u64::try_from(worked).unwrap_or(u64::MAX))
-}
-
-fn extrapolate(left: Anchor, right: Anchor, at: u64) -> u64 {
-    if right.bytes <= left.bytes {
-        return 0;
-    }
-    let span = u128::from(right.bytes - left.bytes);
-    let offset = u128::from(at.saturating_sub(right.bytes));
-    let worked = offset * u128::from(right.ms.saturating_sub(left.ms)) / span;
-    u64::try_from(worked).unwrap_or(u64::MAX)
 }
 
 fn covered_end(ranges: &[Range<u64>], offset: u64) -> Option<u64> {
@@ -600,6 +618,24 @@ mod tests {
     }
 
     #[test]
+    fn the_reader_reports_its_position_to_the_curve() {
+        let temp = NamedTempFile::new().unwrap();
+        let mut writer = temp.reopen().unwrap();
+        let spool = Spool::new(Some(4));
+        spool.write_at(&mut writer, 0, b"abcd").unwrap();
+        spool.mark_complete();
+
+        let progress = spool.progress();
+        let mut file = GrowingFile::new(temp.reopen().unwrap(), Arc::clone(&spool));
+        let mut buffer = [0_u8; 2];
+        file.read_exact(&mut buffer).unwrap();
+        assert_eq!(progress.bytes_read(), 2, "reads advance the anchor source");
+
+        file.seek(SeekFrom::Start(4)).unwrap();
+        assert_eq!(progress.bytes_read(), 4, "seeks move it too");
+    }
+
+    #[test]
     fn anchors_must_advance_on_both_axes() {
         let progress = Progress::default();
         progress.set_bytes(100);
@@ -614,21 +650,45 @@ mod tests {
         // Byte 100 → 1 000 ms survives; the backward move and the too-close
         // one are ignored, so the curve stays monotonic and interpolates
         // between the two accepted anchors.
-        assert_eq!(progress.time_ms(100, 1_000, 2_000), 1_000);
-        assert_eq!(progress.time_ms(200, 1_000, 2_000), 1_300);
+        let curve = progress.curve(1_000, 2_000);
+        assert_eq!(curve.time_ms(100), 1_000);
+        assert_eq!(curve.time_ms(200), 1_300);
     }
 
     #[test]
-    fn a_seek_resets_the_curve() {
+    fn anchors_closer_than_half_a_second_are_ignored() {
         let progress = Progress::default();
         progress.set_bytes(100);
         progress.record(1_000);
+        progress.set_bytes(150);
+        progress.record(1_400);
+        assert_eq!(progress.anchor_count(), 1, "400 ms is too close");
+
+        progress.set_bytes(200);
+        progress.record(1_600);
+        assert_eq!(progress.anchor_count(), 2, "600 ms is accepted");
+    }
+
+    #[test]
+    fn a_backward_seek_keeps_the_curve_and_ignores_new_points() {
+        let progress = Progress::default();
+        progress.set_bytes(100);
+        progress.record(1_000);
+        progress.set_bytes(300);
+        progress.record(1_600);
+
+        // Seek back: the reader is behind the frontier again, so the anchor is
+        // rejected, while the prefix stays calibrated.
         progress.set_bytes(200);
         progress.record(2_000);
-        progress.reset();
 
-        // With no anchors left the average bitrate is the fallback.
-        assert_eq!(progress.time_ms(100, 200, 2_000), 1_000);
+        let curve = progress.curve(1_000, 2_000);
+        assert_eq!(curve.time_ms(200), 1_300, "the old curve still answers");
+        assert_eq!(
+            progress.anchor_count(),
+            2,
+            "no regressive anchor was stored"
+        );
     }
 
     #[test]
@@ -638,9 +698,15 @@ mod tests {
             progress.set_bytes(step * 1_000);
             progress.record(step * 500);
         }
-        // 4 000 s at 500 ms spacing would be 8 000 anchors; the list thins
-        // instead of growing without bound, and still maps sensibly.
-        let mapped = progress.time_ms(2_000_000, 4_000_000, 2_000_000);
-        assert!(mapped > 0 && mapped <= 2_000_000, "mapped {mapped}");
+        // 4 000 anchors would be needed at 500 ms spacing; the list thins
+        // instead of growing without bound, without changing the line they
+        // lie on (bytes = 2 × ms).
+        assert!(
+            progress.anchor_count() <= 512,
+            "anchors: {}",
+            progress.anchor_count()
+        );
+        let curve = progress.curve(4_000_000, 2_000_000);
+        assert_eq!(curve.time_ms(2_000_000), 1_000_000);
     }
 }

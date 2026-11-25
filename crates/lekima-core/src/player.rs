@@ -1019,6 +1019,8 @@ mod tests {
         last_url: Mutex<Option<String>>,
         stops: AtomicU64,
         queued: AtomicU64,
+        stream_duration: AtomicU64,
+        shaded_duration: AtomicU64,
     }
 
     #[async_trait]
@@ -1079,12 +1081,46 @@ mod tests {
             self.queued.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }
+
+        fn stream_duration_ms(&self) -> Option<u64> {
+            match self.stream_duration.load(Ordering::SeqCst) {
+                0 => None,
+                millis => Some(millis),
+            }
+        }
+
+        fn buffered_ranges(&self, duration_ms: u64) -> Vec<lekima_domain::BufferedRange> {
+            self.shaded_duration.store(duration_ms, Ordering::SeqCst);
+            Vec::new()
+        }
     }
 
     fn player() -> (Player, Arc<StubAudio>) {
         let audio = Arc::new(StubAudio::default());
         let player = Player::new(Arc::new(StubMusic), audio.clone(), Quality::Exhigh, 0.5);
         (player, audio)
+    }
+
+    #[tokio::test]
+    async fn shading_uses_the_decoded_duration_when_the_engine_knows_it() {
+        let (player, audio) = player();
+        player
+            .play(PlayRequest::Tracks {
+                tracks: vec![track(1)],
+                kind: QueueKind::Manual,
+            })
+            .await
+            .unwrap();
+
+        // The catalogue says 120 s (see `track`); a preview decodes to 30 s.
+        audio.stream_duration.store(30_000, Ordering::SeqCst);
+        player.snapshot().await;
+
+        assert_eq!(
+            audio.shaded_duration.load(Ordering::SeqCst),
+            30_000,
+            "buffered ranges are scaled against the decoded duration"
+        );
     }
 
     #[tokio::test]

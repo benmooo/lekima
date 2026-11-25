@@ -248,11 +248,17 @@ Decisions:
   time (`buffered_ranges`) and the core publishes them as
   `PlaybackState.buffered`, letting frontends shade what is already local.
   Byte offsets are not proportional to time in a variable-bitrate file, so the
-  decoder records anchors as it reads — "at this file offset it had produced
-  this much audio" — and ranges are interpolated through them. The average
-  bitrate is only the fallback until two anchors exist; anchors are reset on a
-  seek and thinned to stay bounded. Shading is scaled against
-  `stream_duration_ms` when the decoder reports one.
+  decoder records anchors as it reads — the reader offset and the audio it had
+  produced — and ranges are interpolated through them. The offset includes the
+  format reader's read-ahead (tens of kilobytes), so the curve is approximate
+  to about one read buffer, not sample-exact; that is the tightest mapping
+  available while decoding stays inside `rodio`. The average bitrate is the
+  fallback until two anchors exist, the calibrated average slope is extended
+  past the last anchor, a seek keeps the anchors for bytes already calibrated,
+  and the list thins to stay bounded. Full coverage is decided on bytes, not
+  mapped time, so extrapolation cannot make a partial file look complete.
+  Shading is scaled against `stream_duration_ms` when the decoder reports one,
+  and the TUI uses the same value for its rail.
 - The decoder's real duration is published as `stream_duration_ms` when it is
   shorter than catalogue metadata; frontends label the track `PREVIEW` and draw
   progress against the actual stream length.

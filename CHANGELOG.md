@@ -9,8 +9,10 @@ All notable changes to lekima are documented here. The format follows
 
 - Buffered-range shading follows the decoder's own byte-to-time curve instead of
   assuming a constant bitrate, so variable-bitrate streams no longer show
-  shading tens of seconds away from the bytes that are actually local. Previews
-  shade against the decoded stream duration rather than catalogue metadata.
+  shading tens of seconds away from the bytes that are actually local. The
+  curve is approximate to about one read buffer, keeps what it learned across
+  seeks, and extends its calibrated average past the last anchor. Previews shade
+  against the decoded stream duration, and the TUI rail uses the same scale.
 
 ## 0.11.0 — 2026-11-25
 

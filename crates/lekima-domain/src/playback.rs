@@ -138,8 +138,9 @@ pub struct PlaybackState {
     /// Recent amplitude envelope from the audio device (oldest first, 0..=1).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub wave: Vec<f32>,
-    /// Actual decoded stream duration, when it is shorter than the metadata
-    /// duration (a provider preview). `None` for full tracks or unknown.
+    /// Actual decoded stream duration when the engine knows it. Shorter than
+    /// the metadata duration for a provider preview, and the scale frontends
+    /// should use for progress shading and labels.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stream_duration_ms: Option<u64>,
     /// Locally buffered ranges of the current track, for progress shading.

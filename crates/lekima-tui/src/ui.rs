@@ -2282,11 +2282,12 @@ fn draw_queue(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     frame.render_stateful_widget(table, content, &mut state);
 }
 
+/// The scale the core used for `buffered`, so the rail and the shading agree.
 fn effective_duration(state: &PlaybackState, track: &Track) -> u64 {
-    match state.stream_duration_ms {
-        Some(stream) if stream > 0 && stream.saturating_add(2_000) < track.duration_ms => stream,
-        _ => track.duration_ms,
-    }
+    state
+        .stream_duration_ms
+        .filter(|stream| *stream > 0)
+        .unwrap_or(track.duration_ms)
 }
 
 fn is_preview(state: &PlaybackState, track: &Track) -> bool {
