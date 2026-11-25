@@ -4079,6 +4079,29 @@ mod history_tests {
     }
 
     #[test]
+    fn p_cancels_the_delete_confirmation_and_closes_the_pane() {
+        let mut app = App::new();
+        app.mode = Mode::Playlists;
+        app.playlists = vec![lekima_domain::Playlist {
+            id: 7.into(),
+            name: "Late night".to_owned(),
+            description: String::new(),
+            track_count: 0,
+            cover_url: None,
+            owner: None,
+        }];
+
+        app.handle_key(key(KeyCode::Char('x')));
+        assert_eq!(app.playlist_confirm, Some(7.into()));
+        assert!(matches!(
+            app.handle_key(key(KeyCode::Char('P'))),
+            Action::None
+        ));
+        assert!(app.playlist_confirm.is_none());
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
     fn escape_cancels_the_delete_confirmation_without_deleting() {
         let mut app = App::new();
         app.mode = Mode::Playlists;

@@ -3228,7 +3228,9 @@ fn normal_hints(app: &App, theme: &Theme, width: u16) -> String {
             "j/k {sep} {enter} play {sep} space {sep} {q} queue {sep} P playlists {sep} S theme {sep} / search {sep} : cmd {sep} ctrl-o/i hist {sep} ? keys"
         )
     } else if width >= 80 {
-        format!("j/k {sep} {enter} play {sep} space {sep} / search {sep} {q} queue {sep} P lists")
+        format!(
+            "j/k {sep} {enter} play {sep} space {sep} / search {sep} {q} queue {sep} P lists {sep} ?"
+        )
     } else if width >= 52 {
         format!("j/k {sep} {enter} {sep} / {sep} {q} {sep} P {sep} ?")
     } else if app.pending_count.is_some() {
@@ -3255,7 +3257,7 @@ fn queue_hints(theme: &Theme, width: u16) -> String {
 fn playlist_hints(theme: &Theme, width: u16) -> String {
     let enter = "enter";
     let sep = theme.glyphs.separator;
-    if width >= 104 {
+    if width >= 107 {
         format!(
             "j/k nav {sep} {enter} open {sep} n new {sep} R rename {sep} d describe {sep} a add {sep} x delete {sep} r refresh {sep} esc close"
         )
@@ -3938,7 +3940,12 @@ mod tests {
         assert_eq!(
             screen.matches("≡ PLAYLISTS").count(),
             2,
-            "the empty state repeats the pane label: {screen}"
+            "one sidebar label and one pane label: {screen}"
+        );
+        assert_eq!(
+            screen.matches("// PLAYLISTS").count(),
+            0,
+            "the empty state repeats the pane label without the glyph: {screen}"
         );
         assert!(screen.contains("no playlists yet"));
     }
@@ -3957,12 +3964,18 @@ mod tests {
                 footer.contains("esc"),
                 "footer at {width} is clipped: {footer:?}"
             );
+            if width >= 107 {
+                assert!(
+                    footer.contains("close"),
+                    "the full footer is clipped at {width}: {footer:?}"
+                );
+            }
         }
     }
 
     #[test]
-    fn normal_footer_keeps_its_last_hint_at_boundary_widths() {
-        for width in [108, 111, 112, 120] {
+    fn normal_footer_switches_branches_without_clipping() {
+        for width in [108, 111] {
             let mut app = App::new();
             app.status.status = PlaybackStatus::Playing;
             app.status.track = Some(track("Song"));
@@ -3971,18 +3984,30 @@ mod tests {
                 .lines()
                 .find(|line| line.contains("[NORMAL]"))
                 .unwrap_or("");
-            assert!(
-                footer.contains('?'),
-                "the help hint is clipped at {width}: {footer:?}"
-            );
+            assert!(footer.contains("P lists"), "at {width}: {footer:?}");
+            assert!(!footer.contains("ctrl-o/i"), "at {width}: {footer:?}");
+        }
+        for width in [112, 120] {
+            let mut app = App::new();
+            app.status.status = PlaybackStatus::Playing;
+            app.status.track = Some(track("Song"));
+            let screen = render(&mut app, width, 20);
+            let footer = screen
+                .lines()
+                .find(|line| line.contains("[NORMAL]"))
+                .unwrap_or("");
+            assert!(footer.contains("ctrl-o/i hist"), "at {width}: {footer:?}");
+            assert!(footer.contains("? keys"), "at {width}: {footer:?}");
         }
     }
 
     #[test]
     fn comfortable_density_reports_the_position_cue() {
-        let mut app = App::new();
-        app.mode = Mode::Playlists;
-        app.playlists = (1..=16)
+        let theme = Theme::resolve_with("cyber", "unicode", "comfortable", None, false, false);
+
+        let mut seven = App::new();
+        seven.mode = Mode::Playlists;
+        seven.playlists = (1..=7)
             .map(|index| lekima_domain::Playlist {
                 id: (index as u64).into(),
                 name: format!("Playlist {index}"),
@@ -3992,11 +4017,16 @@ mod tests {
                 owner: None,
             })
             .collect();
-        let theme = Theme::resolve_with("cyber", "unicode", "comfortable", None, false, false);
+        // The visible capacity is six two-row entries: the old code compared
+        // 7 > 13 and showed no cue.
+        let screen = render_with(&mut seven, 100, 16, theme);
+        assert!(screen.contains("/7"), "no position cue: {screen}");
 
-        // Ten content rows hold five two-row entries, so sixteen do not fit.
-        let screen = render_with(&mut app, 100, 16, theme);
-        assert!(screen.contains("/16"), "no position cue: {screen}");
+        let mut three = App::new();
+        three.mode = Mode::Playlists;
+        three.playlists = seven.playlists.iter().take(3).cloned().collect();
+        let screen = render_with(&mut three, 100, 16, theme);
+        assert!(!screen.contains("/3"), "unexpected cue: {screen}");
     }
 
     #[test]

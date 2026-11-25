@@ -3,6 +3,28 @@
 All notable changes to lekima are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## Unreleased
+
+### Added
+
+- Playlist editing on every surface: `lekima playlist create|rename|describe|add|remove|delete`,
+  IPC `playlist_*` commands, MCP tools, `POST /v1/command` tags and hook
+  capabilities, backed by `ncmapi 1.10` (the first provider write endpoints).
+  `delete` requires `--yes` on the CLI.
+- A TUI playlist pane (`P`): browse name, description and track count; `enter`
+  opens the tracks; `n` creates, `R` renames, `d` describes, `a` adds the current
+  track, `x` deletes with a y/n confirm, `r` refreshes. Writes refresh the pane
+  and a rejected write shows an inline error with retry.
+- `lekima hooks` reports configured hooks, their events, capabilities and
+  liveness; the HUD shows `HOOK n`, MCP exposes a read-only `hooks` tool and
+  `GET /v1/hooks` serves the same data.
+
+### Fixed
+
+- Buffered-range shading follows the decoder's own byte-to-time curve instead of
+  assuming a constant bitrate, so variable-bitrate streams shade the bytes that
+  are really local. Previews shade against the decoded stream duration.
+
 ## 0.12.0 — 2026-11-25
 
 ### Added

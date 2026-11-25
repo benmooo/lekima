@@ -307,10 +307,9 @@ impl MusicService for NcmMusicService {
             .playlist_create(name, private)
             .await
             .map_err(provider_error)?;
+        // ncmapi drops its response cache inside every write, so the next list
+        // read sees this playlist.
         let response = ensure_success(response)?;
-        // The provider list is cached for minutes; a write must be visible to
-        // the next read.
-        self.client.clear_cache();
         let id = response.body.id;
         if id == 0 {
             return Err(DomainError::Unavailable(
@@ -366,7 +365,6 @@ impl MusicService for NcmMusicService {
             .await
             .map_err(provider_error)?;
         ensure_success(response)?;
-        self.client.clear_cache();
         Ok(())
     }
 
@@ -387,7 +385,6 @@ impl MusicService for NcmMusicService {
             .await
             .map_err(provider_error)?;
         ensure_success(response)?;
-        self.client.clear_cache();
         Ok(())
     }
 
@@ -408,7 +405,6 @@ impl MusicService for NcmMusicService {
             .await
             .map_err(provider_error)?;
         ensure_success(response)?;
-        self.client.clear_cache();
         Ok(())
     }
 
@@ -420,7 +416,6 @@ impl MusicService for NcmMusicService {
             .await
             .map_err(provider_error)?;
         ensure_success(response)?;
-        self.client.clear_cache();
         Ok(())
     }
 
