@@ -165,8 +165,8 @@ local instead of a constant-bitrate guess.
 > Detailed specification: [`sprint-12/`](./sprint-12/).
 
 The first provider writes: create a playlist, rename or describe it, add and
-remove tracks, delete it — from the CLI, MCP, HTTP and the TUI command line,
-backed by `ncmapi 1.10`.
+remove tracks, delete it — from the CLI, MCP, HTTP, the TUI playlist pane and
+`:playlist` commands, backed by `ncmapi 1.10`.
 
 ### v0.12 — “design system” (shipped in 0.12.0)
 
@@ -262,7 +262,7 @@ Global — `q`/`Ctrl-c` quit, `?` help, `/` search, `:` command line,
 | `C` | Show track comments |
 | `H` | Show listening history |
 | `y` | Yank track URL/ID to clipboard (v0.2) |
-| `P` | Toggle provider panel? (removed — `P` in the original was play mode) |
+| `P` | Open / close the playlist pane |
 
 > Search categories are glyphs on the prompt line itself — `♪` tracks, `▣`
 > albums, `☺` artists, `≡` playlists — with the active one bracketed and `ALL`

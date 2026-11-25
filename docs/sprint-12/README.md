@@ -28,12 +28,15 @@ Create and maintain played lists from every surface:
 | C. IPC + daemon | Commands, replies, capability tags, `lekima playlist …` | Round-trip protocol tests; CLI contract tests |
 | D. Agent surfaces | MCP tools, HTTP command tags, `docs/agents.md` | `tools/list` includes the write tools; HTTP refuses them without the token |
 | E. TUI | `:playlist create`, `:playlist add`, `:playlist delete` | Reducer tests; hints updated |
+| E2. TUI pane | Playlist pane: browse, create, rename, describe, add, delete | Reducer and render tests; spec in `tui-playlist-pane.md` |
 | F. Release | Docs, changelog, 0.13.0 | Green workspace, published release |
 
 ## Design documents
 
 - [`playlists.md`](./playlists.md) — provider routes, payloads, models, IPC
   surface, error mapping, TUI flow and non-goals.
+- [`tui-playlist-pane.md`](./tui-playlist-pane.md) — pane layout, keymap,
+  states and visual contract.
 
 ## Definition of ready
 

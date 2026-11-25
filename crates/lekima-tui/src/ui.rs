@@ -2050,6 +2050,39 @@ fn truncate_to_width(value: &str, width: usize, ellipsis: &str) -> String {
     truncated
 }
 
+/// Truncates at a word boundary when one exists, so a name never ends mid-word.
+fn truncate_words_to_width(value: &str, width: usize, ellipsis: &str) -> String {
+    if display_width(value) <= width {
+        return value.to_owned();
+    }
+    let ellipsis_width = display_width(ellipsis);
+    if width <= ellipsis_width {
+        return truncate_to_width(value, width, ellipsis);
+    }
+    let budget = width - ellipsis_width;
+    let mut used = 0;
+    let mut truncated = String::new();
+    for word in value.split_whitespace() {
+        let word_width = display_width(word);
+        let separator = usize::from(!truncated.is_empty());
+        if used + separator + word_width > budget {
+            break;
+        }
+        if !truncated.is_empty() {
+            truncated.push(' ');
+            used += 1;
+        }
+        truncated.push_str(word);
+        used += word_width;
+    }
+    if truncated.is_empty() {
+        // A single long token (or CJK without spaces): fall back to characters.
+        return truncate_to_width(value, width, ellipsis);
+    }
+    truncated.push_str(ellipsis);
+    truncated
+}
+
 /// Greedy width-aware wrap: prefers spaces, hard-breaks long words and CJK.
 fn wrap_to_width(value: &str, width: usize) -> Vec<String> {
     if width == 0 {
@@ -2336,8 +2369,11 @@ fn draw_playlists(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(area);
 
     let total = app.playlists.len();
+    let comfortable = theme.density == Density::Comfortable;
     let visible = usize::from(content.height.saturating_sub(1));
-    let position = if total > visible && total > 0 {
+    // Each entry takes two visual rows when comfortable.
+    let capacity = visible / if comfortable { 2 } else { 1 };
+    let position = if total > capacity && total > 0 {
         format!(
             " {} {}/{}",
             theme.glyphs.separator,
@@ -2359,7 +2395,11 @@ fn draw_playlists(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
                 Style::new().fg(theme.accent_alt),
             ),
             Span::styled(
-                format!(" {}", theme.glyphs.active),
+                if total > 0 {
+                    format!(" {}", theme.glyphs.active)
+                } else {
+                    String::new()
+                },
                 Style::new().fg(theme.accent),
             ),
         ])),
@@ -2410,7 +2450,7 @@ fn draw_playlists(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         }
         frame.render_widget(
             Paragraph::new(Text::from(empty_lines(
-                "PLAYLISTS",
+                "",
                 "no playlists yet",
                 &[("n", "create one"), ("P", "close")],
                 theme,
@@ -2449,7 +2489,6 @@ fn draw_playlists(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     }
     header.push("TRACKS");
 
-    let comfortable = theme.density == Density::Comfortable;
     let mut rows: Vec<Row> = Vec::with_capacity(app.playlists.len() * 2);
     for (index, playlist) in app.playlists.iter().enumerate() {
         let selection = focus_tick(true, index == app.playlists_selection, theme);
@@ -2460,7 +2499,7 @@ fn draw_playlists(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
                 Style::new().fg(theme.muted),
             ),
             Span::styled(
-                truncate_to_width(
+                truncate_words_to_width(
                     &clean(&playlist.name),
                     name_width.saturating_sub(1),
                     theme.glyphs.ellipsis,
@@ -2470,7 +2509,7 @@ fn draw_playlists(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         ];
         if show_description {
             cells.push(Span::styled(
-                truncate_to_width(
+                truncate_words_to_width(
                     &clean(&playlist.description),
                     description_width.saturating_sub(1),
                     theme.glyphs.ellipsis,
@@ -2566,7 +2605,11 @@ fn draw_queue(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
                 Style::new().fg(theme.accent_alt),
             ),
             Span::styled(
-                format!(" {}", theme.glyphs.active),
+                if total > 0 {
+                    format!(" {}", theme.glyphs.active)
+                } else {
+                    String::new()
+                },
                 Style::new().fg(theme.accent),
             ),
         ])),
@@ -3022,8 +3065,13 @@ fn append_comment(
 }
 
 fn draw_footer(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    // The lyric suffix is appended after the hint; budget for it so the line
+    // never clips at the width where a longer hint would otherwise fit.
+    let hint_width = area
+        .width
+        .saturating_sub(if app.lyrics_open { 10 } else { 0 });
     let (mode, hints) = match app.mode {
-        Mode::Normal => ("NORMAL", normal_hints(app, theme, area.width)),
+        Mode::Normal => ("NORMAL", normal_hints(app, theme, hint_width)),
         Mode::Search => ("SEARCH", String::new()),
         Mode::Command => ("CMD", String::new()),
         Mode::Help => (
@@ -3175,7 +3223,7 @@ fn normal_hints(app: &App, theme: &Theme, width: u16) -> String {
             format!("j/k {sep} {enter} {sep} esc")
         };
     }
-    if width >= 108 {
+    if width >= 112 {
         format!(
             "j/k {sep} {enter} play {sep} space {sep} {q} queue {sep} P playlists {sep} S theme {sep} / search {sep} : cmd {sep} ctrl-o/i hist {sep} ? keys"
         )
@@ -3211,7 +3259,7 @@ fn playlist_hints(theme: &Theme, width: u16) -> String {
         format!(
             "j/k nav {sep} {enter} open {sep} n new {sep} R rename {sep} d describe {sep} a add {sep} x delete {sep} r refresh {sep} esc close"
         )
-    } else if width >= 64 {
+    } else if width >= 76 {
         format!(
             "j/k {sep} {enter} open {sep} n new {sep} R rename {sep} x delete {sep} r refresh {sep} esc"
         )
@@ -3766,7 +3814,7 @@ mod tests {
 
     use super::{
         CURSOR_BLINK_FRAMES, comment_date, compact_count, display_width, draw, truncate_to_width,
-        wrap_to_width,
+        truncate_words_to_width, wrap_to_width,
     };
     use lekima_domain::PlaybackStatus;
 
@@ -3865,6 +3913,90 @@ mod tests {
 
         let screen = render(&mut app, 120, 30);
         assert!(!screen.contains("HOOK"));
+    }
+
+    #[test]
+    fn truncation_prefers_a_word_boundary() {
+        let truncated = truncate_words_to_width("A very long playlist name", 10, "…");
+        assert_eq!(truncated, "A very…");
+
+        // One long token still truncates by character.
+        let token = truncate_words_to_width("Supercalifragilistic", 8, "…");
+        assert_eq!(token, "Superca…");
+    }
+
+    #[test]
+    fn playlist_empty_state_does_not_repeat_its_label() {
+        let mut app = App::new();
+        app.mode = Mode::Playlists;
+        app.playlists.clear();
+
+        let screen = render(&mut app, 100, 24);
+
+        // One label for the sidebar section, one for the pane title; the empty
+        // state itself must not add a third.
+        assert_eq!(
+            screen.matches("≡ PLAYLISTS").count(),
+            2,
+            "the empty state repeats the pane label: {screen}"
+        );
+        assert!(screen.contains("no playlists yet"));
+    }
+
+    #[test]
+    fn playlist_footer_fits_every_supported_width() {
+        for width in [60, 64, 76, 104, 120] {
+            let mut app = App::new();
+            app.mode = Mode::Playlists;
+            let screen = render(&mut app, width, 20);
+            let footer = screen
+                .lines()
+                .find(|line| line.contains("[PLAYLISTS]"))
+                .unwrap_or("");
+            assert!(
+                footer.contains("esc"),
+                "footer at {width} is clipped: {footer:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn normal_footer_keeps_its_last_hint_at_boundary_widths() {
+        for width in [108, 111, 112, 120] {
+            let mut app = App::new();
+            app.status.status = PlaybackStatus::Playing;
+            app.status.track = Some(track("Song"));
+            let screen = render(&mut app, width, 20);
+            let footer = screen
+                .lines()
+                .find(|line| line.contains("[NORMAL]"))
+                .unwrap_or("");
+            assert!(
+                footer.contains('?'),
+                "the help hint is clipped at {width}: {footer:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn comfortable_density_reports_the_position_cue() {
+        let mut app = App::new();
+        app.mode = Mode::Playlists;
+        app.playlists = (1..=16)
+            .map(|index| lekima_domain::Playlist {
+                id: (index as u64).into(),
+                name: format!("Playlist {index}"),
+                description: String::new(),
+                track_count: 10,
+                cover_url: None,
+                owner: None,
+            })
+            .collect();
+        let theme = Theme::resolve_with("cyber", "unicode", "comfortable", None, false, false);
+
+        // Ten content rows hold five two-row entries, so sixteen do not fit.
+        let screen = render_with(&mut app, 100, 16, theme);
+        assert!(screen.contains("/16"), "no position cue: {screen}");
     }
 
     #[test]

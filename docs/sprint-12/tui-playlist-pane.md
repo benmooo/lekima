@@ -40,7 +40,7 @@ The pane follows
 
 ## 3. Entry, exit and keymap
 
-`P` opens the pane from Normal mode. It was free in the documented keymap
+`P` opens the pane from Normal mode and closes it again. It was free in the documented keymap
 (`Q` queue, `C` comments, `H` history, `L` lyrics, `S` settings, `?` help).
 Opening the pane issues `Command::Playlists`; the existing reply already carries
 every playlist the sidebar shows, so the pane and sidebar share one source of
@@ -82,7 +82,7 @@ The pane takes over the main column; the sidebar stays visible at 64 columns and
 above, exactly as for queue/history. The pane itself has the standard one-column
 gutter.
 
-### 120×30 (sidebar + 86-column pane)
+### 120×30 (sidebar + 95-column pane)
 
 ```text
 // ≡ PLAYLISTS · 3
@@ -92,7 +92,7 @@ gutter.
       003 Daily                                   morning                        28
 ```
 
-### 80×24 (sidebar + 54-column pane)
+### 80×24 (sidebar + 55-column pane)
 
 The description column is the first thing to go; the name keeps the remaining
 cells and the count stays right-aligned.
@@ -141,7 +141,9 @@ branch clears the flag before any later `Ack` can be mistaken for this write.
 - Error and confirmation states use words plus punctuation (`!`, `?`, `[y/N]`).
 - `--glyphs ascii` is a supported render: the pane title becomes `// p PLAYLISTS`,
   the marker `>`, the divider `|`, the ellipsis `...`, and no codepoint above
-  U+007E is emitted. A render test asserts this.
+  U+007E is emitted for chrome and fixture content. Real playlist names and
+  descriptions are provider text and may contain CJK; they are width-truncated,
+  not transliterated. A render test asserts the chrome glyphs are ASCII.
 - `NO_COLOR`/mono keeps the reverse selection and all words; no state depends on
   a role that collapses to the same terminal colour.
 - All provider text passes through `sanitize_line`/`clean` before rendering.
@@ -191,7 +193,7 @@ Acceptance:
 2. `enter` opens a playlist's tracks through the existing path.
 3. `n` creates a playlist and the refreshed pane shows it.
 4. `R` and `d` rename/describe and the refreshed pane shows the new values.
-5. `a` adds the current track and the ack refreshes the pane.
+5. `a` adds the current track (playing, paused or stopped; it is the selected track) and the ack refreshes the pane.
 6. `x` asks for `y`; `n` cancels; `y` deletes and the refreshed pane no longer
    shows the playlist.
 7. A rejected write shows an error and never a success toast.

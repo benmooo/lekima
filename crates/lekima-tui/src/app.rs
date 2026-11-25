@@ -358,6 +358,8 @@ pub struct App {
     pub hooks: Vec<lekima_ipc::HookStatus>,
     /// A playlist write is in flight; the ack refreshes the sidebar.
     playlist_sync: bool,
+    /// Mode to return to after a prompt that belongs to a pane.
+    prompt_return: Option<Mode>,
     /// Finished plays, newest first, as returned by the daemon.
     pub plays: Vec<lekima_domain::PlayRecord>,
     pub plays_selection: usize,
@@ -435,6 +437,7 @@ impl Default for App {
             queue: Vec::new(),
             hooks: Vec::new(),
             playlist_sync: false,
+            prompt_return: None,
             plays: Vec::new(),
             plays_selection: 0,
             plays_loading: false,
@@ -783,7 +786,7 @@ impl App {
                 if self.mode == Mode::Search {
                     self.search.filter = self.search.applied_filter;
                 }
-                self.mode = Mode::Normal;
+                self.mode = self.prompt_return.take().unwrap_or(Mode::Normal);
                 self.input.clear();
                 self.cursor = 0;
                 self.history_cursor = None;
@@ -794,7 +797,7 @@ impl App {
                 let mode = self.mode;
                 self.cursor = 0;
                 self.history_cursor = None;
-                self.mode = Mode::Normal;
+                self.mode = self.prompt_return.take().unwrap_or(Mode::Normal);
                 if input.trim().is_empty() {
                     return Action::None;
                 }
@@ -1886,6 +1889,7 @@ impl App {
 
     /// Opens the command line with a prefix so the pane reuses the editor.
     fn begin_command(&mut self, text: String) -> Action {
+        self.prompt_return = Some(Mode::Playlists);
         self.mode = Mode::Command;
         self.input = text;
         self.cursor = self.input.len();
@@ -1937,6 +1941,12 @@ impl App {
                 }
                 KeyCode::Esc | KeyCode::Char('n' | 'N') => {
                     self.playlist_confirm = None;
+                    Action::None
+                }
+                // Closing the pane cancels as well; never leave a trap.
+                KeyCode::Char('P' | 'q') => {
+                    self.playlist_confirm = None;
+                    self.mode = Mode::Normal;
                     Action::None
                 }
                 _ => Action::None,
@@ -4043,6 +4053,82 @@ mod history_tests {
         }
         assert!(app.playlist_sync);
         assert!(app.playlist_confirm.is_none());
+    }
+
+    #[test]
+    fn a_playlist_prompt_returns_to_the_pane() {
+        let mut app = App::new();
+        app.mode = Mode::Playlists;
+
+        // `n` prefills the command line from the pane.
+        assert!(matches!(
+            app.handle_key(key(KeyCode::Char('n'))),
+            Action::None
+        ));
+        assert_eq!(app.mode, Mode::Command);
+        for character in "Late night".chars() {
+            app.handle_key(key(KeyCode::Char(character)));
+        }
+        match app.handle_key(key(KeyCode::Enter)) {
+            Action::Call(Command::PlaylistCreate { name, .. }) => {
+                assert_eq!(name, "Late night");
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        assert_eq!(app.mode, Mode::Playlists, "the pane is still open");
+    }
+
+    #[test]
+    fn escape_cancels_the_delete_confirmation_without_deleting() {
+        let mut app = App::new();
+        app.mode = Mode::Playlists;
+        app.playlists = vec![lekima_domain::Playlist {
+            id: 7.into(),
+            name: "Late night".to_owned(),
+            description: String::new(),
+            track_count: 0,
+            cover_url: None,
+            owner: None,
+        }];
+
+        assert!(matches!(
+            app.handle_key(key(KeyCode::Char('x'))),
+            Action::None
+        ));
+        assert_eq!(app.playlist_confirm, Some(7.into()));
+        assert!(matches!(app.handle_key(key(KeyCode::Esc)), Action::None));
+        assert!(app.playlist_confirm.is_none());
+        assert_eq!(app.mode, Mode::Playlists, "esc stays in the pane");
+    }
+
+    #[test]
+    fn a_adds_the_current_track_even_when_playback_is_stopped() {
+        let mut app = App::new();
+        app.mode = Mode::Playlists;
+        app.playlists = vec![lekima_domain::Playlist {
+            id: 7.into(),
+            name: "Late night".to_owned(),
+            description: String::new(),
+            track_count: 0,
+            cover_url: None,
+            owner: None,
+        }];
+        app.status.track = Some(Track {
+            id: TrackId::from(42_u64),
+            name: "Song".to_owned(),
+            artists: Vec::new(),
+            album: None,
+            duration_ms: 1_000,
+        });
+        app.status.status = lekima_domain::PlaybackStatus::Stopped;
+
+        match app.handle_key(key(KeyCode::Char('a'))) {
+            Action::Call(Command::PlaylistAdd { id, tracks }) => {
+                assert_eq!(id, 7.into());
+                assert_eq!(tracks, vec![TrackId::from(42_u64)]);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
     }
 
     #[test]

@@ -112,7 +112,7 @@ pub const QUEUE: &[Binding] = &[
 pub const PLAYLISTS: &[Binding] = &[
     Binding {
         key: "P",
-        description: "playlist pane",
+        description: "open / close pane",
     },
     Binding {
         key: "n/R/d/a",
@@ -158,7 +158,7 @@ pub const APP: &[Binding] = &[
     },
     Binding {
         key: "Q / P / c-w 3",
-        description: "queue / playlists",
+        description: "queue / playlist pane",
     },
     Binding {
         key: "S / R",
