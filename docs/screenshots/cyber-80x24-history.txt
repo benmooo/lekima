@@ -1,5 +1,4 @@
-LEKIMA ┃ ▶ Cigarettes and lighters · LoMo                                    Q25
-━━━━━●────── 00:42/01:49                                     VOL ████░░  [⟲ ALL]
+LEKIMA ┃ ▶ Cigarettes and lighters        Q25  [⟲ ALL]  ━━━━━●────── 00:42/01:49
 ────────────────────────────────────────────────────────────────────────────────
 // LIBRARY · 3          │ // ↺ HISTORY · 4
 ▌d ☀ DAILY              │         AGE  TITLE                             PLAYED
@@ -14,6 +13,7 @@ LEKIMA ┃ ▶ Cigarettes and lighters · LoMo                                  
  03 Daily            28 │───────────────────────────────────────────────────────
                         │// ♫ LYRICS · 4 lines  LRC
                         │───────────────────────────────────────────────────────
+                        │
                         │ ▌ Is this the real life?
                         │   Is this just fantasy?
                         │   Caught in a landslide
@@ -21,4 +21,4 @@ LEKIMA ┃ ▶ Cigarettes and lighters · LoMo                                  
                         │
                         │───────────────────────────────────────────────────────
                         │+0 ms  ·  00:42 / 01:49  ·  [ ] · L
-[HISTORY] j/k nav · enter replay · r refresh · H/esc close · ♫ close
+[HISTORY] j/k nav · enter replay · r refresh · H/esc close · L close

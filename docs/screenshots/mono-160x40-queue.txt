@@ -37,4 +37,4 @@ LEKIMA ┃ ▶ Cigarettes and lighters · LoMo                                  
                         │                                    ║ ▌ queued 3 tracks                                        ║
                         │                                    ╚══════════════════════════════════════════════════════════╝ ──────────────────────────────────────
                         │                                                                                                 +0 ms  ·  00:42 / 01:49  ·  [ ] · L
-[QUEUE] j/k nav · space pause · n/p next · r repeat · s shuffle · x remove · ⏎ jump · esc · ♫ close
+[QUEUE] j/k nav · space pause · n/p next · r repeat · s shuffle · x remove · enter jump · esc · L close

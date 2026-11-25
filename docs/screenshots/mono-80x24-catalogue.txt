@@ -1,5 +1,4 @@
-LEKIMA ┃ ▶ Cigarettes and lighters · LoMo                                    Q25
-━━━━━●────── 00:42/01:49                                     VOL ████░░  [⟲ ALL]
+LEKIMA ┃ ▶ Cigarettes and lighters        Q25  [⟲ ALL]  ━━━━━●────── 00:42/01:49
 ────────────────────────────────────────────────────────────────────────────────
 // LIBRARY · 3          │ // SEARCH · "mota" · ALL · 10 RESULTS ▌
 ▌d ☀ DAILY              │ // TRACKS · 6
@@ -14,6 +13,7 @@ LEKIMA ┃ ▶ Cigarettes and lighters · LoMo                                  
  03 Daily            28 │───────────────────────────────────────────────────────
                         │// ♫ LYRICS · 4 lines  LRC
                         │───────────────────────────────────────────────────────
+                        │
                         │ ▌ Is this the real life?
                         │   Is this just fantasy?
                         │   Caught in a landslide
@@ -21,4 +21,4 @@ LEKIMA ┃ ▶ Cigarettes and lighters · LoMo                                  
                         │
                         │───────────────────────────────────────────────────────
                         │+0 ms  ·  00:42 / 01:49  ·  [ ] · L
-[NORMAL] j/k · ⏎ · a queue · / refine · c-1..5 filter · esc · ♫ close
+[NORMAL] j/k · enter · a queue · / refine · c-1..5 filter · esc · L close

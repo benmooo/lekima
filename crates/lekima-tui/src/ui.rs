@@ -74,7 +74,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, theme: &Theme) {
     }
 
     let [hud, rule, body, footer] = Layout::vertical([
-        Constraint::Length(hud_height(area)),
+        Constraint::Length(1),
         Constraint::Length(1),
         Constraint::Min(1),
         Constraint::Length(1),
@@ -95,17 +95,6 @@ pub fn draw(frame: &mut Frame, app: &mut App, theme: &Theme) {
     }
 }
 
-/// HUD height: two rows on the mid widths where a single row starves the
-/// title (64–95 columns), one row elsewhere. A short terminal keeps one row so
-/// the list still has room.
-fn hud_height(area: Rect) -> u16 {
-    if area.width >= 64 && area.width < 96 && area.height >= 12 {
-        2
-    } else {
-        1
-    }
-}
-
 fn draw_hud(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let loading = app.status.loading || app.status.buffering;
     let prefix = hud_prefix(app, theme, loading);
@@ -118,50 +107,7 @@ fn draw_hud(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         .as_ref()
         .map_or(0, |track| effective_duration(&app.status, track));
 
-    if area.height >= 2 {
-        let [top, bottom] =
-            Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).areas(area);
-        let gap = 2;
-        let left_width = usize::from(top.width).saturating_sub(queue_width + gap);
-        let mut line = prefix;
-        line.extend(hud_title(
-            app,
-            theme,
-            left_width.saturating_sub(prefix_width),
-        ));
-        frame.render_widget(Paragraph::new(Line::from(line)), top);
-        frame.render_widget(
-            Paragraph::new(Line::from(queue)).alignment(Alignment::Right),
-            top,
-        );
-
-        let left = progress_group(app, duration, theme);
-        let rail_width = spans_width(&left);
-        let mut groups = vec![
-            volume_group(app, theme),
-            repeat_group(app, theme),
-            shuffle_group(app, theme),
-        ];
-        while rail_width + 2 + groups_width(&groups) > usize::from(bottom.width) {
-            if groups.is_empty() {
-                break;
-            }
-            groups.remove(0);
-        }
-        let mut right: Vec<Span<'static>> = Vec::new();
-        for group in groups.into_iter().filter(|group| !group.is_empty()) {
-            right.push(Span::raw("  "));
-            right.extend(group);
-        }
-        frame.render_widget(Paragraph::new(Line::from(left)), bottom);
-        frame.render_widget(
-            Paragraph::new(Line::from(right)).alignment(Alignment::Right),
-            bottom,
-        );
-        return;
-    }
-
-    // One row: the title keeps a floor and the right cluster is right-anchored.
+    // The title keeps a floor and the right cluster is right-anchored.
     // Optional facts drop in the documented order: SIG, then the sleep
     // countdown, cache, quality, preview and volume.
     let mut show_sig =
@@ -175,6 +121,7 @@ fn draw_hud(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         .is_some_and(|track| is_preview(&app.status, track));
     let mut show_volume = area.width >= 132 || app.status.muted;
     let mut show_sleep = app.status.sleep_remaining_ms.is_some();
+    let mut show_modes = true;
     let rail = progress_group(app, duration, theme);
     let rail_width = spans_width(&rail);
 
@@ -183,8 +130,10 @@ fn draw_hud(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         if show_sleep {
             right_width += 2 + 2 + 5;
         }
-        right_width += 2 + spans_width(&repeat_group(app, theme));
-        right_width += 2 + spans_width(&shuffle_group(app, theme));
+        if show_modes {
+            right_width += 2 + spans_width(&repeat_group(app, theme));
+            right_width += 2 + spans_width(&shuffle_group(app, theme));
+        }
         if show_volume {
             right_width += 2 + spans_width(&volume_group(app, theme));
         }
@@ -217,14 +166,18 @@ fn draw_hud(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             show_preview = false;
         } else if show_volume {
             show_volume = false;
+        } else if show_modes {
+            show_modes = false;
         } else {
             break;
         }
     }
 
     let mut right: Vec<Vec<Span<'static>>> = vec![queue];
-    right.push(repeat_group(app, theme));
-    right.push(shuffle_group(app, theme));
+    if show_modes {
+        right.push(repeat_group(app, theme));
+        right.push(shuffle_group(app, theme));
+    }
     if show_volume {
         right.push(volume_group(app, theme));
     }
@@ -914,10 +867,6 @@ fn draw_empty_tracks(frame: &mut Frame, theme: &Theme, area: Rect) {
 fn empty_hint(key: &str, description: &str, theme: &Theme) -> Line<'static> {
     Line::from(vec![
         Span::styled("  ", Style::new()),
-        Span::styled(
-            format!("{} ", theme.glyphs.playing),
-            Style::new().fg(theme.accent),
-        ),
         Span::styled(pad_right(key, 6), Style::new().fg(theme.accent_alt)),
         Span::styled(description.to_owned(), Style::new().fg(theme.muted)),
     ])
@@ -3083,7 +3032,7 @@ fn draw_footer(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         spans.push(Span::styled(hints, Style::new().fg(theme.muted)));
         if app.lyrics_open && area.width >= 80 {
             spans.push(Span::styled(
-                format!(" {} {} close", theme.glyphs.separator, theme.glyphs.lyrics),
+                format!(" {} L close", theme.glyphs.separator),
                 Style::new().fg(theme.muted),
             ));
         }
@@ -3093,9 +3042,9 @@ fn draw_footer(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
 }
 
 fn normal_hints(app: &App, theme: &Theme, width: u16) -> String {
-    let enter = theme.glyphs.enter;
+    let enter = "enter";
     let sep = theme.glyphs.separator;
-    let q = theme.glyphs.queue;
+    let q = "Q";
     if app.view == View::Search {
         let filter = "c-1..5 filter";
         return if width >= 92 {
@@ -3148,7 +3097,7 @@ fn normal_hints(app: &App, theme: &Theme, width: u16) -> String {
 }
 
 fn queue_hints(theme: &Theme, width: u16) -> String {
-    let enter = theme.glyphs.enter;
+    let enter = "enter";
     let sep = theme.glyphs.separator;
     if width >= 100 {
         format!(
@@ -3851,9 +3800,7 @@ mod tests {
         assert!(screen.contains("Mota"));
         assert!(screen.contains("Russian Circles"));
         assert!(screen.contains("OFF"));
-        // Volume lives on the two-row HUD, where the title is not starved.
-        let screen = render(&mut app, 80, 30);
-        assert!(screen.contains("VOL"), "{screen}");
+        assert!(screen.contains("Q0"), "{screen}");
     }
 
     #[test]
@@ -3945,7 +3892,8 @@ mod tests {
     fn long_error_toasts_wrap_and_truncate_without_panicking() {
         let mut app = App::new();
         app.notify(
-            "the provider returned an unexpectedly long diagnostic that cannot fit in two lines and must be clipped",
+            "the provider returned an unexpectedly long diagnostic that cannot fit in two lines and must be clipped \
+             because it keeps going with stack traces, request ids and retry advice that no toast can hold",
             true,
         );
         let screen = render(&mut app, 60, 20);
@@ -4024,7 +3972,7 @@ mod tests {
     }
 
     #[test]
-    fn hud_reserves_a_title_floor_and_never_clips_the_clock() {
+    fn hud_keeps_one_row_with_a_title_floor_and_the_clock() {
         let mut app = App::new();
         app.status.status = lekima_domain::PlaybackStatus::Playing;
         app.status.track = Some(track(
@@ -4032,47 +3980,16 @@ mod tests {
         ));
         app.status.position_ms = 42_000;
 
-        // Mid widths get two rows: title on top, rail/clock/volume below.
+        // One row at every width; the title truncates before the clock does.
         let rows = render_rows(&mut app, 80, 24, Theme::cyber());
-        assert!(rows[1].contains("00:42/05:00"), "{rows:?}");
-        assert!(rows[1].contains("VOL"), "{rows:?}");
+        assert!(rows[0].contains("LEKIMA"), "{rows:?}");
         assert!(rows[0].contains('…'), "{rows:?}");
+        assert!(rows[0].contains("00:42/05:00"), "{rows:?}");
+        assert!(rows[1].starts_with('─'), "{rows:?}");
 
-        // Wide terminals keep one row and never lose the clock.
         let screen = render(&mut app, 120, 30);
         assert!(screen.contains("00:42/05:00"), "{screen}");
         assert!(screen.contains("Q0"), "{screen}");
-    }
-
-    #[test]
-    fn hud_is_two_rows_only_on_mid_widths() {
-        let mut app = App::new();
-        app.status.status = lekima_domain::PlaybackStatus::Playing;
-        app.status.track = Some(track("Mota"));
-        let rows = render_rows(&mut app, 80, 24, Theme::cyber());
-        assert!(rows[0].contains("LEKIMA"), "{rows:?}");
-        assert!(rows[1].contains("00:00"), "{rows:?}");
-
-        let rows = render_rows(&mut app, 120, 24, Theme::cyber());
-        assert!(rows[0].contains("LEKIMA"), "{rows:?}");
-        assert!(rows[1].starts_with('─'), "{rows:?}");
-    }
-
-    #[test]
-    fn hud_bottom_row_fits_at_the_two_row_threshold() {
-        let mut app = App::new();
-        app.status.status = lekima_domain::PlaybackStatus::Playing;
-        app.status.track = Some(track("Mota"));
-        app.status.position_ms = 42_000;
-        let rows = render_rows(&mut app, 64, 24, Theme::cyber());
-        assert!(rows[0].contains("LEKIMA"), "{rows:?}");
-        assert!(rows[1].contains("00:42/05:00"), "clock clipped: {rows:?}");
-        if let Some(start) = rows[1].find("VOL") {
-            assert!(
-                rows[1][start..].contains("████░░"),
-                "volume meter clipped: {rows:?}"
-            );
-        }
     }
 
     #[test]
@@ -4261,10 +4178,6 @@ mod tests {
             let screen = render(&mut app, 100, 24);
             assert!(screen.contains(label), "{label}: {screen}");
             assert!(screen.contains(sentence), "{label}: {screen}");
-            assert!(
-                screen.contains('▶'),
-                "hint glyph missing for {label}: {screen}"
-            );
         }
     }
 

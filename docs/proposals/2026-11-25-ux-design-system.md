@@ -1,10 +1,15 @@
 # Proposal — TUI design system v2
 
 Status: **Accepted; slices 1–6 implemented** · 2026-11-25 · Linear AKA-151, AKA-153
+
+Revision after review: the HUD stays **one row at every width** (the two-row
+mid width is withdrawn); shortcut hints spell keys (`enter`, `Q`, `L`) instead
+of reusing concept glyphs. The token, palette, list, surface and accessibility
+decisions stand.
 Extends [`2026-11-25-tui-density-and-theme.md`](./2026-11-25-tui-density-and-theme.md)
 and keeps **A1** (`compact` default) and **B1** (freeze twelve palettes, polish
 `cyber`, add `lekima ui`). Decisions: twelve semantic roles, five type levels, one
-spacing scale, a right-anchored HUD (two rows below 96), one gutter, words for
+spacing scale, a right-anchored one-row HUD with a title floor, one gutter, words for
 state, explicit motion/colour downgrade, and `lekima ui` first. No new palette or
 default flip; "vibrant" means sharper signals, not more hues.
 
@@ -243,7 +248,7 @@ truncate only with `…`, never mid-word. At `micro` only the brand chip is prom
 
 ## 6. Identity direction
 The console stays. Five moves: (1) a stable instrument panel — right-anchored
-cluster, clock/rail at the same column, two rows below 96 so the title keeps ≥20
+cluster, clock/rail at the same column, one row so the title keeps ≥20
 cells; (2) one gutter for focus, selection and the label tick; (3) words for state,
 brackets for controls, so shuffle reads on/off without colour; (4) numbers that
 line up; (5) a calmer palette — brighter `muted`/`label`, a real `danger`, `faint`
@@ -256,7 +261,7 @@ Before (80): 9 title cells, no artist, counters slide with the title.
  LEKIMA  ┃ ▶ Cigarett…  ━━━━━●────── 01:42/01:49  VOL ████░░  Q:25  [⟲ ALL]  [⇄]
 ```
 
-After (80): two rows, 23 title cells plus artist, queue right-anchored.
+After (80): one row (second row withdrawn), 23 title cells plus artist, queue right-anchored.
 
 ```
  LEKIMA ┃ ▶ Cigarettes and lighters · LoMo                                   Q25
@@ -429,7 +434,7 @@ Six slices, each with its docs; screenshots regenerate only in slice 6, and slic
   Docs: `terminal-setup.md`, `agents.md`, visual doc §2.
 
 ### Slice 2 — HUD v2
-- **Goal / files:** stable right edge, title floor, two-row HUD below 96,
+- **Goal / files:** stable right edge, title floor, one-row HUD at every width,
   non-colour state; `ui.rs` (`draw_hud`, `progress_spans`), `theme.rs`
   (`progress_buffered`, drop the unused sleep glyph), tests, `preview.rs`.
 - **Acceptance:** with a 60-character title, ≥20 cells at 80 and ≥32 at 120; the

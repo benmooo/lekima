@@ -1,19 +1,19 @@
-LEKIMA ┃ ▶ Cigarettes and lighters · LoMo                                    Q25
-━━━━━●────── 00:42/01:49                                     VOL ████░░  [⟲ ALL]
+LEKIMA ┃ ▶ Cigarettes and lighters        Q25  [⟲ ALL]  ━━━━━●────── 00:42/01:49
 ────────────────────────────────────────────────────────────────────────────────
 // LIBRARY · 3          │ // search: mota · 6 TRACKS ▌
 ▌d ☀ DAILY              │   #     TITLE                                    TIME
  F ◉ FM                 │ ▌ 001 ▶ ♥ Cigarettes and lighters                1:49
  t ▲ TOPLISTS           │   002   Mota                                     6:32
- c ☁ CLOUD ╔▓ UI ▓══════════════════════════════════════════════════╗      5:21
- ♥ LIKED   ║   THEME       ██ < cyber >                             ║      4:11
-           ║   GLYPHS         < unicode >                           ║      5:30
-// ≡ PLAYLI║   DENSITY        < compact >                           ║══════════╗
- 01 Late ni║ ▌ TRANSLATION    < off >                               ║          ║
- 02 Focus  ║                                                        ║══════════╝
- 03 Daily  ║ h/l change · j/k select · esc close · saved on exit    ║───────────
-           ║ source: config.toml                                    ║
-           ╚════════════════════════════════════════════════════════╝───────────
+ c ☁ CLOUD              │   003   Hyperballad                              5:21
+ ♥ LIKED   ╔▓ UI ▓══════════════════════════════════════════════════╗      4:11
+           ║   THEME       ██ < cyber >                             ║      5:30
+// ≡ PLAYLI║   GLYPHS         < unicode >                           ║══════════╗
+ 01 Late ni║   DENSITY        < compact >                           ║          ║
+ 02 Focus  ║ ▌ TRANSLATION    < off >                               ║══════════╝
+ 03 Daily  ║                                                        ║───────────
+           ║ h/l change · j/k select · esc close · saved on exit    ║
+           ║ source: config.toml                                    ║───────────
+           ╚════════════════════════════════════════════════════════╝
                         │ ▌ Is this the real life?
                         │   Is this just fantasy?
                         │   Caught in a landslide
@@ -21,4 +21,4 @@ LEKIMA ┃ ▶ Cigarettes and lighters · LoMo                                  
                         │
                         │───────────────────────────────────────────────────────
                         │+0 ms  ·  00:42 / 01:49  ·  [ ] · L
-[UI] j/k select · h/l change · esc close · ♫ close
+[UI] j/k select · h/l change · esc close · L close

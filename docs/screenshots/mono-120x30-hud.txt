@@ -27,4 +27,4 @@ LEKIMA ┃ ▶ Cigarettes and lighters · LoMo               Q25  [⟲ ALL]  EXH
                         │║ ▌ queued 3 tracks                                        ║
                         │╚══════════════════════════════════════════════════════════╝───────────────────────────────────
                         │                                                         +0 ms  ·  00:42 / 01:49  ·  [ ] · L
-[NORMAL] j/k · ⏎ play · space · ≣ queue · S theme · / search · : cmd · ctrl-o/i hist · ? keys · ♫ close
+[NORMAL] j/k · enter play · space · Q queue · S theme · / search · : cmd · ctrl-o/i hist · ? keys · L close

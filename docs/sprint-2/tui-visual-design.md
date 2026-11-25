@@ -126,24 +126,20 @@ Breakpoints:
 
 ### HUD
 
-One row at `≥96` columns and below `64`; two rows at `64–95`, where a single row
-would leave the title fewer than 20 cells. The right side is anchored: optional
-facts are dropped in a fixed order (`SIG` → sleep → `CACHE` → quality →
-`PREVIEW` → volume) so counters and the clock never slide with the title. The
-two-row bottom drops volume, then the mode badges, before it clips the clock.
+One row at every width, with a 20-cell title floor. The right side is anchored:
+optional facts are dropped in a fixed order (`SIG` → sleep → `CACHE` → quality →
+`PREVIEW` → volume → mode badges) so the title, counters and clock never slide
+with each other.
 
-**Row 1** — brand chip (` LEKIMA `), state glyph, bold title, `·`, artist
-(`muted`, truncated first), queue count `Q25` flush right.
+**Left** — brand chip (` LEKIMA `), state glyph, bold title, `·`, artist
+(`muted`, truncated first). The title is the first thing shortened.
 
-**Row 2** (mid widths) — a 12-cell rail with a distinct playhead
-(`━━━━●──────`), `position/duration`, then `VOL` and the mode badges flush
-right. Buffered-but-unplayed cells are `┄` in `panel`, so they differ from the
-played `━` even without colour.
-
-**Wide row** — after the title: queue count, `[⟲ ALL|1]`, `[⇄]` (bracket
+**Right, flush to the edge** — queue count, `[⟲ ALL|1]`, `[⇄]` (bracket
 presence, not colour, means shuffle is on; off renders nothing), quality class,
-`CACHE`, `PREVIEW`, sleep countdown, `SIG`, rail and clock. Volume appears on the
-mid-width row whenever it fits, and always when the output is muted.
+`CACHE`, `PREVIEW`, sleep countdown, `SIG`, then the 12-cell rail with a
+distinct playhead (`━━━━●──────`) and `position/duration`. Buffered-but-unplayed
+cells are `┄` in `panel`, so they differ from the played `━` even without
+colour. `VOL` appears when the width allows and always when muted.
 
 Durations use concise `m:ss`; the clock is never clipped. ASCII mode uses
 `>` as the playhead with `=`/`-` rails and `.` for buffered cells.
@@ -274,7 +270,8 @@ Durations use concise `m:ss`; the clock is never clipped. ASCII mode uses
 
 - Mode badge: black on accent, bold, `[NORMAL]`, `[SEARCH]`, `[CMD]`, `[QUEUE]`,
   `[HELP]`.
-- Normal: key hints in `dim`, separated by `·`.
+- Normal: key hints spell the key (`enter`, `space`, `Q`, `L`) rather than
+  showing a glyph; hints are separated by `·` and stay in `muted`.
 - Search/command: `>` or `:` in accent, input in `text`, blinking `▌`.
 - The footer never carries application messages: it is input and state, not a
   log.
