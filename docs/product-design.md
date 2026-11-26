@@ -2,7 +2,7 @@
 
 > NetEase Cloud Music in your terminal. Vim-first, agent-native.
 
-Status: **Living document** — shipped through 0.12.0 · Owner: @benmooo · Rewrite
+Status: **Living document** — shipped through 0.13.0 · Owner: @benmooo · Rewrite
 of the archived Go project [`benmooo/lekima`](https://github.com/benmooo/lekima)
 
 ---
@@ -160,7 +160,7 @@ The 0.11.1 patch makes buffered-range shading follow the decoder's own
 byte-to-time curve, so variable-bitrate streams shade the bytes that are really
 local instead of a constant-bitrate guess.
 
-### v0.13 — “playlist editing” (unreleased)
+### v0.13 — “playlist editing” (shipped in 0.13.0)
 
 > Detailed specification: [`sprint-12/`](./sprint-12/).
 
@@ -446,7 +446,7 @@ token.
 | **M14 Daily-driver loop** (done, 0.10.0) | Desktop notifications, durable listening history across CLI/MCP/HTTP/TUI | 0.10.0 released |
 | **M15 Extensions** (done, 0.11.0) | Out-of-process plugin hooks, capability-checked commands, `doctor` reporting, VBR-accurate buffered ranges | 0.11.1 released |
 | **M16 Design system** (done, 0.12.0) | `lekima ui`, measurable theme contract, one list grammar, unified surfaces, colour downgrade, reduced motion, text fixtures | 0.12.0 released |
-| **M17 Playlist editing** (unreleased) | Create, rename, describe, add/remove tracks and delete, with `ncmapi 1.10` write routes | 0.13.0 |
+| **M17 Playlist editing** (done, 0.13.0) | Create, rename, describe, add/remove tracks and delete, with `ncmapi 1.10` write routes | 0.13.0 |
 
 ## 9. Risks & mitigations
 

@@ -1,6 +1,6 @@
 # Sprint 12 · Playlist editing
 
-Status: **In progress** · Linear: new issues to be opened from the slice table
+Status: **Shipped in 0.13.0** · Linear: new issues to be opened from the slice table
 
 ## 1. Problem
 

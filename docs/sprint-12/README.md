@@ -1,6 +1,6 @@
 # Sprint 12 — Playlist editing
 
-Status: **In progress** · Started 2026-11-25
+Status: **Shipped in 0.13.0** · Started 2026-11-25
 
 Playlists are read-only today: `lekima playlist list` and `show`, the TUI
 sidebar, MCP `queue_playlist` and the HTTP routes can consume a playlist but

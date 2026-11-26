@@ -62,6 +62,10 @@ $ lekima status --json
 
 ## Status
 
+`0.13.0` adds playlist editing end to end: `lekima playlist create|rename|describe|add|remove|delete`,
+MCP and HTTP tools, a TUI playlist pane (`P`) with y/n delete, and the first
+provider write endpoints in `ncmapi 1.10`. See [`docs/sprint-12/`](docs/sprint-12/).
+
 `0.12.0` is the TUI design-system release: `lekima ui` reports and writes theme,
 glyphs, density, motion and lyric offset without a daemon; every palette meets
 the documented contrast floors; the HUD keeps its single-row order while the

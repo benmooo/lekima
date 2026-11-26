@@ -1,6 +1,6 @@
 # Sprint 12 · TUI playlist pane
 
-Status: **Accepted** · 2026-11-25 · Slice E follow-up
+Status: **Shipped in 0.13.0** · 2026-11-25 · Slice E follow-up
 
 ## 1. Problem
 
