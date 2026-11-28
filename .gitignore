@@ -3,3 +3,6 @@
 .DS_Store
 .cargo/
 opencode.json
+branding/lekima-logo/out/
+branding/lekima-logo/*.blend
+__pycache__/
