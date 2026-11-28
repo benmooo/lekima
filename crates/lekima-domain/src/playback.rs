@@ -135,6 +135,9 @@ pub struct PlaybackState {
     /// Active sleep timer, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sleep_remaining_ms: Option<u64>,
+    /// Currently active output device name, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_device: Option<String>,
     /// Recent amplitude envelope from the audio device (oldest first, 0..=1).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub wave: Vec<f32>,
@@ -188,6 +191,7 @@ impl Default for PlaybackState {
             cached: false,
             quality: Quality::Exhigh,
             sleep_remaining_ms: None,
+            output_device: None,
             wave: Vec::new(),
             stream_duration_ms: None,
             buffered: Vec::new(),

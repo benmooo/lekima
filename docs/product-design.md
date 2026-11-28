@@ -2,7 +2,7 @@
 
 > NetEase Cloud Music in your terminal. Vim-first, agent-native.
 
-Status: **Living document** — shipped through 0.13.0 · Owner: @benmooo · Rewrite
+Status: **Living document** — shipped through 0.14.0 · Owner: @benmooo · Rewrite
 of the archived Go project [`benmooo/lekima`](https://github.com/benmooo/lekima)
 
 ---
@@ -182,6 +182,15 @@ history and catalogue; unified empty states and alerts; explicit `NO_COLOR`,
 The HUD keeps its original single-row order (title, rail and clock, volume,
 queue, modes, optional facts) and shortcut hints spell keys instead of reusing
 concept glyphs.
+
+### v0.14 — “resilient output” (shipped in 0.14.0)
+
+> Detailed specification: [`sprint-13/`](./sprint-13/).
+
+Live output device switching (`lekima audio-device`, TUI `:device` / Settings,
+IPC, MCP, HTTP and hooks) without restarting the daemon, plus automatic hot-swap
+recovery on device disconnect or default-device change while preserving queue
+and playback position.
 
 ### Closed candidates
 
@@ -447,6 +456,7 @@ token.
 | **M15 Extensions** (done, 0.11.0) | Out-of-process plugin hooks, capability-checked commands, `doctor` reporting, VBR-accurate buffered ranges | 0.11.1 released |
 | **M16 Design system** (done, 0.12.0) | `lekima ui`, measurable theme contract, one list grammar, unified surfaces, colour downgrade, reduced motion, text fixtures | 0.12.0 released |
 | **M17 Playlist editing** (done, 0.13.0) | Create, rename, describe, add/remove tracks and delete, with `ncmapi 1.10` write routes | 0.13.0 |
+| **M18 Resilient output** (done, 0.14.0) | Live output device switching across CLI/TUI/IPC/MCP/HTTP/hooks and automatic hot-swap recovery | 0.14.0 |
 
 ## 9. Risks & mitigations
 

@@ -153,6 +153,10 @@ pub enum Command {
     SetQuality {
         quality: Quality,
     },
+    /// Switch the active audio output device (`None` selects the system default).
+    SetAudioDevice {
+        device: Option<String>,
+    },
     /// Stream sequenced events on this connection after the ack.
     Subscribe {
         #[serde(default)]
@@ -251,6 +255,7 @@ impl Command {
             Self::Hello { .. } => "hello",
             Self::Sleep { .. } => "sleep",
             Self::SetQuality { .. } => "set_quality",
+            Self::SetAudioDevice { .. } => "set_audio_device",
             Self::Subscribe { .. } => "subscribe",
             Self::Search { .. } => "search",
             Self::Playlists => "playlists",
@@ -304,6 +309,7 @@ pub const HOOK_CAPABILITIES: &[&str] = &[
     "like",
     "sleep",
     "set_quality",
+    "set_audio_device",
     "queue_album",
     "queue_playlist",
     "playlist_create",
@@ -757,6 +763,19 @@ mod tests {
                 encoded,
                 "round trip must be stable"
             );
+        }
+
+        for command in [
+            Command::SetAudioDevice {
+                device: Some("Headphones".to_owned()),
+            },
+            Command::SetAudioDevice { device: None },
+        ] {
+            let encoded = serde_json::to_string(&command).unwrap();
+            let decoded: Command = serde_json::from_str(&encoded).unwrap();
+            assert_eq!(serde_json::to_string(&decoded).unwrap(), encoded);
+            assert_eq!(decoded.tag(), "set_audio_device");
+            assert!(super::is_hook_capability(decoded.tag()));
         }
     }
 }

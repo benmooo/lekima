@@ -1,8 +1,9 @@
 //! The rodio-backed [`AudioEngine`] implementation.
 
 use std::{
+    collections::VecDeque,
     fs::File,
-    io::Cursor,
+    io::{Cursor, Seek as _, SeekFrom},
     ops::Range,
     sync::{
         Arc, Mutex,
@@ -13,8 +14,11 @@ use std::{
 };
 
 use async_trait::async_trait;
-use lekima_domain::{AudioEngine, BufferedRange, DomainError, Result, TrackId};
-use rodio::{Decoder, DeviceSinkBuilder, Player, Source, cpal, cpal::traits::HostTrait};
+use lekima_domain::{AudioDeviceEvent, AudioEngine, BufferedRange, DomainError, Result, TrackId};
+use rodio::{
+    Decoder, DeviceSinkBuilder, Player, Source, cpal,
+    cpal::traits::{DeviceTrait, HostTrait},
+};
 
 use crate::{
     prefetch::PrefetchSource,
@@ -30,6 +34,10 @@ pub struct DeviceInfo {
     pub is_default: bool,
 }
 
+fn device_label(device: &cpal::Device) -> Option<String> {
+    device.description().ok().map(|desc| desc.name().to_owned())
+}
+
 /// Lists output devices. Returns an empty list on headless systems.
 ///
 /// # Errors
@@ -39,17 +47,17 @@ pub fn devices() -> Result<Vec<DeviceInfo>> {
     let host = cpal::default_host();
     let default = host
         .default_output_device()
-        .map(|device| device.to_string());
+        .and_then(|device| device_label(&device));
     let devices = host.output_devices().map_err(|error| {
         DomainError::Playback(format!("failed to enumerate audio devices: {error}"))
     })?;
     Ok(devices
-        .map(|device| {
-            let name = device.to_string();
-            DeviceInfo {
+        .filter_map(|device| {
+            let name = device_label(&device)?;
+            Some(DeviceInfo {
                 is_default: default.as_deref() == Some(name.as_str()),
                 name,
-            }
+            })
         })
         .collect())
 }
@@ -92,6 +100,10 @@ enum Command {
     Stop,
     Seek(u64),
     Volume(f32),
+    SetDevice {
+        name: Option<String>,
+        ack: std::sync::mpsc::SyncSender<Result<String>>,
+    },
     Shutdown,
 }
 
@@ -102,8 +114,11 @@ struct Shared {
     volume_bits: AtomicU32,
     wave: Arc<Waveform>,
     boundary: Mutex<Option<TrackId>>,
+    boundary_crossed: AtomicBool,
     stream_duration_ms: AtomicU64,
     cached: AtomicBool,
+    output_device: Mutex<Option<String>>,
+    device_events: Mutex<VecDeque<AudioDeviceEvent>>,
 }
 
 impl Shared {
@@ -115,9 +130,40 @@ impl Shared {
             volume_bits: AtomicU32::new(volume.clamp(0.0, 1.0).to_bits()),
             wave: Arc::new(Waveform::new()),
             boundary: Mutex::new(None),
+            boundary_crossed: AtomicBool::new(false),
             stream_duration_ms: AtomicU64::new(0),
             cached: AtomicBool::new(false),
+            output_device: Mutex::new(None),
+            device_events: Mutex::new(VecDeque::new()),
         }
+    }
+
+    fn set_output_device(&self, name: Option<String>) {
+        *self
+            .output_device
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner()) = name;
+    }
+
+    fn output_device(&self) -> Option<String> {
+        self.output_device
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .clone()
+    }
+
+    fn push_device_event(&self, event: AudioDeviceEvent) {
+        self.device_events
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .push_back(event);
+    }
+
+    fn take_device_event(&self) -> Option<AudioDeviceEvent> {
+        self.device_events
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .pop_front()
     }
 
     fn volume(&self) -> f32 {
@@ -488,6 +534,28 @@ impl AudioEngine for RodioAudioEngine {
         }
         boundary
     }
+
+    fn set_device(&self, name: Option<&str>) -> Result<String> {
+        let (ack, rx) = std::sync::mpsc::sync_channel(1);
+        self.send(Command::SetDevice {
+            name: name.map(str::to_owned),
+            ack,
+        })?;
+        match rx.recv_timeout(DEVICE_TIMEOUT) {
+            Ok(result) => result,
+            Err(_) => Err(DomainError::Playback(
+                "timed out while switching the audio output device".to_owned(),
+            )),
+        }
+    }
+
+    fn output_device(&self) -> Option<String> {
+        self.shared.output_device()
+    }
+
+    fn take_device_event(&self) -> Option<AudioDeviceEvent> {
+        self.shared.take_device_event()
+    }
 }
 
 async fn await_load(ack_rx: oneshot::Receiver<std::result::Result<(), String>>) -> Result<()> {
@@ -529,6 +597,7 @@ impl<S: rodio::Source> Iterator for Boundary<S> {
                 .boundary
                 .lock()
                 .unwrap_or_else(|poison| poison.into_inner()) = Some(self.track);
+            self.shared.boundary_crossed.store(true, Ordering::Relaxed);
             self.shared.set_stream_duration(self.duration);
             self.shared.cached.store(self.cached, Ordering::Relaxed);
             self.shared.position_ms.store(0, Ordering::Relaxed);
@@ -680,20 +749,266 @@ fn content_range_total(response: &reqwest::Response) -> Option<u64> {
     value.rsplit('/').next()?.trim().parse().ok()
 }
 
-fn open_device(name: Option<&str>) -> std::result::Result<rodio::MixerDeviceSink, String> {
+const DEVICE_POLL_TICKS: u8 = 10;
+
+enum ActiveSource {
+    Memory {
+        bytes: Arc<[u8]>,
+        cached: bool,
+    },
+    Stream {
+        reader: File,
+        total: Option<u64>,
+        spool: Arc<Spool>,
+        cached: bool,
+    },
+}
+
+fn open_device_resolved(
+    name: Option<&str>,
+) -> std::result::Result<(rodio::MixerDeviceSink, String), DomainError> {
+    let host = cpal::default_host();
     match name {
-        None => DeviceSinkBuilder::open_default_sink()
-            .map_err(|error| format!("no audio output device: {error}")),
-        Some(name) => {
-            let host = cpal::default_host();
+        None => {
+            let resolved = host
+                .default_output_device()
+                .and_then(|device| device_label(&device))
+                .ok_or_else(|| DomainError::Playback("no audio output device".to_owned()))?;
+            let sink = DeviceSinkBuilder::open_default_sink().map_err(|error| {
+                DomainError::Playback(format!("no audio output device: {error}"))
+            })?;
+            Ok((sink, resolved))
+        }
+        Some(target) => {
             let device = host
                 .output_devices()
-                .map_err(|error| format!("failed to enumerate audio devices: {error}"))?
-                .find(|device| device.to_string() == name)
-                .ok_or_else(|| format!("output device `{name}` was not found"))?;
-            DeviceSinkBuilder::from_device(device)
+                .map_err(|error| {
+                    DomainError::Playback(format!("failed to enumerate audio devices: {error}"))
+                })?
+                .find(|device| device_label(device).as_deref() == Some(target))
+                .ok_or_else(|| {
+                    DomainError::NotFound(format!("output device `{target}` was not found"))
+                })?;
+            let sink = DeviceSinkBuilder::from_device(device)
                 .and_then(DeviceSinkBuilder::open_stream)
-                .map_err(|error| format!("failed to open `{name}`: {error}"))
+                .map_err(|error| {
+                    DomainError::Playback(format!("failed to open `{target}`: {error}"))
+                })?;
+            Ok((sink, target.to_owned()))
+        }
+    }
+}
+
+fn attach_source(
+    player: &Player,
+    source: &ActiveSource,
+    position_ms: u64,
+    paused: bool,
+    shared: &Shared,
+) -> std::result::Result<(), String> {
+    match source {
+        ActiveSource::Memory { bytes, cached } => {
+            let byte_len = bytes.len() as u64;
+            let decoder = Decoder::builder()
+                .with_data(Cursor::new(Arc::clone(bytes)))
+                .with_byte_len(byte_len)
+                .with_seekable(true)
+                .build()
+                .map_err(|error| format!("audio format not supported: {error}"))?;
+            shared.set_stream_duration(decoder.total_duration());
+            shared.cached.store(*cached, Ordering::Relaxed);
+            shared.loaded.store(true, Ordering::Relaxed);
+            shared.finished.store(false, Ordering::Relaxed);
+            shared.position_ms.store(position_ms, Ordering::Relaxed);
+            shared.wave.reset();
+            player.append(Metered::new(decoder, Arc::clone(&shared.wave)));
+        }
+        ActiveSource::Stream {
+            reader,
+            total,
+            spool,
+            cached,
+        } => {
+            let mut cloned = reader
+                .try_clone()
+                .map_err(|error| format!("failed to reopen stream spool: {error}"))?;
+            cloned
+                .seek(SeekFrom::Start(0))
+                .map_err(|error| format!("failed to rewind stream spool: {error}"))?;
+            let progress = spool.progress();
+            let mut builder = Decoder::builder()
+                .with_data(GrowingFile::new(cloned, Arc::clone(spool)))
+                .with_seekable(true);
+            if let Some(total) = total {
+                builder = builder.with_byte_len(*total);
+            }
+            let decoder = builder
+                .build()
+                .map_err(|error| format!("streamed audio format not supported: {error}"))?;
+            shared.set_stream_duration(decoder.total_duration());
+            shared.cached.store(*cached, Ordering::Relaxed);
+            shared.loaded.store(true, Ordering::Relaxed);
+            shared.finished.store(false, Ordering::Relaxed);
+            shared.position_ms.store(position_ms, Ordering::Relaxed);
+            shared.wave.reset();
+            let prefetched = PrefetchSource::new_with_progress(decoder, progress);
+            player.append(Metered::new(prefetched, Arc::clone(&shared.wave)));
+        }
+    }
+    if position_ms > 0
+        && let Err(error) = player.try_seek(Duration::from_millis(position_ms))
+    {
+        tracing::warn!(?error, position_ms, "seek after device switch failed");
+    }
+    if paused {
+        player.pause();
+    } else {
+        player.play();
+    }
+    Ok(())
+}
+
+struct AudioState {
+    device: Option<rodio::MixerDeviceSink>,
+    player: Option<Player>,
+    configured_device: Option<String>,
+    active_device: Option<String>,
+    current_source: Option<ActiveSource>,
+    pending_source: Option<ActiveSource>,
+    paused: bool,
+}
+
+impl AudioState {
+    fn promote_boundary_if_crossed(&mut self, shared: &Shared) {
+        if shared.boundary_crossed.swap(false, Ordering::Relaxed)
+            && let Some(next) = self.pending_source.take()
+        {
+            self.current_source = Some(next);
+            self.paused = false;
+        }
+    }
+    fn current_position_ms(&self, shared: &Shared) -> u64 {
+        if !shared.loaded.load(Ordering::Relaxed) {
+            return 0;
+        }
+        self.player
+            .as_ref()
+            .map(|player| player.get_pos().as_millis() as u64)
+            .unwrap_or_else(|| shared.position_ms.load(Ordering::Relaxed))
+    }
+
+    fn reopen_on(
+        &mut self,
+        target: Option<&str>,
+        paused_override: Option<bool>,
+        shared: &Shared,
+    ) -> std::result::Result<String, DomainError> {
+        let saved_pos_ms = self.current_position_ms(shared);
+        let paused = paused_override.unwrap_or(self.paused);
+        let (new_sink, resolved_name) = open_device_resolved(target)?;
+
+        // Drop old player and sink only after the new sink is open.
+        self.player = None;
+        self.device = None;
+        *shared
+            .boundary
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner()) = None;
+        shared.boundary_crossed.store(false, Ordering::Relaxed);
+        self.pending_source = None;
+
+        let new_player = Player::connect_new(new_sink.mixer());
+        new_player.set_volume(shared.volume());
+        if shared.loaded.load(Ordering::Relaxed)
+            && let Some(source) = self.current_source.as_ref()
+            && let Err(error) = attach_source(&new_player, source, saved_pos_ms, paused, shared)
+        {
+            tracing::warn!(%error, "failed to re-attach track after device switch");
+        }
+
+        self.device = Some(new_sink);
+        self.player = Some(new_player);
+        self.paused = paused;
+        self.active_device = Some(resolved_name.clone());
+        shared.set_output_device(Some(resolved_name.clone()));
+        Ok(resolved_name)
+    }
+
+    fn drop_sink_and_pause(&mut self, shared: &Shared) {
+        let saved_pos_ms = self.current_position_ms(shared);
+        if shared.loaded.load(Ordering::Relaxed) {
+            shared.position_ms.store(saved_pos_ms, Ordering::Relaxed);
+        }
+        self.player = None;
+        self.device = None;
+        self.paused = true;
+        self.active_device = None;
+        shared.set_output_device(None);
+    }
+
+    fn check_health(&mut self, shared: &Shared) {
+        let host = cpal::default_host();
+        if let Some(pinned) = self.configured_device.clone() {
+            let exists = host
+                .output_devices()
+                .map(|mut devs| devs.any(|d| device_label(&d).as_deref() == Some(pinned.as_str())))
+                .unwrap_or(false);
+            if exists {
+                if self.active_device.as_deref() != Some(pinned.as_str())
+                    && let Ok(resolved) = self.reopen_on(Some(&pinned), None, shared)
+                {
+                    shared.push_device_event(AudioDeviceEvent::Changed { device: resolved });
+                }
+                return;
+            }
+            if self.active_device.as_deref() == Some(pinned.as_str()) {
+                match self.reopen_on(None, None, shared) {
+                    Ok(fallback) => {
+                        shared.push_device_event(AudioDeviceEvent::Lost {
+                            previous: Some(pinned),
+                            fallback: Some(fallback),
+                            paused: false,
+                        });
+                    }
+                    Err(_) => {
+                        self.drop_sink_and_pause(shared);
+                        shared.push_device_event(AudioDeviceEvent::Lost {
+                            previous: Some(pinned),
+                            fallback: None,
+                            paused: true,
+                        });
+                    }
+                }
+                return;
+            }
+            // Pinned device is still absent and we are already on fallback or
+            // paused; fall through to monitor the default device's health.
+        }
+
+        let default_name = host
+            .default_output_device()
+            .and_then(|device| device_label(&device));
+        match (&self.active_device, default_name) {
+            (Some(current), Some(new_default)) if current != &new_default => {
+                if let Ok(resolved) = self.reopen_on(None, None, shared) {
+                    shared.push_device_event(AudioDeviceEvent::Changed { device: resolved });
+                }
+            }
+            (Some(current), None) => {
+                let previous = current.clone();
+                self.drop_sink_and_pause(shared);
+                shared.push_device_event(AudioDeviceEvent::Lost {
+                    previous: Some(previous),
+                    fallback: None,
+                    paused: true,
+                });
+            }
+            (None, Some(_)) => {
+                if let Ok(resolved) = self.reopen_on(None, Some(true), shared) {
+                    shared.push_device_event(AudioDeviceEvent::Changed { device: resolved });
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -704,21 +1019,35 @@ fn audio_thread(
     ready: &std::sync::mpsc::SyncSender<std::result::Result<(), String>>,
     device_name: Option<String>,
 ) {
-    let device = match open_device(device_name.as_deref()) {
-        Ok(device) => device,
+    let (sink, resolved_name) = match open_device_resolved(device_name.as_deref()) {
+        Ok(opened) => opened,
         Err(error) => {
-            let _ = ready.send(Err(error));
+            let _ = ready.send(Err(error.to_string()));
             return;
         }
     };
-    let player = Player::connect_new(device.mixer());
-    player.set_volume(shared.volume());
+    let initial_player = Player::connect_new(sink.mixer());
+    initial_player.set_volume(shared.volume());
+    shared.set_output_device(Some(resolved_name.clone()));
     let _ = ready.send(Ok(()));
+
+    let mut state = AudioState {
+        device: Some(sink),
+        player: Some(initial_player),
+        configured_device: device_name,
+        active_device: Some(resolved_name),
+        current_source: None,
+        pending_source: None,
+        paused: false,
+    };
+    let mut poll_ticks: u8 = 0;
 
     loop {
         match receiver.recv_timeout(POLL_INTERVAL) {
             Ok(Command::Load { bytes, cached, ack }) => {
-                player.stop();
+                if let Some(player) = state.player.as_ref() {
+                    player.stop();
+                }
                 shared.set_stream_duration(None);
                 shared.cached.store(cached, Ordering::Relaxed);
                 *shared
@@ -726,28 +1055,27 @@ fn audio_thread(
                     .lock()
                     .unwrap_or_else(|poison| poison.into_inner()) = None;
                 let len = bytes.len();
-                let byte_len = bytes.len() as u64;
-                let decoder = Decoder::builder()
-                    .with_data(Cursor::new(bytes))
-                    .with_byte_len(byte_len)
-                    .with_seekable(true)
-                    .build();
-                match decoder {
-                    Ok(decoder) => {
-                        shared.set_stream_duration(decoder.total_duration());
-                        shared.loaded.store(true, Ordering::Relaxed);
-                        shared.finished.store(false, Ordering::Relaxed);
-                        shared.position_ms.store(0, Ordering::Relaxed);
-                        shared.wave.reset();
-                        player.append(Metered::new(decoder, Arc::clone(&shared.wave)));
-                        player.play();
-                        tracing::debug!(bytes = len, "audio loaded");
-                        let _ = ack.send(Ok(()));
+                let source = ActiveSource::Memory {
+                    bytes: Arc::from(bytes.into_boxed_slice()),
+                    cached,
+                };
+                if let Some(player) = state.player.as_ref() {
+                    match attach_source(player, &source, 0, false, &shared) {
+                        Ok(()) => {
+                            state.current_source = Some(source);
+                            state.paused = false;
+                            tracing::debug!(bytes = len, "audio loaded");
+                            let _ = ack.send(Ok(()));
+                        }
+                        Err(error) => {
+                            shared.loaded.store(false, Ordering::Relaxed);
+                            state.current_source = None;
+                            let _ = ack.send(Err(error));
+                        }
                     }
-                    Err(error) => {
-                        shared.loaded.store(false, Ordering::Relaxed);
-                        let _ = ack.send(Err(format!("audio format not supported: {error}")));
-                    }
+                } else {
+                    shared.loaded.store(false, Ordering::Relaxed);
+                    let _ = ack.send(Err("no audio output device".to_owned()));
                 }
             }
             Ok(Command::LoadStream {
@@ -757,39 +1085,38 @@ fn audio_thread(
                 cached,
                 ack,
             }) => {
-                player.stop();
+                if let Some(player) = state.player.as_ref() {
+                    player.stop();
+                }
                 shared.set_stream_duration(None);
                 shared.cached.store(cached, Ordering::Relaxed);
                 *shared
                     .boundary
                     .lock()
                     .unwrap_or_else(|poison| poison.into_inner()) = None;
-                let progress = spool.progress();
-                let mut builder = Decoder::builder()
-                    .with_data(GrowingFile::new(reader, spool))
-                    .with_seekable(true);
-                if let Some(total) = total {
-                    builder = builder.with_byte_len(total);
-                }
-                match builder.build() {
-                    Ok(decoder) => {
-                        shared.set_stream_duration(decoder.total_duration());
-                        shared.loaded.store(true, Ordering::Relaxed);
-                        shared.finished.store(false, Ordering::Relaxed);
-                        shared.position_ms.store(0, Ordering::Relaxed);
-                        shared.wave.reset();
-                        // Decode ahead so range fetches never block the device.
-                        let source = PrefetchSource::new_with_progress(decoder, progress);
-                        player.append(Metered::new(source, Arc::clone(&shared.wave)));
-                        player.play();
-                        tracing::debug!("stream loaded from spool");
-                        let _ = ack.send(Ok(()));
+                let source = ActiveSource::Stream {
+                    reader,
+                    total,
+                    spool,
+                    cached,
+                };
+                if let Some(player) = state.player.as_ref() {
+                    match attach_source(player, &source, 0, false, &shared) {
+                        Ok(()) => {
+                            state.current_source = Some(source);
+                            state.paused = false;
+                            tracing::debug!("stream loaded from spool");
+                            let _ = ack.send(Ok(()));
+                        }
+                        Err(error) => {
+                            shared.loaded.store(false, Ordering::Relaxed);
+                            state.current_source = None;
+                            let _ = ack.send(Err(error));
+                        }
                     }
-                    Err(error) => {
-                        shared.loaded.store(false, Ordering::Relaxed);
-                        let _ =
-                            ack.send(Err(format!("streamed audio format not supported: {error}")));
-                    }
+                } else {
+                    shared.loaded.store(false, Ordering::Relaxed);
+                    let _ = ack.send(Err("no audio output device".to_owned()));
                 }
             }
             Ok(Command::QueueNext {
@@ -798,9 +1125,14 @@ fn audio_thread(
                 cached,
                 ack,
             }) => {
-                let byte_len = bytes.len() as u64;
+                let Some(player) = state.player.as_ref() else {
+                    let _ = ack.send(Err("no audio output device".to_owned()));
+                    continue;
+                };
+                let arc_bytes: Arc<[u8]> = Arc::from(bytes.into_boxed_slice());
+                let byte_len = arc_bytes.len() as u64;
                 let decoder = Decoder::builder()
-                    .with_data(Cursor::new(bytes))
+                    .with_data(Cursor::new(Arc::clone(&arc_bytes)))
                     .with_byte_len(byte_len)
                     .with_seekable(true)
                     .build();
@@ -816,6 +1148,10 @@ fn audio_thread(
                             fired: false,
                         };
                         player.append(source);
+                        state.pending_source = Some(ActiveSource::Memory {
+                            bytes: arc_bytes,
+                            cached,
+                        });
                         let _ = ack.send(Ok(()));
                     }
                     Err(error) => {
@@ -823,10 +1159,24 @@ fn audio_thread(
                     }
                 }
             }
-            Ok(Command::Pause) => player.pause(),
-            Ok(Command::Resume) => player.play(),
+            Ok(Command::Pause) => {
+                state.paused = true;
+                if let Some(player) = state.player.as_ref() {
+                    player.pause();
+                }
+            }
+            Ok(Command::Resume) => {
+                state.paused = false;
+                if let Some(player) = state.player.as_ref() {
+                    player.play();
+                }
+            }
             Ok(Command::Stop) => {
-                player.clear();
+                if let Some(player) = state.player.as_ref() {
+                    player.clear();
+                }
+                state.current_source = None;
+                state.paused = false;
                 *shared
                     .boundary
                     .lock()
@@ -839,14 +1189,31 @@ fn audio_thread(
                 shared.wave.reset();
             }
             Ok(Command::Seek(position_ms)) => {
-                if let Err(error) = player.try_seek(Duration::from_millis(position_ms)) {
+                if let Some(player) = state.player.as_ref()
+                    && let Err(error) = player.try_seek(Duration::from_millis(position_ms))
+                {
                     tracing::warn!(?error, "seek failed");
                 }
             }
-            Ok(Command::Volume(gain)) => player.set_volume(gain),
+            Ok(Command::Volume(gain)) => {
+                if let Some(player) = state.player.as_ref() {
+                    player.set_volume(gain);
+                }
+            }
+            Ok(Command::SetDevice { name, ack }) => {
+                state.promote_boundary_if_crossed(&shared);
+                let result = state.reopen_on(name.as_deref(), None, &shared);
+                if result.is_ok() {
+                    state.configured_device = name;
+                }
+                let _ = ack.send(result);
+            }
             Ok(Command::Shutdown) => break,
             Err(RecvTimeoutError::Timeout) => {
-                if shared.loaded.load(Ordering::Relaxed) {
+                state.promote_boundary_if_crossed(&shared);
+                if shared.loaded.load(Ordering::Relaxed)
+                    && let Some(player) = state.player.as_ref()
+                {
                     let position = player.get_pos();
                     shared
                         .position_ms
@@ -854,7 +1221,15 @@ fn audio_thread(
                     if player.empty() {
                         shared.loaded.store(false, Ordering::Relaxed);
                         shared.finished.store(true, Ordering::Relaxed);
+                        state.current_source = None;
+                        state.pending_source = None;
+                        state.paused = false;
                     }
+                }
+                poll_ticks = poll_ticks.wrapping_add(1);
+                if poll_ticks >= DEVICE_POLL_TICKS {
+                    poll_ticks = 0;
+                    state.check_health(&shared);
                 }
             }
             Err(RecvTimeoutError::Disconnected) => break,

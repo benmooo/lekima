@@ -180,6 +180,7 @@ impl Player {
             cached: self.audio.last_was_cached(),
             quality: *self.quality.lock().await,
             sleep_remaining_ms: None,
+            output_device: self.audio.output_device(),
             wave: self.audio.wave(),
             stream_duration_ms: self.audio.stream_duration_ms(),
             buffered: self.audio.buffered_ranges(duration_ms),
@@ -694,6 +695,28 @@ impl Player {
         *self.quality.lock().await
     }
 
+    /// Switches the active output device live (`None` selects the system
+    /// default) without restarting the daemon, returning the updated snapshot.
+    pub async fn set_audio_device(&self, name: Option<&str>) -> Result<PlaybackState> {
+        self.audio.set_device(name)?;
+        Ok(self.snapshot().await)
+    }
+
+    /// Consumes the next pending audio-device event and reconciles playback
+    /// status when the sink was lost with no fallback device.
+    pub async fn poll_device_event(&self) -> Option<lekima_domain::AudioDeviceEvent> {
+        let event = self.audio.take_device_event()?;
+        let mut inner = self.inner.lock().await;
+        if let lekima_domain::AudioDeviceEvent::Lost { paused: true, .. } = &event
+            && inner.status == PlaybackStatus::Playing
+        {
+            inner.position_ms = self.audio.position_ms();
+            inner.status = PlaybackStatus::Paused;
+        }
+        drop(inner);
+        Some(event)
+    }
+
     /// True when this track/quality is already in the persistent cache.
     #[must_use]
     pub fn has_cached(&self, id: TrackId, quality: Quality) -> bool {
@@ -1021,6 +1044,9 @@ mod tests {
         queued: AtomicU64,
         stream_duration: AtomicU64,
         shaded_duration: AtomicU64,
+        device: Mutex<Option<String>>,
+        reject_device: Mutex<Option<String>>,
+        device_event: Mutex<Option<lekima_domain::AudioDeviceEvent>>,
     }
 
     #[async_trait]
@@ -1092,6 +1118,27 @@ mod tests {
         fn buffered_ranges(&self, duration_ms: u64) -> Vec<lekima_domain::BufferedRange> {
             self.shaded_duration.store(duration_ms, Ordering::SeqCst);
             Vec::new()
+        }
+
+        fn set_device(&self, name: Option<&str>) -> Result<String> {
+            if let Some(target) = name
+                && self.reject_device.lock().unwrap().as_deref() == Some(target)
+            {
+                return Err(DomainError::NotFound(format!(
+                    "output device `{target}` was not found"
+                )));
+            }
+            let resolved = name.unwrap_or("Built-in Output").to_owned();
+            *self.device.lock().unwrap() = Some(resolved.clone());
+            Ok(resolved)
+        }
+
+        fn output_device(&self) -> Option<String> {
+            self.device.lock().unwrap().clone()
+        }
+
+        fn take_device_event(&self) -> Option<lekima_domain::AudioDeviceEvent> {
+            self.device_event.lock().unwrap().take()
         }
     }
 
@@ -1635,5 +1682,95 @@ mod tests {
                 "album {id}: {error:?}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn live_device_switch_updates_state_and_rejects_missing_device() {
+        let (player, audio) = player();
+        *audio.reject_device.lock().unwrap() = Some("Missing DAC".to_owned());
+
+        let state = player.set_audio_device(Some("Headphones")).await.unwrap();
+        assert_eq!(state.output_device.as_deref(), Some("Headphones"));
+
+        let err = player
+            .set_audio_device(Some("Missing DAC"))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::NotFound(_)));
+        assert_eq!(
+            player.snapshot().await.output_device.as_deref(),
+            Some("Headphones")
+        );
+
+        let default_state = player.set_audio_device(None).await.unwrap();
+        assert_eq!(
+            default_state.output_device.as_deref(),
+            Some("Built-in Output")
+        );
+    }
+
+    #[tokio::test]
+    async fn device_loss_without_fallback_pauses_playing_state() {
+        let (player, audio) = player();
+        player
+            .play(PlayRequest::Tracks {
+                tracks: vec![track(1)],
+                kind: QueueKind::Manual,
+            })
+            .await
+            .unwrap();
+        audio.position.store(42_000, Ordering::SeqCst);
+        *audio.device_event.lock().unwrap() = Some(lekima_domain::AudioDeviceEvent::Lost {
+            previous: Some("USB DAC".to_owned()),
+            fallback: None,
+            paused: true,
+        });
+
+        let event = player.poll_device_event().await.unwrap();
+        assert!(matches!(
+            event,
+            lekima_domain::AudioDeviceEvent::Lost { paused: true, .. }
+        ));
+        let state = player.snapshot().await;
+        assert_eq!(state.status, PlaybackStatus::Paused);
+        assert_eq!(state.position_ms, 42_000);
+    }
+
+    #[tokio::test]
+    async fn live_switch_while_paused_and_fallback_keep_status() {
+        let (player, audio) = player();
+        player
+            .play(PlayRequest::Tracks {
+                tracks: vec![track(1)],
+                kind: QueueKind::Manual,
+            })
+            .await
+            .unwrap();
+        player.pause().await.unwrap();
+
+        let state = player.set_audio_device(Some("Headphones")).await.unwrap();
+        assert_eq!(state.status, PlaybackStatus::Paused);
+        assert_eq!(state.output_device.as_deref(), Some("Headphones"));
+
+        player.resume().await.unwrap();
+        *audio.device_event.lock().unwrap() = Some(lekima_domain::AudioDeviceEvent::Lost {
+            previous: Some("Headphones".to_owned()),
+            fallback: Some("Built-in Output".to_owned()),
+            paused: false,
+        });
+        let event = player.poll_device_event().await.unwrap();
+        assert!(matches!(
+            event,
+            lekima_domain::AudioDeviceEvent::Lost { paused: false, .. }
+        ));
+        assert_eq!(player.snapshot().await.status, PlaybackStatus::Playing);
+
+        *audio.device_event.lock().unwrap() = Some(lekima_domain::AudioDeviceEvent::Changed {
+            device: "Headphones".to_owned(),
+        });
+        assert!(matches!(
+            player.poll_device_event().await,
+            Some(lekima_domain::AudioDeviceEvent::Changed { .. })
+        ));
     }
 }

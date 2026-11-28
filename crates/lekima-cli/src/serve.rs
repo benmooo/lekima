@@ -32,7 +32,7 @@ const TOKEN_BYTES: usize = 32;
 /// A hand-supplied token shorter than this is rejected as guessable.
 const MIN_TOKEN_CHARS: usize = 16;
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
-const ENDPOINTS: [&str; 8] = [
+const ENDPOINTS: [&str; 9] = [
     "GET /",
     "GET /v1/health",
     "GET /v1/capabilities",
@@ -40,6 +40,7 @@ const ENDPOINTS: [&str; 8] = [
     "GET /v1/queue",
     "GET /v1/history?limit=N",
     "GET /v1/hooks",
+    "GET /v1/devices",
     "POST /v1/command",
 ];
 const REMOTE_HTML: &str = include_str!("../assets/remote.html");
@@ -48,7 +49,7 @@ const CONTENT_SECURITY_POLICY: &str = "default-src 'none'; style-src 'unsafe-inl
      script-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; \
      form-action 'none'; frame-ancestors 'none'";
 /// Command tags accepted by `POST /v1/command`.
-const COMMAND_TYPES: [&str; 46] = [
+const COMMAND_TYPES: [&str; 47] = [
     "status",
     "play",
     "jump",
@@ -85,6 +86,7 @@ const COMMAND_TYPES: [&str; 46] = [
     "liked",
     "sleep",
     "set_quality",
+    "set_audio_device",
     "search",
     "playlists",
     "playlist_tracks",
@@ -191,6 +193,7 @@ fn router(state: AppState) -> Router {
         .route("/v1/queue", get(queue))
         .route("/v1/history", get(history))
         .route("/v1/hooks", get(hooks))
+        .route("/v1/devices", get(devices))
         .route("/v1/command", post(command))
         .layer(DefaultBodyLimit::max(MAX_FRAME_BYTES))
         .with_state(state)
@@ -274,6 +277,45 @@ async fn hooks(State(state): State<AppState>, headers: HeaderMap) -> Response {
         return response;
     }
     forward(&state, Command::Hooks).await
+}
+
+async fn devices(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Some(response) = authorize(&headers, &state) {
+        return response;
+    }
+    let list = match lekima_audio::devices() {
+        Ok(devices) => devices,
+        Err(err) => {
+            return error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                ErrorCode::Playback,
+                err.to_string(),
+            );
+        }
+    };
+    let active = match lekima_ipc::call(&state.socket, Command::Status).await {
+        Ok(lekima_ipc::Reply::Status { state }) => state.output_device,
+        _ => None,
+    };
+    let items: Vec<_> = list
+        .into_iter()
+        .map(|device| {
+            json!({
+                "name": device.name,
+                "default": device.is_default,
+                "active": active.as_deref() == Some(device.name.as_str()),
+            })
+        })
+        .collect();
+    Json(json!({
+        "ok": true,
+        "data": {
+            "type": "devices",
+            "devices": items,
+            "active": active,
+        }
+    }))
+    .into_response()
 }
 
 async fn command(
@@ -439,6 +481,7 @@ fn permitted(command: &Command) -> bool {
             | Command::Liked { .. }
             | Command::Sleep { .. }
             | Command::SetQuality { .. }
+            | Command::SetAudioDevice { .. }
             | Command::Search { .. }
             | Command::Playlists
             | Command::PlaylistTracks { .. }
@@ -679,6 +722,31 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(body["error"]["code"], "daemon");
+    }
+
+    #[tokio::test]
+    async fn devices_requires_a_bearer_token_and_returns_list_with_token() {
+        let (unauth_status, unauth_body) = call(
+            Request::builder()
+                .uri("/v1/devices")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(unauth_status, StatusCode::UNAUTHORIZED);
+        assert_eq!(unauth_body["error"]["code"], "unauthorized");
+
+        let (status, body) = call(
+            Request::builder()
+                .uri("/v1/devices")
+                .header("authorization", "Bearer test-token-0123456789")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["ok"], true);
+        assert_eq!(body["data"]["type"], "devices");
     }
 
     #[tokio::test]

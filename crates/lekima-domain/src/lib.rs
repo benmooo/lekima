@@ -29,5 +29,5 @@ pub use model::{
     SearchResults, SearchTotals, Toplist, Track, TrackId, UserId, UserProfile, format_duration_ms,
 };
 pub use playback::{BufferedRange, PlaybackState, PlaybackStatus, Queue, QueueKind, RepeatMode};
-pub use ports::{AudioEngine, CredentialsStore, MusicService};
+pub use ports::{AudioDeviceEvent, AudioEngine, CredentialsStore, MusicService};
 pub use sanitize::{sanitize_line, sanitize_multiline};

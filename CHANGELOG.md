@@ -3,6 +3,19 @@
 All notable changes to lekima are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## 0.14.0 — 2026-11-29
+
+### Added
+
+- Live audio output device switching without restarting the daemon:
+  `lekima audio-device <name|default>`, IPC `set_audio_device`, MCP
+  `list_devices` and `set_audio_device`, HTTP `GET /v1/devices` and
+  `POST /v1/command` (`set_audio_device`), `HOOK_CAPABILITIES`, TUI
+  `:device <name|default>`, and the Settings `OUTPUT` row.
+- Automatic hot-swap recovery on output device disconnect or system-default
+  change, preserving track position (or pausing cleanly when no output device is
+  available) and reporting the live active device in `PlaybackState.output_device`.
+
 ## 0.13.0 — 2026-11-26
 
 ### Added

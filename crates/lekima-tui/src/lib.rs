@@ -37,9 +37,11 @@ pub enum TuiError {
 pub async fn run(
     socket: PathBuf,
     preferences: UiPreferences,
+    devices: Vec<String>,
 ) -> Result<Option<UiPreferences>, TuiError> {
     let mut app = App::new();
     app.set_preferences(preferences);
+    app.set_devices(devices);
     let mut theme = app.theme();
 
     let mut terminal = ratatui::init();

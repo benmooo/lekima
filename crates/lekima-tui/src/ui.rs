@@ -3471,7 +3471,7 @@ fn wave_spans<'a>(app: &App, theme: &Theme) -> Vec<Span<'a>> {
 }
 
 fn draw_settings(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
-    let popup = centred_box(area, 58, 9);
+    let popup = centred_box(area, 58, 10);
     frame.render_widget(Clear, popup);
     let block = Block::bordered()
         .border_set(overlay_border(theme))
@@ -3493,6 +3493,10 @@ fn draw_settings(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             } else {
                 "off".to_owned()
             },
+        ),
+        (
+            "OUTPUT",
+            lekima_domain::sanitize_line(app.status.output_device.as_deref().unwrap_or("default")),
         ),
     ];
     let mut lines: Vec<Line> = Vec::new();
@@ -5468,5 +5472,21 @@ mod tests {
         let screen = render(&mut app, 100, 24);
         assert!(screen.contains("CATALOGUE UNAVAILABLE"));
         assert!(screen.contains("provider down"));
+    }
+
+    #[test]
+    fn settings_overlay_renders_output_row_at_80_and_120() {
+        let mut app = App::new();
+        app.mode = Mode::Settings;
+        app.status.output_device = Some("Studio Headphones".to_owned());
+        for width in [80, 120] {
+            let screen = render(&mut app, width, 24);
+            assert!(screen.contains("OUTPUT"), "width {width}: {screen}");
+            assert!(
+                screen.contains("Studio Headphones"),
+                "width {width}: {screen}"
+            );
+            assert!(screen.contains("TRANSLATION"), "width {width}: {screen}");
+        }
     }
 }

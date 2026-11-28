@@ -317,6 +317,40 @@ pub trait AudioEngine: Send + Sync {
     fn take_track_boundary(&self) -> Option<crate::model::TrackId> {
         None
     }
+
+    /// Switches the active output device (`None` selects the system default)
+    /// and returns the resolved device name.
+    fn set_device(&self, name: Option<&str>) -> Result<String> {
+        let _ = name;
+        Err(crate::DomainError::Unsupported(
+            "this audio backend cannot switch output devices live".to_owned(),
+        ))
+    }
+
+    /// Returns the currently active output device name, if known.
+    fn output_device(&self) -> Option<String> {
+        None
+    }
+
+    /// Returns the next pending device change/loss event, if any.
+    fn take_device_event(&self) -> Option<AudioDeviceEvent> {
+        None
+    }
+}
+
+/// Asynchronous device event surfaced by an [`AudioEngine`] when the active
+/// output device disappears or the system default changes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AudioDeviceEvent {
+    /// Active output device was lost; `fallback` is the new active device if
+    /// the engine recovered onto it, or `None` if playback had to pause.
+    Lost {
+        previous: Option<String>,
+        fallback: Option<String>,
+        paused: bool,
+    },
+    /// System default output device changed while following default (`None`).
+    Changed { device: String },
 }
 
 /// Extension point for `status` output in frontends that do not own the daemon.

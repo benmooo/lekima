@@ -39,7 +39,12 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
                 lyrics_offset_ms: config.ui.lyrics_offset_ms,
                 lyrics_translation: config.ui.lyrics_translation,
             };
-            let changed = lekima_tui::run(socket, preferences)
+            let devices = lekima_audio::devices()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|device| device.name)
+                .collect();
+            let changed = lekima_tui::run(socket, preferences, devices)
                 .await
                 .map_err(|error| Failure::internal(error.to_string()))?;
             if let Some(preferences) = changed
@@ -588,6 +593,15 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
 
         TopCommand::Devices => {
             let devices = lekima_audio::devices()?;
+            let live_active = if is_running(&socket).await {
+                match call(&socket, Command::Status).await {
+                    Ok(Reply::Status { state }) => state.output_device,
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            let active_name = live_active.as_deref().or(config.audio.device.as_deref());
             if json {
                 let list: Vec<_> = devices
                     .iter()
@@ -595,7 +609,7 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
                         serde_json::json!({
                             "name": device.name,
                             "default": device.is_default,
-                            "active": config.audio.device.as_deref() == Some(device.name.as_str()),
+                            "active": active_name == Some(device.name.as_str()),
                         })
                     })
                     .collect();
@@ -604,6 +618,7 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
                     Some(serde_json::json!({
                         "devices": list,
                         "configured": config.audio.device,
+                        "active": active_name,
                     })),
                     None,
                 );
@@ -612,12 +627,15 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
             } else {
                 for device in devices {
                     let default = if device.is_default { "*" } else { " " };
-                    let active = if config.audio.device.as_deref() == Some(device.name.as_str()) {
+                    let active = if active_name == Some(device.name.as_str()) {
                         ">"
                     } else {
                         " "
                     };
-                    crate::say!("{default}{active} {}", device.name);
+                    crate::say!(
+                        "{default}{active} {}",
+                        lekima_domain::sanitize_line(&device.name)
+                    );
                 }
             }
             Ok(())
@@ -636,12 +654,42 @@ pub async fn execute(cli: Cli, paths: Paths, config: Config) -> Result<(), Failu
                 }
                 Some(device)
             };
+            let live = if is_running(&socket).await {
+                match call(
+                    &socket,
+                    Command::SetAudioDevice {
+                        device: selection.clone(),
+                    },
+                )
+                .await?
+                {
+                    Reply::Status { state } => state.output_device,
+                    _ => None,
+                }
+            } else {
+                None
+            };
             lekima_config::save_audio_device(&paths.config_file(), selection.as_deref())?;
-            restart_daemon(&socket).await;
             if json {
-                output::emit_json(true, Some(serde_json::json!({ "device": selection })), None);
+                output::emit_json(
+                    true,
+                    Some(serde_json::json!({
+                        "device": selection,
+                        "active": live,
+                        "live": live.is_some(),
+                    })),
+                    None,
+                );
+            } else if let Some(active) = live {
+                crate::say!(
+                    "audio device switched to `{}`",
+                    lekima_domain::sanitize_line(&active)
+                );
             } else if let Some(device) = selection {
-                crate::say!("audio device set to `{device}`; the next daemon start uses it");
+                crate::say!(
+                    "audio device set to `{}`; the next daemon start uses it",
+                    lekima_domain::sanitize_line(&device)
+                );
             } else {
                 crate::say!("audio device reset to the system default");
             }

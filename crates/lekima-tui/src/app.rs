@@ -53,8 +53,8 @@ impl Default for UiPreferences {
 
 const GLYPHS: [&str; 2] = ["unicode", "ascii"];
 const DENSITIES: [&str; 2] = ["compact", "comfortable"];
-/// Rows in the settings overlay: theme, glyphs, density, translation.
-pub const SETTINGS_ROWS: usize = 4;
+/// Rows in the settings overlay: theme, glyphs, density, translation, output.
+pub const SETTINGS_ROWS: usize = 5;
 /// Prompt history is capped per mode.
 const HISTORY_LIMIT: usize = 50;
 
@@ -407,6 +407,7 @@ pub struct App {
     history_back: Vec<HistoryEntry>,
     history_forward: Vec<HistoryEntry>,
     pub preferences: UiPreferences,
+    pub available_devices: Vec<String>,
     pub settings_selection: usize,
     settings_dirty: bool,
 }
@@ -473,6 +474,7 @@ impl Default for App {
             history_back: Vec::new(),
             history_forward: Vec::new(),
             preferences: UiPreferences::default(),
+            available_devices: Vec::new(),
             settings_selection: 0,
             settings_dirty: false,
         }
@@ -611,6 +613,10 @@ impl App {
         self.preferences = preferences;
     }
 
+    pub fn set_devices(&mut self, devices: Vec<String>) {
+        self.available_devices = devices;
+    }
+
     /// Returns the preferences to persist when the TUI exits.
     #[must_use]
     pub fn changed_preferences(&self) -> Option<UiPreferences> {
@@ -622,8 +628,32 @@ impl App {
             0 => cycle_list(&crate::theme::THEMES, &mut self.preferences.theme, delta),
             1 => cycle_list(&GLYPHS, &mut self.preferences.glyphs, delta),
             2 => cycle_list(&DENSITIES, &mut self.preferences.density, delta),
-            _ => {
+            3 => {
                 self.preferences.lyrics_translation = !self.preferences.lyrics_translation;
+            }
+            _ => {
+                if self.available_devices.is_empty() {
+                    self.notify("no output devices available", true);
+                    return Action::None;
+                }
+                let mut options: Vec<Option<String>> = vec![None];
+                options.extend(self.available_devices.iter().cloned().map(Some));
+                let current_idx = self
+                    .status
+                    .output_device
+                    .as_ref()
+                    .and_then(|active| {
+                        options
+                            .iter()
+                            .position(|opt| opt.as_deref() == Some(active.as_str()))
+                    })
+                    .unwrap_or(0);
+                let len = options.len() as isize;
+                let next_idx = ((current_idx as isize + delta).rem_euclid(len)) as usize;
+                let next_device = options[next_idx].clone();
+                return Action::Call(Command::SetAudioDevice {
+                    device: next_device,
+                });
             }
         }
         self.settings_dirty = true;
@@ -1083,6 +1113,23 @@ impl App {
                     Action::None
                 }
             },
+            "device" => {
+                let target = rest.trim();
+                if target.is_empty() {
+                    let current = self.status.output_device.as_deref().unwrap_or("default");
+                    self.notify(
+                        format!("output: {}", lekima_domain::sanitize_line(current)),
+                        false,
+                    );
+                    Action::None
+                } else if target == "default" {
+                    Action::Call(Command::SetAudioDevice { device: None })
+                } else {
+                    Action::Call(Command::SetAudioDevice {
+                        device: Some(target.to_owned()),
+                    })
+                }
+            }
             "help" => {
                 self.mode = Mode::Help;
                 Action::None
@@ -2283,6 +2330,8 @@ impl App {
                             return Action::None;
                         }
                         let previous = self.status.track.as_ref().map(|track| track.id);
+                        let previous_device = self.status.output_device.clone();
+                        let previous_status = self.status.status;
                         let current_index = state.queue_index;
                         self.status = state;
                         let first = !self.bootstrapped;
@@ -2301,6 +2350,22 @@ impl App {
                             && self.status.status == lekima_domain::PlaybackStatus::Stopped
                         {
                             self.notify("queue restored; space to resume", false);
+                        } else if !first {
+                            if previous_device.is_some()
+                                && self.status.output_device.is_none()
+                                && previous_status == PlaybackStatus::Playing
+                                && self.status.status == PlaybackStatus::Paused
+                            {
+                                self.notify("output device lost; playback paused", true);
+                            } else if previous_device.is_some()
+                                && self.status.output_device != previous_device
+                                && let Some(ref device) = self.status.output_device
+                            {
+                                self.notify(
+                                    format!("output: {}", lekima_domain::sanitize_line(device)),
+                                    false,
+                                );
+                            }
                         }
                         if self.mode == Mode::Queue
                             && self.queue_follow
@@ -4230,5 +4295,73 @@ mod history_tests {
         app.handle_key(key(KeyCode::Char('r')));
         assert!(app.playlists_loading);
         assert!(app.playlists_error.is_none());
+    }
+
+    #[test]
+    fn device_command_and_settings_row_dispatch_set_audio_device() {
+        let mut app = App::new();
+        app.set_devices(vec!["Built-in".to_owned(), "Headphones".to_owned()]);
+
+        app.handle_key(key(KeyCode::Char(':')));
+        for ch in "device Headphones".chars() {
+            app.handle_key(key(KeyCode::Char(ch)));
+        }
+        assert!(matches!(
+            app.handle_key(key(KeyCode::Enter)),
+            Action::Call(Command::SetAudioDevice { device: Some(name) }) if name == "Headphones"
+        ));
+
+        app.handle_key(key(KeyCode::Char(':')));
+        for ch in "device default".chars() {
+            app.handle_key(key(KeyCode::Char(ch)));
+        }
+        assert!(matches!(
+            app.handle_key(key(KeyCode::Enter)),
+            Action::Call(Command::SetAudioDevice { device: None })
+        ));
+
+        app.mode = Mode::Settings;
+        app.settings_selection = 4;
+        assert!(matches!(
+            app.handle_key(key(KeyCode::Char('l'))),
+            Action::Call(Command::SetAudioDevice { device: Some(name) }) if name == "Built-in"
+        ));
+    }
+
+    #[test]
+    fn status_update_notifies_on_device_loss_or_switch() {
+        use lekima_domain::{PlaybackState, PlaybackStatus};
+        let mut app = App::new();
+        let initial = PlaybackState {
+            status: PlaybackStatus::Playing,
+            output_device: Some("USB DAC".to_owned()),
+            revision: 1,
+            ..PlaybackState::default()
+        };
+        app.apply(Ok(lekima_ipc::Reply::Status { state: initial }));
+
+        let switched = PlaybackState {
+            status: PlaybackStatus::Playing,
+            output_device: Some("Built-in".to_owned()),
+            revision: 2,
+            ..PlaybackState::default()
+        };
+        app.apply(Ok(lekima_ipc::Reply::Status { state: switched }));
+        assert_eq!(
+            app.message.as_ref().map(|m| m.text.as_str()),
+            Some("output: Built-in")
+        );
+
+        let lost = PlaybackState {
+            status: PlaybackStatus::Paused,
+            output_device: None,
+            revision: 3,
+            ..PlaybackState::default()
+        };
+        app.apply(Ok(lekima_ipc::Reply::Status { state: lost }));
+        assert_eq!(
+            app.message.as_ref().map(|m| (m.text.as_str(), m.error)),
+            Some(("output device lost; playback paused", true))
+        );
     }
 }

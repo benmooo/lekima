@@ -62,6 +62,14 @@ $ lekima status --json
 
 ## Status
 
+`0.14.0` adds live audio output device switching and automatic hot-swap
+recovery: `lekima audio-device <name|default>` switches the running daemon in
+place without restarting, MCP (`list_devices`, `set_audio_device`), HTTP
+(`GET /v1/devices`, `POST /v1/command`), `HOOK_CAPABILITIES`, and the TUI
+(`:device` and the Settings `OUTPUT` row) all follow the live sink, and
+disconnecting headphones or changing the system default recovers without losing
+track position. See [`docs/sprint-13/`](docs/sprint-13/).
+
 `0.13.0` adds playlist editing end to end: `lekima playlist create|rename|describe|add|remove|delete`,
 MCP and HTTP tools, a TUI playlist pane (`P`) with y/n delete, and the first
 provider write endpoints in `ncmapi 1.10`. See [`docs/sprint-12/`](docs/sprint-12/).

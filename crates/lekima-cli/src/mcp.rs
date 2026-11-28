@@ -94,6 +94,10 @@ async fn tools_call(
         .cloned()
         .unwrap_or_else(|| json!({}));
 
+    if name == "list_devices" {
+        return list_devices_tool(id, socket, paths, config).await;
+    }
+
     let command = match build_command(name, &args) {
         Ok(command) => command,
         Err(message) => return tool_error(id, "bad_request", &message),
@@ -216,6 +220,14 @@ fn build_command(name: &str, args: &Value) -> Result<Command, String> {
                 "lossless" => lekima_domain::Quality::Lossless,
                 _ => lekima_domain::Quality::Exhigh,
             },
+        },
+        "set_audio_device" => Command::SetAudioDevice {
+            device: args
+                .get("device")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty() && *value != "default")
+                .map(str::to_owned),
         },
         "queue_remove" => Command::QueueRemove {
             index: usize_arg(args, "index")?,
@@ -673,6 +685,23 @@ fn tools() -> Vec<Value> {
             false,
         ),
         tool(
+            "list_devices",
+            "List available audio output devices and which one is active.",
+            json!({ "type": "object", "properties": {} }),
+            true,
+        ),
+        tool(
+            "set_audio_device",
+            "Switch the audio output device live without restarting the daemon; omit or pass \"default\" for the system default.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "device": { "type": "string" }
+                }
+            }),
+            false,
+        ),
+        tool(
             "lyrics",
             "Timed lyrics for the current or a specific track.",
             json!({
@@ -713,6 +742,63 @@ fn tools() -> Vec<Value> {
             false,
         ),
     ]
+}
+
+async fn list_devices_tool(
+    id: Value,
+    socket: &std::path::Path,
+    paths: &lekima_config::Paths,
+    config: &lekima_config::Config,
+) -> Value {
+    let devices = match lekima_audio::devices() {
+        Ok(devices) => devices,
+        Err(error) => return tool_error(id, "playback", &error.to_string()),
+    };
+    let live_active = match daemon_call(socket, paths, config, Command::Status).await {
+        Ok(Reply::Status { state }) => state.output_device,
+        _ => None,
+    };
+    let active_name = live_active.as_deref().or(config.audio.device.as_deref());
+    let list: Vec<_> = devices
+        .iter()
+        .map(|device| {
+            json!({
+                "name": device.name,
+                "default": device.is_default,
+                "active": active_name == Some(device.name.as_str()),
+            })
+        })
+        .collect();
+    let text = if devices.is_empty() {
+        "no output devices found".to_owned()
+    } else {
+        devices
+            .iter()
+            .map(|device| {
+                let mark = if active_name == Some(device.name.as_str()) {
+                    ">"
+                } else if device.is_default {
+                    "*"
+                } else {
+                    " "
+                };
+                format!("{mark} {}", device.name)
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    success(
+        id,
+        json!({
+            "content": [{ "type": "text", "text": text }],
+            "structuredContent": {
+                "type": "devices",
+                "devices": list,
+                "active": active_name,
+            },
+            "isError": false,
+        }),
+    )
 }
 
 #[cfg(test)]
@@ -794,6 +880,8 @@ mod tests {
             "queue_move",
             "sleep",
             "set_quality",
+            "list_devices",
+            "set_audio_device",
             "lyrics",
             "comments",
             "daily",
@@ -841,5 +929,25 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn set_audio_device_maps_named_and_default() {
+        assert!(matches!(
+            build_command("set_audio_device", &serde_json::json!({"device": "Headphones"})).unwrap(),
+            Command::SetAudioDevice { device: Some(name) } if name == "Headphones"
+        ));
+        assert!(matches!(
+            build_command(
+                "set_audio_device",
+                &serde_json::json!({"device": "default"})
+            )
+            .unwrap(),
+            Command::SetAudioDevice { device: None }
+        ));
+        assert!(matches!(
+            build_command("set_audio_device", &serde_json::json!({})).unwrap(),
+            Command::SetAudioDevice { device: None }
+        ));
     }
 }

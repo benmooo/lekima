@@ -771,6 +771,10 @@ impl Daemon {
                 self.player.set_quality(quality).await;
                 Ok(self.status().await)
             }
+            Command::SetAudioDevice { device } => {
+                self.player.set_audio_device(device.as_deref()).await?;
+                Ok(self.status().await)
+            }
             Command::Shutdown => {
                 self.shutdown.notify_waiters();
                 Ok(Reply::Ack)
@@ -927,6 +931,13 @@ fn spawn_ticker(
                 }
                 Ok(None) => {}
                 Err(error) => tracing::warn!(%error, "auto-advance failed"),
+            }
+            if let Some(event) = player.poll_device_event().await {
+                preloaded.store(false, Ordering::SeqCst);
+                tracing::info!(?event, "audio device event");
+                hub.publish(Event::Status {
+                    state: Box::new(player.snapshot().await),
+                });
             }
             match player.fm_maybe_prefetch().await {
                 Ok(0) => {}
@@ -1333,6 +1344,7 @@ fn invalidates_preload(command: &Command) -> bool {
             | Command::Stop
             | Command::Next
             | Command::Prev
+            | Command::SetAudioDevice { .. }
             | Command::QueueRemove { .. }
             | Command::QueueMove { .. }
             | Command::Enqueue { .. }
@@ -1513,6 +1525,7 @@ mod tests {
             cached: false,
             quality: Quality::Exhigh,
             sleep_remaining_ms: None,
+            output_device: None,
             wave: Vec::new(),
             stream_duration_ms: None,
             buffered: Vec::new(),
